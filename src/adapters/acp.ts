@@ -38,6 +38,9 @@ export const ACP_PRESETS: Record<string, { command: string[]; label: string; mod
 };
 
 interface AcpOptions {
+  model?: string;
+  /** For agents without session/set_model, a documented startup flag such as --model. */
+  modelFlag?: string;
   preset?: string;
   /** The agent command and its args, e.g. ["gemini", "--experimental-acp"]. */
   command?: string[] | string;
@@ -51,6 +54,8 @@ interface AcpOptions {
 }
 
 type Json = Record<string, unknown>;
+interface SessionModels { currentModelId: string; availableModels: Array<{ modelId: string }> }
+interface SessionSetup { sessionId: string; models?: SessionModels; modes?: { availableModes?: Array<{ id: string }> } }
 interface Pending { resolve: (v: unknown) => void; reject: (e: Error) => void }
 
 /** The ACP "kind" of a tool call, as the name Loom's Auto policy knows. */
@@ -78,6 +83,8 @@ export class AcpAdapter extends AdapterBase {
   private loading = new Set<string>();
   private options: AcpOptions;
   private stderrTail = "";
+  private readonly sessionModels = new Map<string, SessionModels>();
+  private readonly defaultModels = new Map<string, string>();
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "acp", projectDir);
@@ -106,6 +113,9 @@ export class AcpAdapter extends AdapterBase {
     this.child?.kill();
     this.child = null;
     this.ready = null;
+    this.liveSessions.clear();
+    this.sessionModels.clear();
+    this.defaultModels.clear();
   }
 
   // ── JSON-RPC over stdio ──
@@ -184,6 +194,7 @@ export class AcpAdapter extends AdapterBase {
   private boot(): Promise<Json> {
     if (this.ready) return this.ready;
     const [bin, ...args] = this.commandLine();
+    if (this.options.modelFlag && this.options.model) args.push(this.options.modelFlag, this.options.model);
     const child = spawn(bin!, args, { cwd: this.projectDir, stdio: ["pipe", "pipe", "pipe"], env: { ...agentEnv(), ...(this.options.env ?? {}) } });
     this.child = child;
     child.stdout!.on("data", (d: Buffer) => {
@@ -200,6 +211,9 @@ export class AcpAdapter extends AdapterBase {
       if (this.child !== child) return;
       this.child = null;
       this.ready = null;
+      this.liveSessions.clear();
+      this.sessionModels.clear();
+      this.defaultModels.clear();
       for (const w of this.pending.values()) w.reject(new Error(`${why}${this.stderrTail ? `: ${this.stderrTail.trim().split("\n").slice(-3).join(" | ")}` : ""}`));
       this.pending.clear();
     };
@@ -232,13 +246,18 @@ export class AcpAdapter extends AdapterBase {
     let id: string | undefined;
     if (known && this.caps.loadSession) {
       this.loading.add(known);
-      try { await this.request("session/load", { sessionId: known, ...params }); id = known; }
+      try {
+        const r = await this.request("session/load", { sessionId: known, ...params }) as SessionSetup | null;
+        this.rememberModels(known, r?.models);
+        id = known;
+      }
       catch { /* gone on the agent's side: a new one */ }
       finally { this.loading.delete(known); }
     } else if (known && this.liveSessions.has(known)) id = known;
     if (!id) {
-      const r = (await this.request("session/new", params)) as { sessionId: string; modes?: { availableModes?: Array<{ id: string }> } };
+      const r = (await this.request("session/new", params)) as SessionSetup;
       id = r.sessionId;
+      this.rememberModels(id, r.models);
       const want = (this.options.modes ?? ACP_PRESETS[this.options.preset ?? ""]?.modes)?.[permissionFor("acp", this.options as Record<string, unknown>)];
       if (want && r.modes?.availableModes?.some((m) => m.id === want)) await this.request("session/set_mode", { sessionId: id, modeId: want }).catch(() => {});
       this.nativeState.patch({ sessions: { ...sessions, [chat]: id } });
@@ -247,6 +266,30 @@ export class AcpAdapter extends AdapterBase {
     return id;
   }
   private liveSessions = new Set<string>();
+
+  private rememberModels(id: string, models?: SessionModels): void {
+    if (!models?.availableModels?.length) return;
+    this.sessionModels.set(id, models);
+    if (!this.defaultModels.has(id)) {
+      const defaults = (this.nativeState.read().modelDefaults ?? {}) as Record<string, string>;
+      this.defaultModels.set(id, defaults[id] ?? models.currentModelId);
+      if (!defaults[id]) this.nativeState.patch({ modelDefaults: { ...defaults, [id]: models.currentModelId } });
+    }
+  }
+
+  private async selectModel(sessionId: string, override?: string): Promise<void> {
+    const models = this.sessionModels.get(sessionId);
+    const want = override ?? this.options.model ?? this.defaultModels.get(sessionId);
+    if (!want) return;
+    if (!models) {
+      if (this.options.modelFlag && want === this.options.model) return;
+      throw new Error("this ACP agent doesn't advertise session models; configure options.modelFlag if it accepts a startup model flag");
+    }
+    if (!models.availableModels.some(model => model.modelId === want)) throw new Error(`ACP model "${want}" isn't available in this session`);
+    if (models.currentModelId === want) return;
+    await this.request("session/set_model", { sessionId, modelId: want });
+    models.currentModelId = want;
+  }
 
   async send(input: SendInput): Promise<void> {
     if (this._busy) throw new Error(`ACP agent "${this.id}" is busy`);
@@ -262,6 +305,7 @@ export class AcpAdapter extends AdapterBase {
     try {
       await this.boot();
       const sessionId = await this.session(input.chat ?? "main", input.mcp);
+      await this.selectModel(sessionId, input.model);
       this.current = { sessionId };
       const touch = () => {
         if (idle) clearTimeout(idle);

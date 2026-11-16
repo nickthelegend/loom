@@ -214,6 +214,43 @@ loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravit
   was interrupted. **Resume** (or `loom orchestra:resume <run>`) picks up the
   tasks that were running and briefs the orchestrator again.
 
+Workers can report progress during a turn with one command per update:
+
+```bash
+loom report --checkpoint "Implementation finished; running tests"
+loom report --needs-input "Which API version should I support?"
+loom report --stuck "The dependency is unavailable"
+loom report --done
+```
+
+Loom supplies `LOOM_API` (daemon origin), `LOOM_PROJECT_ID`, `LOOM_RUN_ID`,
+`LOOM_TASK_ID`, and a private `LOOM_REPORT_TOKEN` to each local worker process.
+The token grants only report POSTs for that run. A worker without a shell can
+emit the same report in its message; the transcript stays intact:
+
+````text
+```loom-report
+checkpoint: Implementation finished; running tests
+```
+````
+
+Use `checkpoint`, `needs_input`, `stuck`, or `done` in the fence. Reports appear
+in `loom orchestra <run> --wait --progress` (with `--json`, progress is JSON lines
+on stderr). `needs_input` and `stuck` are batched for five seconds into one note
+to the orchestrator, even while workers are running. A busy orchestrator receives
+the note on its next turn; a run waiting on a human stays paused. Checkpoints and
+`done` reports do not wake it. Reports do not change task status: a `done` report
+still waits for the worker's turn to end and its work to merge.
+
+API clients POST `{ "kind": "checkpoint", "text": "…" }` to
+`/api/projects/:id/orchestra/:run/tasks/:task/report`, authenticated with the run's
+report token or an owner/admin bearer token. Text is limited to 4,000 characters
+and required except for `done`. The response is `{ report: { at, kind, text } }`;
+`at` is server time in milliseconds. GET orchestra runs include each task's
+`reports` (latest 20, oldest first) and `lastReport` (`null` before any report).
+An `orchestra` WS event with phase `task_report` includes `runId`, `taskId`,
+`report`, and the updated `task` summary for clients to render live.
+
 Use `agent[@model][:effort][xN]` to choose a model and build a fleet without
 adding roster entries. Agent names, kinds and aliases all work; `xN` (or `×N`)
 adds 1–100 instances per spec. The orchestrator takes the same syntax with count
@@ -1081,10 +1118,42 @@ touches the repository; a conversation doesn't need it, and taking it would
 stop whatever is actually working. The main thread still follows the baton,
 because that's what makes it the main thread.
 
-A thread may pin a **model** as well, for agents that can change model per turn
-(the `model` kind). Pinning one to an agent whose model is baked into a spawned
-process is refused at the point of pinning — a setting that silently does
-nothing is worse than an error.
+A thread may pin a **model** and, where supported, **reasoning effort**, without
+changing the agent's defaults or restarting its current turn. Claude Code and
+Codex receive the selection through their native provider sessions. ACP uses
+`session/set_model` when the session advertises models. Other adapters keep a
+separate warm instance per agent, model and effort; turns on the same agent
+still run in order. Native state stays separate between those model instances.
+
+```sh
+loom chat:create "Review" --agent codex --model gpt-5.4 --effort high
+loom chat:agent "Review" codex --model gpt-5.4 --effort low
+loom chat:agent "Review" codex          # restore the agent's model/effort defaults
+loom chat:agent "Review" --clear        # follow the baton again
+loom send --chat "Review" "Review the changes"
+```
+
+The API returns `{ "chat": ChatInfo }`, and chat listing includes `agentId`,
+`model`, and `effort`. Create with `POST /api/projects/:id/chats` and a body such
+as `{ "title": "Review", "agentId": "codex", "model": "gpt-5.4", "effort": "high" }`.
+Replace the selection with `POST /api/projects/:id/chats/:chatId/agent` and
+`{ "agentId": "codex", "model": "gpt-5.4", "effort": "low" }`. This replaces all
+three fields: omitted or empty model/effort values inherit the agent defaults;
+`{ "agentId": null }` clears all three. Model and effort require a bound agent.
+Main continues to follow the baton and cannot be pinned. An explicit send to
+another agent uses that agent's defaults. A change leaves an in-flight answer
+alone; queued native requests retain the selection captured when submitted.
+
+Effort is supported by Claude Code, Codex, and Antigravity CLI (and the test
+`echo` adapter). Unsupported effort choices are rejected. Model IDs are
+provider-specific strings (up to 200 characters). For an ACP agent without
+session model selection, configure `options.modelFlag` with its documented
+startup flag, for example `"--model"`, to use separate model processes. Without
+either mechanism, a requested model fails before the prompt is sent.
+
+Approach credit: [T3 Code](https://github.com/pingdotgg/t3code) (MIT), for
+per-thread provider and model selection. Web and phone picker updates are
+separate from this API and CLI support.
 
 ## Asking several models at once
 

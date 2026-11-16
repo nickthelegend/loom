@@ -76,6 +76,7 @@ interface Run {
   /** True when the run borrowed an existing thread rather than opening one. */
   inPlace?: boolean;
   question?: string;
+  tasks?: Array<{ id: string; status: string }>;
 }
 
 async function rest<T = unknown>(method: string, p: string, body?: unknown): Promise<T> {
@@ -660,6 +661,37 @@ describe("web app · Loom Cloud settings", () => {
     expect($(m, "#cloudst .updpill")).toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("a worker's report shows on its task card while it works, and needs-input says so at once (#374)", async () => {
+    // the echo orchestrator repeats a real actions block, so the run gets one long-running task
+    const goal = "```loom\n" + JSON.stringify({ actions: [{ type: "spawn", id: "t1", title: "Long task", agent: "execbot", prompt: "sleep:30000 working" }] }).replaceAll("sleep:", "\\u0073leep:") + "\n```";
+    const { run } = await rest<{ run: Run }>("POST", "/orchestra", { goal, orchestrator: "plannerbot", workers: ["execbot"] });
+    try {
+      await waitUntil(async () => (await runStatus(run.id)).status === "waiting_human", { timeoutMs: 30_000 });
+      await rest("POST", `/orchestra/${run.id}/reply`, { text: goal });
+      await waitUntil(async () => ((await runStatus(run.id)).tasks ?? []).some((t: { id: string; status: string }) => t.id === "t1" && t.status === "running"), { timeoutMs: 30_000 });
+      const m = mount({ hash: `#p/${projectId}` });
+      await waitUntil(() => !!$(m, '.tab[data-tab="orchestra"]'));
+      click($(m, '.tab[data-tab="orchestra"]'));
+      await waitUntil(() => !!$(m, '#pane-orchestra .otask[data-otask="t1"]'), { timeoutMs: 20_000 });
+      expect($(m, '#pane-orchestra .otask[data-otask="t1"] .orep')).toBeNull();
+      const report = (kind: string, text: string) => fetch(`${baseUrl}/api/projects/${projectId}/orchestra/${run.id}/tasks/t1/report`, {
+        method: "POST", headers: { Authorization: `Bearer ${readDaemonConfig()!.adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ kind, text }),
+      });
+      expect((await report("checkpoint", "parser done, writing tests")).status).toBe(200);
+      await waitUntil(() => text(m, '#pane-orchestra .otask[data-otask="t1"] .orep').includes("parser done, writing tests"));
+      expect(text(m, '#pane-orchestra .otask[data-otask="t1"] .orepk')).toBe("checkpoint");
+      expect((await report("needs_input", "which database?")).status).toBe(200);
+      await waitUntil(() => $(m, '#pane-orchestra .otask[data-otask="t1"] .orep')?.classList.contains("warn") === true);
+      expect(text(m, '#pane-orchestra .otask[data-otask="t1"] .orep')).toContain("which database?");
+      // the earlier checkpoint is still there, in the tooltip
+      expect($(m, '#pane-orchestra .otask[data-otask="t1"] .orep')!.getAttribute("title")).toContain("parser done");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await rest("POST", `/orchestra/${run.id}/abort`).catch(() => {});
+      await waitUntil(async () => !["running", "waiting_human", "planning", "reviewing"].includes((await runStatus(run.id)).status), { timeoutMs: 30_000 }).catch(() => {});
+    }
+  }, 90_000);
 
   it("a fleet row adds N workers of one agent on a model, is remembered, and goes out as agent@model×N (#369)", async () => {
     const m = mount({ hash: `#p/${projectId}` });

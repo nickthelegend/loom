@@ -630,6 +630,10 @@ export function createOrchestra(view) {
         if (lr) { lr.landing = p.landing; drawOrch(); }
       }
       if (ev.kind === "orchestra" && p.phase === "alert" && p.text) toast(String(p.text));
+      // a worker that's blocked says so the moment it is, not when its turn ends
+      if (ev.kind === "orchestra" && p.phase === "task_report" && p.report && (p.report.kind === "needs_input" || p.report.kind === "stuck")) {
+        toast((p.task && p.task.agent ? p.task.agent : p.taskId) + (p.report.kind === "stuck" ? " is stuck" : " needs input") + (p.report.text ? ": " + String(p.report.text).slice(0, 120) : ""));
+      }
       if (ev.kind === "orchestra" || (p.orchestra && view.ORCH_TASK_KINDS[ev.kind])) scheduleOrch();
     }
 
@@ -1044,8 +1048,28 @@ export function createOrchestra(view) {
         ((t.touches || []).length ? '<div class="tglobs otouch" title="the files it declared it will touch">' + teamGlobs(t.touches, 4) + "</div>" : "") +
         (open && files.length ? '<div class="ofiles">' + files.map(function(f){ return "<span>" + esc(f) + "</span>"; }).join("") + "</div>" : "") +
         (t.hold && t.status === "pending" ? orchHoldHtml(t) : "") +
+        orchReportHtml(t) +
         (t.error ? '<div class="oerr">' + esc(t.error) + "</div>" : "") +
         "</div>";
+    }
+
+    /**
+     * What the worker last said about itself (#374) — a checkpoint, "needs input", "stuck" or "done",
+     * posted with `loom report` or a loom-report block mid-turn — so the board moves before the turn
+     * ends. The earlier ones are in the tooltip.
+     */
+    var REPORT_KIND = { checkpoint: ["checkpoint", "live"], needs_input: ["needs input", "warn"], stuck: ["stuck", "err"], done: ["says done", "ok"] };
+    function orchReportHtml(t){
+      var r = t.lastReport;
+      if (!r) return "";
+      var k = REPORT_KIND[r.kind] || [r.kind, "off"];
+      var earlier = (t.reports || []).slice(0, -1).slice(-4).map(function(x){
+        return rel(x.at) + " \u00b7 " + ((REPORT_KIND[x.kind] || [x.kind])[0]) + (x.text ? ": " + x.text : "");
+      }).join("\n");
+      return '<div class="orep ' + k[1] + '"' + (earlier ? ' title="' + esc("earlier:\n" + earlier) + '"' : "") + '>' +
+        '<span class="orepk"><span class="odot ' + k[1] + '"></span>' + esc(k[0]) + "</span>" +
+        (r.text ? '<span class="orept">' + esc(r.text) + "</span>" : "") +
+        '<span class="orepw" data-rel="' + Number(r.at) + '">' + esc(rel(r.at)) + "</span></div>";
     }
 
     /**

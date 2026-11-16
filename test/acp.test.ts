@@ -7,14 +7,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { createAgent } from "../src/adapters/index.js";
+import { isAdapter, type Adapter } from "../src/types.js";
 import { AcpAdapter } from "../src/adapters/acp.js";
 import { setApprovalBroker } from "../src/core/approvals.js";
 import { writeMcpSession, type McpSession } from "../src/core/mcp.js";
 import type { AdapterEvent, McpServerConfig } from "../src/types.js";
-import { tmpDir } from "./helpers.js";
+import { tmpDir, waitUntil } from "./helpers.js";
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), "acp-fake-agent.mjs");
-const agents: AcpAdapter[] = [];
+const agents: Adapter[] = [];
 const mcps: McpSession[] = [];
 
 function mcp(config: McpServerConfig[]) {
@@ -31,7 +33,7 @@ function agent(mode: "bypass" | "auto" | "ask", extra: Record<string, unknown> =
   agents.push(a);
   const events: AdapterEvent[] = [];
   a.onEvent((e) => events.push(e));
-  const calls = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { method: string; params: Record<string, unknown> }) : []);
+  const calls = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").trim().split("\n").map((l) => { const { method, params } = JSON.parse(l) as { method: string; params: Record<string, unknown> }; return { method, params }; }) : []); // pid/argv are for the pool test
   return { a, events, calls, dir };
 }
 const texts = (events: AdapterEvent[]) => events.filter((e) => e.kind === "message" && !(e.payload as { reasoning?: boolean }).reasoning).map((e) => String((e.payload as { text: string }).text));
@@ -43,6 +45,51 @@ afterEach(async () => {
 });
 
 describe("ACP adapter", () => {
+  it("switches advertised session models before prompting and restores the session default", async () => {
+    const { a, calls } = agent("bypass", { env: { FAKE_ACP_MODELS: "1" } });
+    await a.send({ text: "first", chat: "a", model: "fast" });
+    await a.send({ text: "second", chat: "a", model: "deep" });
+    await a.send({ text: "other", chat: "b", model: "fast" });
+    await a.send({ text: "defaults", chat: "a" });
+    expect(calls().filter(c => c.method === "session/set_model").map(c => c.params)).toEqual([
+      { sessionId: "s1", modelId: "fast" }, { sessionId: "s1", modelId: "deep" },
+      { sessionId: "s2", modelId: "fast" }, { sessionId: "s1", modelId: "default" },
+    ]);
+    const methods = calls().map(c => c.method);
+    expect(methods.indexOf("session/set_model")).toBeLessThan(methods.indexOf("session/prompt"));
+    await expect(a.send({ text: "bad", chat: "a", model: "absent" })).rejects.toThrow(/isn't available/);
+    expect(calls().filter(c => c.method === "session/prompt")).toHaveLength(4);
+  });
+
+  it("refuses a model when neither session selection nor a startup flag is available", async () => {
+    const { a, calls } = agent("bypass");
+    await expect(a.send({ text: "hello", model: "fast" })).rejects.toThrow(/doesn't advertise session models/);
+    expect(calls().some(c => c.method === "session/set_model" || c.method === "session/prompt")).toBe(false);
+  });
+
+  it("keeps a process and native state per startup model, then reuses the previous process", async () => {
+    const dir = tmpDir("acp-pool"), logFile = path.join(dir, "calls.jsonl");
+    const a = createAgent({ id: "fixed", kind: "acp", options: { command: [process.execPath, fake], modelFlag: "--model", env: { FAKE_ACP_LOG: logFile } } }, dir, true);
+    if (!isAdapter(a)) throw new Error("expected adapter");
+    agents.push(a);
+    await a.start();
+    await a.send({ text: "one", chat: "same", model: "fast" });
+    await a.send({ text: "two", chat: "same", model: "deep" });
+    await a.send({ text: "three", chat: "same", model: "fast" });
+    const calls = fs.readFileSync(logFile, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const starts = calls.filter(c => c.method === "initialize");
+    expect(starts).toHaveLength(2);
+    expect(starts.map(c => c.argv.slice(-2))).toEqual([["--model", "fast"], ["--model", "deep"]]);
+    expect(calls.filter(c => c.method === "session/load")).toHaveLength(1);
+    const prompts = calls.filter(c => c.method === "session/prompt");
+    expect(prompts[0].pid).toBe(prompts[2].pid);
+    expect(prompts[0].pid).not.toBe(prompts[1].pid);
+    await a.stop();
+    await waitUntil(() => starts.every(c => {
+      try { process.kill(c.pid, 0); return false; } catch { return true; }
+    }));
+  });
+
   it.each([
     undefined,
     {},
