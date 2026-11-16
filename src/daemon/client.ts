@@ -4,6 +4,7 @@
  */
 
 import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
+import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -138,6 +139,18 @@ export class DaemonClient {
     if (opts.days) q.set("days", String(opts.days));
     if (opts.since) q.set("since", String(opts.since));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
+  }
+
+  prs(id: string): Promise<{ prs: TrackedPr[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/prs`);
+  }
+
+  watchPr(id: string, chat: string, pr: number | string): Promise<{ pr: TrackedPr }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/prs`, { pr });
+  }
+
+  setPrFeedback(id: string, chat: string, prFeedback: PrFeedbackMode): Promise<{ chat: ChatInfo }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}`, { prFeedback });
   }
 
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
