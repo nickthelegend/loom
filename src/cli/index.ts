@@ -6,6 +6,7 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
+import { configDirPath, isAccountKind } from "../core/accounts.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import { freeUsage } from "../core/free-pool.js";
@@ -427,6 +428,39 @@ program
       return;
     }
     for (const a of project.agents) console.log(formatAgentRosterRow(a));
+  });
+
+const accountsCommand = program.command("accounts")
+  .description("list CLI accounts stored on this machine")
+  .option("--json", "print account metadata and sign-in status as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const { accounts } = await (await ensureDaemon()).accounts();
+    if (opts.json) return void console.log(JSON.stringify({ accounts }, null, 2));
+    if (!accounts.length) return void console.log("No accounts configured. Run: loom accounts add codex --label work");
+    for (const a of accounts) console.log(`${a.id}  ${a.kind}  ${a.label}  ${a.authed === null ? "unknown" : a.authed ? "signed in" : "signed out"}  ${a.configDir}`);
+  });
+accountsCommand.command("add <kind>")
+  .description("register a separate CLI configuration directory")
+  .requiredOption("--label <name>", "a name for this account")
+  .option("--dir <path>", "absolute config directory (default: under LOOM_HOME/accounts)")
+  .action(async (kind: string, opts: { label: string; dir?: string }) => {
+    if (!isAccountKind(kind)) return fail("account kind must be claude-code or codex");
+    const { account } = await (await ensureDaemon()).addAccount({ kind, label: opts.label, ...(opts.dir ? { configDir: configDirPath(opts.dir) } : {}) });
+    console.log(`${account.id}  ${account.kind}  ${account.label}  ${account.configDir}`);
+    console.log(`Sign in: loom accounts login ${account.id}`);
+  });
+accountsCommand.command("login <id>")
+  .description("sign in to an account in this terminal")
+  .action(async (id: string) => {
+    const spec = await (await ensureDaemon()).accountLogin(id);
+    const bin = spec.bin === "codex" ? (await import("../providers/codex/adapter.js")).codexBin()
+      : (await import("../providers/claude/adapter.js")).claudeBin();
+    if (!bin) return fail(`${spec.bin} CLI not found`);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(bin, spec.args, { env: { ...process.env, ...spec.env }, stdio: "inherit" });
+      child.once("error", reject);
+      child.once("exit", (code) => { process.exitCode = code ?? 1; resolve(); });
+    });
   });
 
 program
@@ -3010,6 +3044,7 @@ program
 
 program
   .command("agents:add <kind>")
+  .option("--account <id-or-label>", "CLI account to use (loom accounts)")
   .description("add agent sessions to this project")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
   .option("--role <role>", "what this instance is for, e.g. planner or reviewer")
@@ -3026,6 +3061,7 @@ program
       kind: string,
       opts: {
         as?: string;
+        account?: string;
         role?: string;
         model?: string;
         count: string;
