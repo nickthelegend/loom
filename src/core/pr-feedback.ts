@@ -1,3 +1,4 @@
+import { recordIntakePr } from "./intake.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -59,9 +60,10 @@ export function savePrRecord(dir: string, record: PrRecord): void {
 export function recordOpenedPr(dir: string, url: string, owner: Pick<TrackedPr, "chat" | "agentId" | "source">): PrRecord {
   const identity = prFromUrl(url);
   const prior = readPrRecords(dir).find(p => p.repo === identity.repo && p.prNumber === identity.prNumber);
-  if (prior) return prior;
+  if (prior) { recordIntakePr(dir, prior.chat, url); return prior; }
   const row: PrRecord = { ...identity, ...owner, url, openedAt: Date.now(), state: "OPEN", signatures: [] };
   savePrRecord(dir, row);
+  recordIntakePr(dir, row.chat, url);
   return row;
 }
 

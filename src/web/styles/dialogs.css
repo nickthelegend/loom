@@ -1528,6 +1528,22 @@
 .npmodal .field .npamodel,.npmodal .field .npacount{height:28px;padding:0 7px;font-size:12px}
 .npmodal .field .npacount{text-align:center;padding:0 2px}
 .npmodal .field .npatick .opt{font-size:11px;color:var(--muted-foreground)}
+/* My issues (#382) */
+.intakemodal{width:min(640px,calc(100vw - 32px))}
+.intakemodal .ikbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.intakemodal #iklabel{flex:1;min-width:140px;height:30px;border:1px solid var(--input);border-radius:var(--radius-md);background:transparent;
+  color:var(--foreground);font:inherit;font-size:12.5px;padding:0 9px}
+.intakemodal .iklist{max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-md)}
+.intakemodal .ikrow{display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
+.intakemodal .ikrow:last-child{border-bottom:0}
+.intakemodal .ikrow.done{opacity:.7;cursor:default}
+.intakemodal .ikdone{display:inline-flex;width:16px;height:16px;color:var(--ok)}
+.intakemodal .ikdone svg{width:14px;height:14px}
+.intakemodal .ikref{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);flex:none}
+.intakemodal .iktitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.intakemodal .iklab{font-size:10.5px;border:1px solid var(--border);border-radius:6px;padding:0 5px;color:var(--muted-foreground);flex:none}
+.intakemodal .ikopts{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted-foreground)}
+.intakemodal #ikagent{height:30px;border:1px solid var(--input);border-radius:var(--radius-md);background:transparent;color:var(--foreground);font:inherit;font-size:12.5px}
 /* Accounts (#379) */
 .acctrow{align-items:flex-start}
 .acctrow .acctacts{display:flex;gap:6px;flex:none}

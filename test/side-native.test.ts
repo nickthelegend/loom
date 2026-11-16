@@ -8,7 +8,8 @@ import { codexDone, codexMessage, codexNotify, fakeCodex, rpcOf, stdinOf, turnsO
 
 it("forks a busy parent's native session in a separate process, preserving its cursor and model", async () => {
   const dir = makeProjectDir();
-  const bin = fakeCodex({ model: "parent-model", script: [{ sleep: 350 }, codexMessage("answer"), codexDone()] });
+  // long enough that the parent is still busy when the side's own process has started, on a slow Windows runner too
+  const bin = fakeCodex({ model: "parent-model", script: [{ sleep: 3000 }, codexMessage("answer"), codexDone()] });
   const parent = new CodexAdapter("parent", dir, { bin, model: "parent-model" });
   const running = parent.send({ text: "parent work", chat: "main" });
   await waitUntil(() => turnsOf(bin).length === 1);

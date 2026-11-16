@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
+
 ### Fixed
 
 - **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
@@ -14,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Move a chat between machines with `loom chat:move <chat> --to <runner>` and the owner-only chat move API (#364). Moves wait for the active turn, seal bounded history and eligible native resume cursors as team jobs, preserve imported authors/timestamps, and leave a source redirect. Targets retain the chat in a project and brief the next turn when native history is unavailable. Web and phone menus are separate work. Approach credit: Nuphos's runtime switcher.
+
+- Start assigned GitHub or Linear issues in separate chats or queued orchestra goals with `loom intake` (#382). Owner/device APIs expose issue and session links; a durable ledger prevents repeat starts, PRs link back to their issues, and optional intake schedules are disabled by default. Linear supports environment or stored provider keys.
 
 - **Several accounts per agent CLI (#379).** Register Claude Code and Codex accounts with `loom accounts add`, sign in with `loom accounts login`, and select them with `loom agents:add --account` or `options.configDir`. The owner/unscoped accounts API stores only labels and paths and asks CLIs for sign-in status. Quota Relay tries another account of the same CLI before switching kinds; Orchestra spreads fleet copies across accounts and persists the selection in `workerDetails`. Web and phone screens are separate. Approach credit: Agent Orchestrator's account switching (Apache-2.0).
 
