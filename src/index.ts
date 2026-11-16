@@ -5,6 +5,7 @@
  */
 
 export * from "./types.js";
+export * from "./core/presence.js";
 export { EventLog } from "./core/eventlog.js";
 export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";

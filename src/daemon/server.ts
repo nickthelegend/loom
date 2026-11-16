@@ -1,4 +1,6 @@
 import { ClientDelivery } from "./delivery.js";
+import { ChatPresenceTracker } from "./presence.js";
+import type { PresencePerson } from "../core/presence.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -144,6 +146,8 @@ export class LoomDaemon {
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   private readonly delivery = new ClientDelivery(this.sockets, (socket) => socket.terminate());
+  private readonly presence = new ChatPresenceTracker<WebSocket>((snapshot) =>
+    this.broadcastFrame({ ...snapshot }, snapshot.projectId));
   /** In-flight self-heal recheck timers, cleared on close. */
   private healTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Terminal shells — a real pty when node-pty loaded, else plain pipes. */
@@ -455,7 +459,8 @@ export class LoomDaemon {
       void this.runtime(g.project).then((rt) => {
         const chat = rt.chats().find((c) => c.id === g.chat);
         res.json({ project: { id: rt.info.id, name: rt.info.name }, chat: { id: g.chat, title: chat?.title ?? (g.chat === "main" ? "Main" : g.chat) },
-          role: g.role, name: g.name, expiresAt: g.expiresAt, agents: rt.config.agents.filter((a) => a.enabled !== false).map((a) => a.id) });
+          role: g.role, name: g.name, expiresAt: g.expiresAt, agents: rt.config.agents.filter((a) => a.enabled !== false).map((a) => a.id),
+          presence: this.presence.snapshot(rt.info.id, g.chat) });
       }).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
 
@@ -503,6 +508,11 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    app.get("/api/projects/:id/chats/:chat/presence", withRuntime(async (rt, req, res) => {
+      const chat = String(req.params.chat);
+      if (!rt.chats().some((c) => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
+      res.json(this.presence.snapshot(rt.info.id, chat));
+    }));
     registerObservabilityRoutes(app, withRuntime);
     registerAlertsRoutes(app, ctx);
     registerMessagesRoutes(app, withRuntime);
@@ -860,12 +870,31 @@ export class LoomDaemon {
       let resolvedProject: string | undefined;
       if (project) {
         resolvedProject = findProject(project)?.id ?? project;
-        // Ensure the runtime is live so its events flow.
-        void this.runtime(project).catch(() => { });
       }
       const wsScope = this.auth.allowedProjects(token);
       const wsGuest = this.auth.guestOf(token);
       if (wsGuest && resolvedProject !== wsGuest.project) { ws.close(4403, "this shared-chat link reaches only its chat"); return; }
+      if (resolvedProject && wsScope && !wsScope.includes(resolvedProject)) { ws.close(4403, "project not allowed"); return; }
+      // Resolve once; presence messages wait for the runtime so unknown chats
+      // cannot accumulate entries, including during the first socket's load.
+      const projectRuntime = resolvedProject ? this.runtime(resolvedProject).catch(() => null) : Promise.resolve(null);
+      const who: Pick<PresencePerson, "id" | "name" | "kind"> = {
+        id: crypto.randomUUID(),
+        name: wsGuest?.name ?? (this.auth.isAdmin(token) ? "you" : this.auth.clientFor(token)?.name ?? "device"),
+        kind: wsGuest ? "guest" : this.auth.isAdmin(token) ? "owner" : "device",
+      };
+      const view = (chat: string, typing?: boolean) => {
+        if (wsGuest && chat !== wsGuest.chat) return;
+        void projectRuntime.then((rt) => {
+          if (ws.readyState !== WebSocket.OPEN || !rt || !rt.chats().some((c) => c.id === chat)) return;
+          if (!this.auth.isAuthorized(token)) {
+            this.presence.remove(ws);
+            ws.close(4401, "unauthorized");
+            return;
+          }
+          this.presence.view(ws, rt.info.id, chat, who, typing);
+        });
+      };
       this.sockets.set(ws, {
         ...(resolvedProject ? { project: resolvedProject } : {}),
         ...(wsScope ? { scope: wsScope } : {}),
@@ -874,18 +903,27 @@ export class LoomDaemon {
       ws.send(
         JSON.stringify({
           type: "hello",
-          projects: listProjects().map((p) => p.id),
+          projects: listProjects().filter((p) => !wsScope || wsScope.includes(p.id)).map((p) => p.id),
           terminal: this.terminals.mode,
+          // this socket's own entry in presence frames, so a client can leave itself out (#362)
+          presenceId: who.id,
         }),
       );
+      if (wsGuest) view(wsGuest.chat);
       // Terminal input comes back up this socket: a tty needs a round-trip per
       // keystroke, which a POST each time can't carry. Only a socket scoped to
       // a project may drive that project's terminals.
       ws.on("message", (raw) => {
-        let msg: { type?: string; term?: string; data?: string; cols?: number; rows?: number };
+        let msg: { type?: string; term?: string; data?: string; cols?: number; rows?: number; chat?: unknown; typing?: unknown };
         try {
           msg = JSON.parse(String(raw)) as typeof msg;
         } catch {
+          return;
+        }
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "presence") {
+          if (typeof msg.chat !== "string" || !msg.chat || (msg.typing !== undefined && typeof msg.typing !== "boolean")) return;
+          view(msg.chat, msg.typing);
           return;
         }
         if (!resolvedProject || !msg.term || wsGuest) return; // a guest never drives a terminal
@@ -900,7 +938,10 @@ export class LoomDaemon {
       // a phone off its network) and is dropped instead of buffering for minutes
       (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true;
       ws.on("pong", () => { (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true; });
-      ws.on("close", () => this.sockets.delete(ws));
+      ws.on("close", () => {
+        this.sockets.delete(ws);
+        this.presence.remove(ws);
+      });
     });
     return wss;
   }
@@ -1085,6 +1126,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    this.presence.close();
     this.triggers.stop();
     await this.bridges.stopAll().catch(() => { });
     // A broker pointing at a closed daemon would leave the next adapter
