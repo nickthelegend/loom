@@ -124,6 +124,7 @@ function mount({
   bootstrap = true,
   firstRun = false,
   simple = false,
+  addAgentFixture = false,
 } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
@@ -185,6 +186,15 @@ function mount({
           ) as unknown as Promise<Response>;
         }
         const p = new URL(String(input), baseUrl).pathname;
+        // Offer an in-process agent and model suggestions without running a CLI.
+        if (addAgentFixture && p.endsWith("/agents/available")) {
+          return Promise.resolve(new Response(JSON.stringify({ ades: [
+            { kind: "echo", label: "Echo", tier: "adapter", installed: true, canAddAnother: true },
+          ] })));
+        }
+        if (addAgentFixture && p.endsWith("/agents/models")) {
+          return Promise.resolve(new Response(JSON.stringify({ models: ['suggested-model', 'model"<probe>'] })));
+        }
         // A rotated daemon token: everything 401s until the page re-bootstraps,
         // at which point it is holding the new one and calls succeed again.
         if (stale && p.startsWith("/api/")) {
@@ -1455,8 +1465,8 @@ describe("web app · review comments", () => {
  * truth about a config that couldn't learn.
  */
 describe("web app · the agent picker", () => {
-  const openAgents = async (): Promise<Mounted> => {
-    const m = mount({ hash: `#p/${projectId}` });
+  const openAgents = async (addAgentFixture = false): Promise<Mounted> => {
+    const m = mount({ hash: `#p/${projectId}`, addAgentFixture });
     await waitUntil(() => !!$(m, '.rvbtn[data-view="tasks"]'));
     click($(m, '.rvbtn[data-view="tasks"]'));
     await waitUntil(() => !!$(m, "#addagents"));
@@ -1484,8 +1494,8 @@ describe("web app · the agent picker", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
 
-  it("adds an agent to the project for real", async () => {
-    const m = await openAgents();
+  it("adds three agents with a freely typed model to the project for real", async () => {
+    const m = await openAgents(true);
     // wait for the row to be *wired*, not just drawn — drawAddAgents fetches,
     // renders, then binds, and clicking between the last two is a silent no-op
     await ready(m, "#addagents .addrow:not(.off)");
@@ -1493,6 +1503,13 @@ describe("web app · the agent picker", () => {
     const kind = row.getAttribute("data-add")!;
 
     click(row);
+    await ready(m, '.cfscrim form');
+    await waitUntil(() => m.window.document.querySelectorAll("#addmodels option").length === 2);
+    expect(($(m, "#addmodels option") as HTMLOptionElement).value).toBe("suggested-model");
+    expect(m.window.document.querySelector("#addmodels probe")).toBeNull();
+    ($(m, "#addmodel") as HTMLInputElement).value = "custom-model";
+    ($(m, "#addcount") as HTMLInputElement).value = "3";
+    click($(m, '.cfscrim [type="submit"]'));
     // it lands in the roster above, and the daemon agrees
     // The daemon agrees, which is the only opinion that counts: the row could
     // vanish from the DOM for any number of reasons that aren't "it worked".
@@ -1500,11 +1517,27 @@ describe("web app · the agent picker", () => {
       const res = await fetch(`${baseUrl}/api/projects/${projectId}`, {
         headers: { authorization: `Bearer ${clientToken}` },
       });
-      const j = (await res.json()) as { project?: { agents?: { kind: string }[] } };
-      return Boolean(j.project?.agents?.some((a) => a.kind === kind));
+      const j = (await res.json()) as { project?: { agents?: { kind: string; model: string }[] } };
+      return j.project?.agents?.filter((a) => a.kind === kind && a.model === "custom-model").length === 3;
     });
     expect(m.errors.join("\n")).toBe("");
   }, 25_000);
+
+  it("validates the count and lets the user cancel without adding agents", async () => {
+    const m = await openAgents(true);
+    await ready(m, '#addagents [data-add="echo"]');
+    click($(m, '#addagents [data-add="echo"]'));
+    await ready(m, '.cfscrim form');
+    const count = $(m, "#addcount") as HTMLInputElement;
+    expect(count.value).toBe("1");
+    count.value = "9";
+    click($(m, '.cfscrim [type="submit"]'));
+    expect(count.checkValidity()).toBe(false);
+    expect($(m, '.cfscrim form')).not.toBeNull();
+    click($(m, '.cfscrim [data-cancel]'));
+    expect($(m, '.cfscrim form')).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  });
 
   it("gives a new agent its kind as its role, not an invented job", async () => {
     // Self-contained: depending on a previous test having run is how a suite

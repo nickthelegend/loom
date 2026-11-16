@@ -389,11 +389,10 @@ describe("web app · picking models in Orchestrate", () => {
   it("adds an API model as a worker, and refuses to start one that has none", () => {
     expect(APP_HTML).toContain('id="cowadd"');
     expect(APP_HTML).toContain("function addModelWorker(");
-    expect(APP_HTML).toContain('JSON.stringify({ kind: "model" })');
-    // Added, then asked which model — not left as a chip that fails on send.
-    expect(webSource("project/orchestra.js")).toContain("if (a && a.id) view.openModelMenu(a.id);");
+    // Model and count are chosen before the workers join the roster.
+    expect(webSource("project/orchestra.js")).toContain('addAgents(view.pid, "model")');
     // The roster is re-read before anything is drawn off it.
-    expect(webSource("project/orchestra.js")).toContain("return view.refresh().then(function(){ return a; });");
+    expect(webSource("project/orchestra.js")).toContain("return view.refresh().then(function(){ drawOrchControls(); });");
     expect(webSource("project/thread.js")).toContain("return api(\"/api/projects/\" + view.pid).then(function(j){");
     // And the send guard covers the orchestrator as well as the workers.
     expect(APP_HTML).toContain('return a.kind === "model" && !a.model;');
