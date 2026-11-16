@@ -2088,7 +2088,12 @@ with its why: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Configuration
 
-`.loom/config.json` (created by `loom init`, hot-reloaded on edit):
+`.loom/config.json` is created by `loom init`. The running daemon watches it and
+reloads after a short pause in edits. Agent additions, removals, roles,
+instructions, permissions and routes take effect without a restart; changes to an
+agent mid-turn wait until its turn finishes. The thread records what changed or
+was deferred. A broken JSON edit is reported there and the last working config
+stays active until you fix the file.
 
 ```json
 {

@@ -3,8 +3,6 @@
  * their spend, and totals survive a runtime reopen (rehydration from log).
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { DaemonClient } from "../src/daemon/client.js";
@@ -83,11 +81,10 @@ describe("cost telemetry", () => {
 
   it("totals survive a runtime reopen (rehydrated from the log)", async () => {
     const before = (await client.costs(projectId)).costs;
-    // Touch the config to force the daemon to reopen the runtime.
-    const cfgFile = path.join(projectDir, ".loom", "config.json");
-    const future = new Date(Date.now() + 2000);
-    fs.utimesSync(cfgFile, future, future);
-    await client.project(projectId); // triggers hot-reload
+    await daemon.close();
+    daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
+    await daemon.listen();
+    client = new DaemonClient(readDaemonConfig()!);
     const after = (await client.costs(projectId)).costs;
     expect(after.totalUsd).toBeCloseTo(before.totalUsd, 6);
     expect(after.turns).toBe(before.turns);

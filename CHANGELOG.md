@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Watch `.loom/config.json` for debounced edits and update running projects in place. Agent changes wait for their current turn to finish; applied changes and invalid edits are reported in the thread, with the last working config kept on errors (#358).
+
 ## [1.3.0] — 2026-10-26
 
 ### Added
