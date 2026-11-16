@@ -37,6 +37,7 @@ import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
   PromptQueue,
+  QueueItemGone,
   type QueueCondition,
   type QueueInput,
   type QueueItem,
@@ -2684,6 +2685,43 @@ export class ProjectRuntime {
 
   async drainPromptQueue(): Promise<void> { return this.queueCoordinator.drainPromptQueue(); }
 
+  /** A fallback enters the regular queue, which dispatches immediately if the project is idle. */
+  async steerMessage(text: string, agentId?: string, opts: { chat?: string } = {}): Promise<import("../types.js").SteerResult> {
+    const result = await this.turns.steer(text, agentId, opts);
+    if (result.steered) return { steered: true };
+    const item = this.enqueue({ text, chat: opts.chat, target: { kind: "agent", agentId: result.agentId } });
+    return { steered: false, queued: this.queue.length, queueId: item.id, reason: result.reason };
+  }
+
+  /** Failed promotions keep their id, position, condition and target; they never create another item. */
+  async steerQueued(queueId: string): Promise<import("../types.js").SteerResult> {
+    const releaseQueue = this.queueCoordinator.hold();
+    let releaseItem: (() => void) | undefined;
+    try {
+      releaseItem = this.queue.reserve(queueId);
+      const item = this.queue.snapshot().items.find(i => i.id === queueId);
+      if (!item) throw new QueueItemGone(queueId);
+      const fallback = (reason: string): import("../types.js").SteerResult => ({
+        steered: false, queued: this.queue.length, queueId, reason,
+      });
+      if (item.target.kind === "orchestra")
+        return fallback("An orchestra goal needs its own run; kept in the queue.");
+      const result = await this.turns.steer(item.text, item.target.kind === "agent" ? item.target.agentId : undefined,
+        { chat: item.chat, ...(item.by ? { by: item.by } : {}) }).catch(error => {
+          // A lost acknowledgement may mean the input arrived. Keep it for review, without replaying it.
+          this.queue.setPaused(true, "steering was not confirmed — check the conversation before resuming the queue");
+          throw error;
+        });
+      if (!result.steered) return fallback(result.reason);
+      releaseItem();
+      this.queue.remove(queueId);
+      return { steered: true };
+    } finally {
+      releaseItem?.();
+      releaseQueue();
+    }
+  }
+
 
   async sendMessage(
     text: string,
@@ -3473,6 +3511,7 @@ export class ProjectRuntime {
             kind: cfg.kind,
             role: cfg.role,
             tier,
+            capabilities: { steer: false },
             available: false,
             busy: false,
             holdsBaton: false,
@@ -3493,6 +3532,7 @@ export class ProjectRuntime {
           kind: cfg.kind,
           role: cfg.role,
           tier: live.capabilities.tier,
+          capabilities: { steer: isAdapter(live) && live.capabilities.steer === true && typeof live.steer === "function" },
           available: this.continuity && isNativeKind(cfg.kind)
             ? (await this.harnesses.ensure(cfg.id)).available
             : await live.available().catch(() => false),

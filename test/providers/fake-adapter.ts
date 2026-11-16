@@ -49,7 +49,7 @@ export class FakeAdapter implements ProviderAdapter {
 
   constructor(readonly instanceId: string, private readonly options: FakeOptions = {}) {
     this.provider = options.provider ?? "codex";
-    this.capabilities = { sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: false, ...options.capabilities };
+    this.capabilities = { steer: false, sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: false, ...options.capabilities };
   }
 
   emit<K extends RuntimeEventType>(threadId: string, type: K, payload: RuntimeEventPayloads[K], extra: { turnId?: string; itemId?: string; requestId?: string } = {}): void {

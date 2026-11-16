@@ -229,7 +229,7 @@ interface Session {
 
 export class CodexProviderAdapter implements ProviderAdapter {
   readonly provider = "codex" as const;
-  readonly capabilities: AdapterCapabilities = { sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: true };
+  readonly capabilities: AdapterCapabilities = { steer: true, sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: true };
   private readonly sessions = new Map<ThreadId, Session>();
   private readonly hub = new EventHub<ProviderRuntimeEvent>();
 
@@ -459,6 +459,23 @@ export class CodexProviderAdapter implements ProviderAdapter {
     const target = turnId ?? s.info.activeTurnId;
     if (!target || s.finished.has(target)) return;
     await s.rpc.request("turn/interrupt", { threadId: s.providerThreadId, turnId: target }, 5000);
+  }
+
+  async steer(chat: ThreadId, text: string): Promise<boolean> {
+    const s = this.sessions.get(chat);
+    const expectedTurnId = s?.info.activeTurnId;
+    if (!s || s.stopping || !expectedTurnId || s.finished.has(expectedTurnId)) return false;
+    try {
+      // The precondition prevents a late request from steering the next turn.
+      await s.rpc.request("turn/steer", { threadId: s.providerThreadId, expectedTurnId,
+        input: [{ type: "text", text, text_elements: [] },
+          ...attachedImages(text, s.info.cwd).map(im => ({ type: "localImage", path: im.abs }))] });
+      return true;
+    } catch (error) {
+      if ((error as RpcError).code !== undefined) return false;
+      // A lost response may already have delivered input. Retrying via the queue would duplicate it.
+      throw error;
+    }
   }
 
   async respondToRequest(threadId: ThreadId, requestId: RequestId, decision: ApprovalDecision): Promise<void> {

@@ -157,6 +157,9 @@ export interface FakeCodexOptions {
   missingThread?: boolean;
   /** turn/start is refused with an error response. */
   refuseTurn?: string;
+  /** turn/steer is explicitly refused, or the transport closes before replying. */
+  refuseSteer?: boolean;
+  closeOnSteer?: boolean;
   /** Exit before answering initialize, with this stderr. */
   dieAtStart?: { code: number; stderr: string };
   /** The model thread/start reports. */
@@ -192,7 +195,8 @@ export function fakeCodex(options: FakeCodexOptions = {}): string {
   const dir = tmpDir("fake-codex"), bin = path.join(dir, "codex");
   const config = { settings: options.config ?? {}, unsupportedFork: options.unsupportedFork ?? false, script: options.script ?? CODEX_OK, scripts: options.scripts ?? [], missingThread: options.missingThread ?? false,
     refuseTurn: options.refuseTurn ?? null, dieAtStart: options.dieAtStart ?? null, model: options.model ?? "gpt-test",
-    version: options.version ?? "codex-cli 0.155.0", models: options.models ?? null, turnReplyDelayMs: options.turnReplyDelayMs ?? 0 };
+    version: options.version ?? "codex-cli 0.155.0", models: options.models ?? null, turnReplyDelayMs: options.turnReplyDelayMs ?? 0,
+    refuseSteer: options.refuseSteer ?? false, closeOnSteer: options.closeOnSteer ?? false };
   fs.writeFileSync(bin, `#!/usr/bin/env node
 ${RUNNER}
 const config = ${JSON.stringify(config)};
@@ -255,6 +259,11 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
       else reply(m.id, turnReply);
       void run(config.scripts[turns - 1] || config.script);
       return;
+    case "turn/steer":
+      if (config.closeOnSteer) process.exit(1);
+      if (config.refuseSteer || m.params.threadId !== vars.THREAD || m.params.expectedTurnId !== vars.TURN)
+        return out({ id: m.id, error: { code: -32600, message: "no matching active turn to steer" } });
+      return reply(m.id, { turnId: vars.TURN });
     case "model/list":
       if (!config.models) return out({ id: m.id, error: { code: -32601, message: "unknown method model/list" } });
       return reply(m.id, { data: config.models.map((x) => ({ model: x.id, ...x })), nextCursor: null });

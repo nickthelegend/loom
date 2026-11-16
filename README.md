@@ -214,6 +214,40 @@ loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravit
   was interrupted. **Resume** (or `loom orchestra:resume <run>`) picks up the
   tasks that were running and briefs the orchestrator again.
 
+Use `agent[@model][:effort][xN]` to choose a model and build a fleet without
+adding roster entries. Agent names, kinds and aliases all work; `xN` (or `×N`)
+adds 1–100 instances per spec. The orchestrator takes the same syntax with count
+1. Model names and effort values are passed to the agent's provider unchanged.
+Omitted selections inherit the roster's options, then the provider's defaults.
+
+```sh
+loom orchestrate "implement and verify the feature" \
+  -o claude-code@claude-opus-5-5 \
+  -w claude-code@claude-opus-5-5x2,codex@gpt-5.6-sol:highx2,codex@gpt-6-solx2 -p 3
+
+# Chain lines accept the same specs, including with --check:
+# my-project :: [-o codex@gpt-6-sol -w codex@gpt-5.6-solx2 -p 2] implement the feature
+```
+
+Instances have distinct ids, such as `codex@gpt-5.6-sol:high#2`. Repeating a spec
+adds another instance. `-p` caps concurrent tasks across the fleet, including
+races. The planner sees each worker's model and can override a task with
+`{"type":"spawn","agent":"codex@gpt-6-sol","title":"review","prompt":"…","model":"gpt-5.6-sol","effort":"high"}`.
+These choices stay pinned through follow-ups and restarts, without changing the
+roster. Model and effort overrides currently apply to local workers; `team:<kind>`
+continues to use the teammate's configured agent.
+
+`loom orchestra <run>` shows the selections. Its `--json` output includes
+`orchestrator`, `workers`, `workerDetails` and `taskDetails`, while `tasks` retains
+its outcome counts. For API clients, `POST /api/projects/:id/orchestra` accepts
+`workers: string[]` of fleet specs and an `orchestrator` spec. Start, list and
+run-detail responses retain `workers: string[]` of instance ids and add
+`workerDetails: [{ id, kind, model?, effort? }]`; `orchestrator` and each entry in
+`run.tasks` also carry `model?` and `effort?`. The `started` event includes
+`workerDetails`, and task events and `/subagents` include task selections.
+Absent selections mean provider defaults; older runs may lack `workerDetails`.
+Web and phone fleet controls can use these fields without parsing instance ids.
+
 Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
 `node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
 CLIs and checks the result on disk.
@@ -603,6 +637,30 @@ loom init          # detects the agents installed on this machine, assigns roles
 loom               # opens the TUI — a tabbed workspace (Thread · Board · Brain · Diff)
 ```
 
+To start somewhere new, run `loom new "My project"` or
+`loom clone https://github.com/you/repo.git --name "My project"` from any directory.
+Both print the registered project id. Folders go under `~/Loom Projects` on the
+daemon's machine; set `projectsRoot` to an absolute path in `~/.loom/daemon.json`
+to choose another location (`LOOM_HOME` overrides `~/.loom`). Names become lowercase
+slugs of up to 60 characters, and existing folders are always refused.
+
+`loom new` creates a README, ignores `.loom/`, initializes Git and makes a first
+commit, using Loom's identity if Git has none. Use `--no-git` to skip Git, or
+`--agent codex@your-modelx2 --agent opencode` to choose agents and counts (1–8 per
+entry; `×2` also works). Without `--agent`, Loom detects installed agents.
+
+Remote clients can use `POST /api/projects/new` with `{ name, agents?: [{ kind,
+model?, count? }], git?: boolean }`, returning `{ project, config }`, or
+`POST /api/projects/clone` with `{ url, name? }`, returning HTTP 202 `{ jobId, dir }`.
+Clones accept HTTPS, `git@host:path`, and SSH URLs. Poll
+`GET /api/projects/jobs/:jobId` for `{ status: "cloning" | "done" | "failed",
+project?, error?, progress? }`. Jobs last until daemon restart; recent completed
+jobs are retained for reconnecting clients. Failed clones remove their partial
+folder so the name can be retried. These endpoints require the owner token or an
+unscoped paired device; guests and scoped tokens receive 403.
+Their WebSockets receive `{ type: "project-job", jobId, dir, status, ... }` as
+progress changes and `{ type: "projects", project }` after registration.
+
 ```
   ██      ▄████▄  ▄████▄  ▄█▄▄█▄
   ██      ██  ██  ██  ██  ██▀▀██
@@ -709,8 +767,11 @@ detects at least two roles.
 |---|---|
 | `loom` | **The TUI** — tabbed workspace (Thread · Board · Brain · Diff), `shift+tab` switches view, `tab` shifts agents, `/`-commands + `ctrl+p` palette inline |
 | `loom init` | Make the current directory a Loom project (auto-detects agents); in a git repo it offers to add `.loom/` to `.gitignore` (`--gitignore` / `--no-gitignore` to skip the question) |
+| `loom new <name> [--agent kind[@model][xN] ...] [--no-git]` | Create and register a new folder in `projectsRoot`; print its project id |
+| `loom clone <url> [--name <name>]` | Clone into `projectsRoot`, wait for registration, and print its project id |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db`. Before resuming a session of 100k+ tokens whose prompt cache has likely expired, it warns with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over |
+| `loom steer <text> [--chat <chat>]` | Add input to a running turn; otherwise queue it and explain why. `--agent <id>` overrides the chat binding |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |
@@ -1691,6 +1752,12 @@ long turn could cross it. The same numbers are on every agent in
 
 ## The prompt queue — line up the next ones
 
+Use `loom steer "use the smaller change" [--chat <id-or-title>]` to add input
+to the running turn in that chat. Codex and Claude support steering; an idle
+chat or an agent without steering receives a normal queued prompt instead,
+and the CLI prints why. `--agent <id>` overrides the chat's agent. Accepted
+steering appears immediately as a user message in the conversation.
+
 Type while an agent is mid-turn, or while a goal is still running, and the
 prompt waits above the composer instead of being refused or lost. It stays
 yours until it's sent:
@@ -1724,6 +1791,31 @@ It survives a daemon restart (reloaded paused, so an hour-old queue doesn't
 start itself), and lives in the project's `.loom/queue.json`. Over the API:
 `GET/POST /api/projects/:id/queue`, `PATCH|DELETE .../queue/:itemId` (text,
 target, or `to` for its position), `POST .../queue/pause`, `DELETE .../queue`.
+
+Steering API (also exposed as `DaemonClient.steer` and `steerQueued`):
+
+- `POST /api/projects/:id/steer` with `{text, chat?, agentId?}`. Chat defaults
+  to `main`; the target is the explicit agent, the chat binding, the baton
+  holder, then the project's default adapter, in that order.
+- `POST /api/projects/:id/queue/:queueId/steer` with no body promotes that
+  item's current text in its own chat. Acceptance removes it from the queue.
+  Explicit promotion can bypass a pause or condition. A failed promotion
+  keeps the same item, position, target and condition. A promoted prompt uses
+  the running turn's mode; orchestra goals remain queued for their own run.
+- Both return `{steered:true}` on acceptance, or
+  `{steered:false, queued:number, queueId:string, reason:string}` on fallback.
+  `queued` is the queue size at acceptance; an idle queue can dispatch immediately.
+  No running turn is a normal fallback, not a 409. Missing queue items return
+  404; malformed steering bodies return 400. Transport errors with uncertain
+  delivery are errors, not an automatic resend; a promotion with an error
+  pauses the queue for review.
+- Every agent status includes `capabilities.steer: boolean`. Clients should
+  display the fallback `reason`. An accepted steer uses the ordinary `message`
+  event with `payload: {text, author:"user", steer:true}` in the requested chat.
+  The existing turn continues; there is no new turn or baton handoff.
+
+Approach inspired by Agent Orchestrator's `steer.go` and T3 Code's composer
+(Apache-2.0 / MIT). Web and phone steering controls can build on this API.
 
 ## Prompt manager
 
@@ -2283,7 +2375,8 @@ Loom stands on good open-source work. Full license texts are in
   "coordinate, never implement" orchestrator rules, its worker rules and its
   worktree-per-worker isolation. Loom rebuilt the orchestration around a parsed
   action protocol and a dependency graph, so any agent can orchestrate any mix
-  of workers.
+  of workers. Its `ao spawn --agent --model --effort` also inspired Loom's
+  fleet specs and per-task model selection.
 - **[T3 Code](https://github.com/pingdotgg/t3code)** (MIT, © T3 Tools Inc.). Loom
   adapted its mobile connection patterns: the pairing secret in the URL fragment,
   resuming a stream from a known sequence, and a reconnect supervisor that forces

@@ -31,7 +31,7 @@ import {
 import { NewChatSheet } from "./new-chat";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -48,6 +48,7 @@ import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
 import { SideSheet } from "./side";
+import { NewProjectSheet } from "./new-project";
 import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
@@ -434,6 +435,7 @@ export function BoardScreen(props: {
   accountButton?: React.ReactNode;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [daemon, setDaemon] = useState<DaemonReachability | null>(null);
@@ -681,12 +683,26 @@ export function BoardScreen(props: {
           </View>
         )}
 
-        {/* projects */}
+        {/* projects — and + Project, which starts or clones one on the computer (#371) */}
         <View>
-          <SectionLabel text="Projects" />
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <SectionLabel text="Projects" />
+            <TouchableOpacity
+              onPress={() => setNewProjectOpen(true)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="New project: start or clone one on your computer"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: 30, paddingHorizontal: 11, borderRadius: radii.pill,
+                borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised, marginBottom: 6 }}
+            >
+              <Text style={{ color: T.text, fontSize: 15, fontWeight: "700", marginTop: -1 }}>+</Text>
+              <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "700" }}>Project</Text>
+            </TouchableOpacity>
+          </View>
           <View style={{ gap: spacing.sm }}>
             {projects.length === 0 ? (
-              <Sys text="no projects yet — run loom init on your computer" />
+              <Sys text="no projects yet — tap + Project to start one, or clone a repo" />
             ) : (
               projects.map((p) => (
                 <ProjectCard key={p.id} p={p} onPress={() => props.onOpen(p)} />
@@ -741,6 +757,19 @@ export function BoardScreen(props: {
         </View>
       </ScrollView>
 
+      <NewProjectSheet
+        visible={newProjectOpen}
+        creds={props.creds}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={(id) => {
+          setNewProjectOpen(false);
+          void getProjects(props.creds).then(({ projects: fresh }) => {
+            setProjects(fresh);
+            const made = fresh.find((p) => p.id === id);
+            if (made) props.onOpen(made);
+          }).catch(() => void refresh());
+        }}
+      />
       <ApprovalsSheet
         creds={props.creds}
         projects={projects}
@@ -1173,6 +1202,33 @@ export function ProjectScreen(props: {
           .catch(() => {});
       }
     } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Steer (#373): hold Send while a turn runs here and what you typed goes into that turn now,
+  // not after it. Agents that can't take it (or a turn that just ended) queue it instead, and say so.
+  const steerable = project.agents.find((a) => a.tier === "adapter" && a.busy && (!a.chat || a.chat === chatId) && a.capabilities?.steer) ?? null;
+  const steer = async () => {
+    if (!steerable) return void send();
+    const refs = attach.refs();
+    const typed = text.trim();
+    const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
+    if (!message) return;
+    if (attach.uploading) return setErr("still uploading the picture…");
+    attach.clear();
+    haptic.tap();
+    setText("");
+    sttBase.current = "";
+    setErr(null);
+    try {
+      const res = await steerMessage(creds, project.id, message, chatId, steerable.id);
+      if (!res.steered) {
+        setErr(res.reason ?? "queued for the next turn");
+        void getQueue(creds, project.id).then(setQueue).catch(() => {});
+      }
+    } catch (e) {
+      setText(message); // keep what you wrote
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
@@ -1872,8 +1928,16 @@ export function ProjectScreen(props: {
                   </Text>
                 </TouchableOpacity>
               )}
+              {steerable && armed ? (
+                <Text style={{ color: T.faint, fontSize: 11, marginRight: 2 }} accessibilityElementsHidden>hold to steer</Text>
+              ) : null}
               <TouchableOpacity
                 onPress={send}
+                onLongPress={steerable ? () => void steer() : undefined}
+                delayLongPress={350}
+                accessibilityRole="button"
+                accessibilityLabel={steerable ? "Send (queues after this turn)" : "Send"}
+                accessibilityHint={steerable ? `Hold to steer: ${steerable.id} takes it into the turn it's running now` : undefined}
                 activeOpacity={0.7}
                 style={{
                   width: 34,

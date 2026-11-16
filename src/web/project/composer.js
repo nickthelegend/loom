@@ -26,6 +26,45 @@ export function createComposer(view) {
     var pendingSubmission;
 
 
+    /**
+     * The agent that is mid-turn in this chat and can take more input into that turn (#373),
+     * or null. Codex (turn/steer) and Claude (streamed input) can; the rest queue.
+     */
+    function steerTarget(){
+      var p = state.project || {}, here = view.chatId || "main";
+      return (p.agents || []).filter(function(a){
+        return a.tier !== "bridge" && a.busy && (!a.chat || a.chat === here) && a.capabilities && a.capabilities.steer;
+      })[0] || null;
+    }
+
+    /**
+     * Steer: what's in the box goes into the turn that's running now, instead of waiting for it
+     * to end. When the turn can't take it (it just ended, or the agent can't steer), the daemon
+     * queues it and says why — nothing is lost either way.
+     */
+    function steer(){
+      var target = steerTarget();
+      if (!target) return send();
+      var box = document.getElementById("box");
+      var text = (box.value || "").trim();
+      if (!text && !view.attach.length) return;
+      if (view.attach.some(function(a){ return a.uploading; })) { toast("still uploading\u2026"); return; }
+      var refs = view.attach.map(function(a){ return (a.kind === "image" ? "[image] " : "[file] ") + a.path; });
+      var full = refs.length ? refs.join("\n") + (text ? "\n\n" + text : "") : text;
+      box.value = ""; autosizeBox(); view.attach = []; drawAttach(); view.clearDraft(); view.recall.i = -1;
+      view.wantScroll();
+      api("/api/projects/" + view.pid + "/steer", { method: "POST", body: JSON.stringify({ text: full, chat: view.chatId || "main", agentId: target.id }) })
+        .then(function(j){
+          if (j && j.steered) toast("steered \u2014 " + labelOf(target.id) + " takes it into this turn");
+          else toast((j && j.reason) || "queued for the next turn");
+          view.refresh();
+        })
+        .catch(function(err){
+          toast(err.message);
+          if (!box.value) { box.value = full; autosizeBox(); view.saveDraft(); } // keep what you wrote
+        });
+    }
+
     function send(){
       if (state.cmode === "orch" && devMode()) return view.sendOrchestra();
       var box = document.getElementById("box");
@@ -820,7 +859,8 @@ export function createComposer(view) {
             return;
           }
         }
-        // Enter sends; Shift+Enter is a newline.
+        // Enter sends (or queues behind a running turn); ⌥Enter steers that turn; Shift+Enter is a newline.
+        if (e.key === "Enter" && e.altKey && !e.shiftKey && steerTarget()) { e.preventDefault(); steer(); return; }
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
       });
       box.addEventListener("paste", function(e){
@@ -1827,5 +1867,5 @@ export function createComposer(view) {
     }
 // Settings → Preferences opens these for the project on screen.
 state.openTools = function(kind){ if (!view.pid) return; if (kind === "skills") openSkillsModal(view.pid); else openMcpModal(view.pid); };
-return { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send };
+return { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send, steer, steerTarget };
 }
