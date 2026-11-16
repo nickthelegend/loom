@@ -812,6 +812,33 @@ describe("web app · chat folders and agent groups", () => {
   });
 });
 
+describe("web app · steer a running turn (#373)", () => {
+  it("shows Steer while a steerable turn runs, and puts the text into that turn", async () => {
+    const call = (method: string, p: string, body?: unknown) => fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+      method, headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    }).then((r) => r.json());
+    const status = () => call("GET", "") as Promise<{ project?: { agents: Array<{ id: string; busy: boolean }> }; agents?: Array<{ id: string; busy: boolean }> }>;
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    expect(($(m, "#steer") as HTMLElement).style.display).toBe("none");
+    const agent = ((await status()).project?.agents ?? (await status()).agents ?? [])[0]!.id;
+    await call("POST", "/messages", { text: "sleep:8000 long job", chat: "main", agentId: agent });
+    await waitUntil(() => ($(m, "#steer") as HTMLElement).style.display !== "none", { timeoutMs: 10_000 }).catch(async (e) => {
+      throw new Error(`${e.message}\nstatus: ${JSON.stringify(await status()).slice(0, 900)}\nstop: ${($(m, "#stop") as HTMLElement).style.display}`);
+    });
+    expect(text(m, "#hint")).toContain("Steer");
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    box.value = "also add a test";
+    click($(m, "#steer"));
+    await waitUntil(() => [...m.window.document.querySelectorAll(".msg.user")].some((u) => (u.textContent ?? "").includes("also add a test") && !!u.querySelector(".usteer")), { timeoutMs: 10_000 });
+    // the one turn answers with both, and nothing was left waiting in the queue
+    await waitUntil(() => [...m.window.document.querySelectorAll(".msg.agent .bubble")].some((b) => (b.textContent ?? "").includes("long job") && (b.textContent ?? "").includes("also add a test")), { timeoutMs: 15_000 });
+    expect(((await call("GET", "/queue")) as { queue?: unknown[]; items?: unknown[] }).items ?? []).toHaveLength(0);
+    await waitUntil(() => ($(m, "#steer") as HTMLElement).style.display === "none");
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
 describe("web app · New project from anywhere (#371)", () => {
   it("starts a project from a name, clones one from a URL, and still adds an existing folder", async () => {
     // never the real ~/Loom Projects: point the daemon at a temp root first

@@ -6,6 +6,23 @@ import { z } from "zod";
 /** Register messages routes in the order established by LoomDaemon.routes(). */
 export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): void {
 
+  /**
+   * {text, chat?, agentId?} -> {steered:true}, or
+   * {steered:false, queued:number, queueId:string, reason:string}.
+   * chat defaults to main; agentId overrides the chat binding and current holder.
+   * An idle chat uses the normal queue (no 409). Accepted input is a user message
+   * with payload.steer=true. A transport error is not retried: delivery may be unknown.
+   */
+  app.post("/api/projects/:id/steer", withRuntime(async (rt, req, res) => {
+    const body = z.strictObject({ text: Text.refine(t => t.trim().length > 0, "missing text"),
+      chat: Id.optional(), agentId: Id.optional() }).safeParse(req.body);
+    if (!body.success) return void res.status(400).json({ error: "expected {text, chat?, agentId?} with nonempty text and string ids" });
+    const { text, chat, agentId } = body.data;
+    const result = await rt.steerMessage(text, agentId, { ...(chat ? { chat } : {}) });
+    recordRecent(text, { project: rt.info.name, mode: "chat" });
+    res.json(result);
+  }));
+
   app.get(
     "/api/projects/:id/events",
     withRuntime(async (rt, req, res) => {
