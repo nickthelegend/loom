@@ -92,6 +92,7 @@ export async function stopAllProviderSessions(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 interface AgentOptions {
+  env?: Record<string, string>;
   model?: string;
   /** Reasoning effort ("low" | "medium" | "high" | …, the provider's own words). */
   effort?: string;
@@ -143,6 +144,7 @@ export class ProviderAgent extends AdapterBase {
   /** The MCP servers each chat's live session was started with. */
   private readonly sessionMcp = new Map<ThreadId, string>();
   private mcp: SendInput["mcp"];
+  private readonly chatSelections = new Map<string, { model?: string; effort?: string }>();
   private readonly liveListeners = new Set<(delta: LiveDelta) => void>();
   private readonly itemListeners = new Set<(item: LiveItem) => void>();
 
@@ -202,12 +204,12 @@ export class ProviderAgent extends AdapterBase {
    * compacts on its `/compact` command, sent as a turn (t3code's
    * `compaction: { type: "slash-command" }`).
    */
-  async compact(chat: ThreadId = MAIN_CHAT): Promise<void> {
-    if (this.provider === "claude-code") return this.send({ text: "/compact", chat });
+  async compact(chat: ThreadId = MAIN_CHAT, selection: Pick<SendInput, "model" | "effort"> = {}): Promise<void> {
+    if (this.provider === "claude-code") return this.send({ text: "/compact", chat, ...selection });
     if (this._busy) throw new Error(`${this.provider} agent "${this.id}" is busy`);
     const { service } = await this.attach();
     await service.ensureSession({ threadId: chat, instanceId: this.id, cwd: this.projectDir, runtimeMode: this.runtimeMode(),
-      ...(this.options.model ? { model: this.options.model } : {}), onMissingSession: "fresh" });
+      model: selection.model ?? this.options.model, effort: selection.effort ?? this.options.effort, onMissingSession: "fresh" });
     await service.compact(chat, this.id);
   }
 
@@ -262,10 +264,10 @@ export class ProviderAgent extends AdapterBase {
     if (attached) { releaseProviders(this.projectDir, providers); return { providers: attached, service: attached.service }; }
     const mcpServers = () => this.mcp?.servers ?? [];
     const adapter: ProviderAdapter = this.provider === "codex"
-      ? new CodexProviderAdapter(this.id, { ...(this.options.bin ? { bin: this.options.bin } : {}),
+      ? new CodexProviderAdapter(this.id, { env: this.options.env, ...(this.options.bin ? { bin: this.options.bin } : {}),
         ...(this.options.extraArgs ? { extraArgs: this.options.extraArgs } : {}), ...(this.options.sandbox ? { sandbox: this.options.sandbox } : {}),
         mcpConfig: () => Object.fromEntries(mcpServers().map(s => [`mcp_servers.${s.key}`, codexMcpServer(s.entry)])) })
-      : new ClaudeProviderAdapter(this.id, { ...(this.options.bin ? { bin: this.options.bin } : {}),
+      : new ClaudeProviderAdapter(this.id, { env: this.options.env, ...(this.options.bin ? { bin: this.options.bin } : {}),
         ...(this.options.extraArgs ? { extraArgs: this.options.extraArgs } : {}),
         ...(this.options.permissionMode ? { permissionMode: this.options.permissionMode } : {}),
         // looked up by project id: options stay plain data (native continuity clones them)
@@ -356,10 +358,16 @@ export class ProviderAgent extends AdapterBase {
       const { service } = await this.attach();
       const runtimeMode = this.runtimeMode();
       const model = input.model ?? this.options.model;
-      const effort = this.options.effort;
+      const effort = input.effort ?? this.options.effort;
       if (input.continuity) await this.bindContinuity(service, chat, input.continuity.nativeSessionId);
       // forget this chat's native session: the turn starts a new one with nothing to re-read (#280)
       else if (input.freshSession) await this.bindContinuity(service, chat, null);
+      const previous = this.chatSelections.get(chat);
+      // Claude fixes effort at query creation. Resume only this chat when it changes.
+      // Codex resumes with its configured defaults when an override is cleared.
+      if (previous && ((this.provider === "claude-code" && previous.effort !== effort) ||
+        (this.provider === "codex" && ((previous.model && !model) || (previous.effort && !effort)))))
+        await service.stopSession(chat, this.id);
       await this.applyMcp(service, chat, input.mcp);
       if (cur.interrupted) throw new NativeDispatchRejected("interrupted before the turn started");
       // Codex has no per-turn system channel and a warm Claude session's system
@@ -374,8 +382,8 @@ export class ProviderAgent extends AdapterBase {
       cur.watching = true;
       try {
         result = await service.sendTurn({ threadId: chat, instanceId: this.id, input: text, cwd: this.projectDir, runtimeMode,
-          ...(model ? { model } : {}), ...(effort ? { effort } : {}),
-          ...(model || effort ? { modelSelection: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } } : {}),
+          model, ...(effort ? { effort } : {}),
+          modelSelection: { model, ...(effort ? { effort } : {}) },
           ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           onMissingSession: input.continuity ? "fail" : "fresh",
           ...(input.continuity ? { clientTurnId: input.continuity.runId } : {}) });
@@ -390,6 +398,7 @@ export class ProviderAgent extends AdapterBase {
         throw failure;
       }
       submitted = true;
+      this.chatSelections.set(chat, { model, effort });
       this.sessionMcp.set(chat, JSON.stringify(input.mcp?.servers ?? []));
       cur.turnId = result.turnId;
       if (cur.interrupted) await service.interruptTurn(chat, this.id, result.turnId).catch(() => {});

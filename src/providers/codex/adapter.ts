@@ -23,7 +23,7 @@ import { execFileSync, findExecutable } from "../../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { guardNativeOutput } from "../../adapters/base.js";
+import { agentEnv, guardNativeOutput } from "../../adapters/base.js";
 import { VERSION } from "../../version.js";
 import { EventHub, type ProviderAdapter } from "../adapter.js";
 import type {
@@ -40,6 +40,7 @@ import { CodexRpc, type Json, type RpcError } from "./rpc.js";
 export interface CodexAdapterOptions {
   /** Side conversations cannot approve tools or escape the read-only sandbox. */
   readOnly?: boolean;
+  env?: Record<string, string>;
   /** Absolute path to the codex binary, when it's somewhere unusual. */
   bin?: string;
   /** Extra `codex app-server` args (e.g. `-c key=value`), escape hatch. */
@@ -264,7 +265,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
       throw new ProviderError("validation", "startSession", "extraArgs must be a list of strings", { provider: this.provider, instanceId: this.instanceId, threadId: input.threadId });
 
     this.emit(input.threadId, "session.state.changed", { state: "starting" });
-    proc = spawnHarness(bin, ["app-server", ...extraArgs], { cwd: input.cwd });
+    proc = spawnHarness(bin, ["app-server", ...extraArgs], { cwd: input.cwd, env: { ...agentEnv(), ...this.options.env } });
     try { await launched(proc.child); }
     catch (error) { throw fail("transport", `${bin}: ${(error as Error).message}`, error); }
 

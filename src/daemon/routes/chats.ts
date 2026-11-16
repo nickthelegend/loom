@@ -201,19 +201,24 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  /** Body: { title?: string, agentId?: string, model?: string, effort?: string }.
+   * Model/effort require agentId; omitted choices inherit its defaults. Returns { chat: ChatInfo }.
+   */
   app.post(
     "/api/projects/:id/chats",
     withRuntime(async (rt, req, res) => {
-      const { title, agentId, model } = (req.body ?? {}) as {
+      const { title, agentId, model, effort } = (req.body ?? {}) as {
         title?: string;
         agentId?: string;
         model?: string;
+        effort?: string;
       };
       try {
         res.json({
           chat: rt.createChat(String(title ?? ""), {
             ...(agentId ? { agentId: String(agentId) } : {}),
-            ...(model ? { model: String(model) } : {}),
+            ...(model !== undefined ? { model } : {}),
+            ...(effort !== undefined ? { effort } : {}),
           }),
         });
       } catch (err) {
@@ -263,17 +268,21 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
 
   /**
    * Who answers in a thread. Null unbinds it, and the thread goes back to
-   * following the baton like the main one.
+   * following the baton like the main one. Body: { agentId: string | null,
+   * model?: string, effort?: string }. This replaces the whole selection:
+   * omitted/empty model and effort inherit agent defaults. Returns { chat: ChatInfo }.
+   * Changes affect future turns; an in-flight turn keeps its captured selection.
    */
   app.post(
     "/api/projects/:id/chats/:chatId/agent",
     withRuntime(async (rt, req, res) => {
-      const { agentId, model } = (req.body ?? {}) as { agentId?: string | null; model?: string };
+      const { agentId, model, effort } = (req.body ?? {}) as { agentId?: string | null; model?: string; effort?: string };
       try {
         const chat = rt.setChatAgent(
           String(req.params.chatId),
           agentId ? String(agentId) : null,
-          model ? String(model) : undefined,
+          model,
+          effort,
         );
         if (!chat) return void res.status(404).json({ error: "no such thread" });
         res.json({ chat });

@@ -34,7 +34,7 @@ export function sideDriver(source: SideSource): SideDriver {
   if (config.kind !== "echo" && config.kind !== "model") {
     throw new SideChatError(`side chats are unavailable for ${config.kind}: this adapter cannot enforce read-only execution`, 409);
   }
-  const agent = config.kind === "echo" ? new EchoAdapter(config.id, "echo", cwd, true)
+  const agent = config.kind === "echo" ? new EchoAdapter(config.id, "echo", cwd, {}, true)
     : new ModelAdapter(config.id, cwd, { ...options, ...(model ? { model } : {}), readOnly: true, tools: true, write: false, run: [], permissions: "ask" });
   let first = true;
   return {

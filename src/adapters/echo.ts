@@ -27,8 +27,8 @@ export class EchoAdapter extends AdapterBase {
     return true;
   }
 
-  constructor(id: string, kind: string, projectDir: string, private readonly readOnly = false) {
-    super(id, kind, projectDir);
+  constructor(id: string, kind: string, dir: string, private readonly options: Record<string, unknown> = {}, private readonly readOnly = false) {
+    super(id, kind, dir);
   }
 
   async available(): Promise<boolean> {
@@ -145,7 +145,7 @@ export class EchoAdapter extends AdapterBase {
       this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: 0.001 } });
       this.emit({
         kind: "run_complete",
-        payload: { durationMs: Date.now() - started, model: "echo-1", costUsd: 0.001, inputTokens, outputTokens },
+        payload: { durationMs: Date.now() - started, model: this.options.model ?? "echo-1", ...(this.options.effort ? { effort: this.options.effort } : {}), costUsd: 0.001, inputTokens, outputTokens },
       });
     } finally {
       this._busy = false;

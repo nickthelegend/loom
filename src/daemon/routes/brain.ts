@@ -92,7 +92,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
       const latest = brain.store.receipts(request.id).at(-1);
       if (latest && !["prepared", "failed"].includes(latest.status)) throw new ContinuityError("recovery_required", "submitted requests cannot be replayed through overflow recovery");
       res.json(await rt.sendMessage(request.text, request.agentInstanceId, { requestId: request.id, resume: true,
-        chat: request.conversationId, source: request.source, plan: request.plan, capturedModel: request.model,
+        chat: request.conversationId, source: request.source, plan: request.plan, capturedModel: request.model, capturedEffort: request.effort ?? null,
         contextTarget: input.targetAddedTokens }));
     } catch (error) { failure(res, error); }
   }));

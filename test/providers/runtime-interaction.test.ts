@@ -21,14 +21,52 @@ const until = async (check: () => boolean, ms = 8000) => {
 };
 const started = codexNotify("turn/started", { turn: { id: "$TURN", items: [], status: "inProgress", error: null } });
 
-async function runtimeWith(bin: string) {
-  const dir = makeProjectDir({ agents: [{ id: "codex", kind: "codex", options: { bin } }] });
+async function runtimeWith(bin: string, continuity = false) {
+  const dir = makeProjectDir({ agents: [{ id: "codex", kind: "codex", options: { bin } }], brain: { extractor: "off", continuity } });
   const rt = await ProjectRuntime.open({ id: `p-${Math.random().toString(36).slice(2)}`, name: "ix", dir });
   open.push(rt);
   return { rt, dir };
 }
 
 describe("runtime · provider interaction", () => {
+  it("sends each chat's model and effort to Codex, including changes on a warm thread", async () => {
+    const bin = fakeCodex();
+    const { rt } = await runtimeWith(bin);
+    const a = rt.createChat("fast", { agentId: "codex", model: "fast-model", effort: "low" });
+    const b = rt.createChat("deep", { agentId: "codex", model: "deep-model", effort: "high" });
+    const send = async (chat: string, count: number) => {
+      await rt.sendMessage("hello", undefined, { chat });
+      await until(() => !rt.anyBusy() && rt.log.list({ kinds: ["run_complete"] }).length === count);
+    };
+    await send(a.id, 1);
+    await send(b.id, 2);
+    rt.setChatAgent(a.id, "codex", "new-model", "medium");
+    await send(a.id, 3);
+    expect(rpcOf(bin, "turn/start").map(t => ({ model: t.model, effort: t.effort }))).toEqual([
+      { model: "fast-model", effort: "low" }, { model: "deep-model", effort: "high" }, { model: "new-model", effort: "medium" },
+    ]);
+    expect(rpcOf(bin, "thread/start")).toHaveLength(2);
+    rt.setChatAgent(a.id, "codex");
+    await send(a.id, 4);
+    expect(rpcOf(bin, "thread/resume")).toHaveLength(1);
+    expect(rpcOf(bin, "thread/resume")[0]).not.toHaveProperty("model");
+    expect(rpcOf(bin, "turn/start").at(-1)).not.toHaveProperty("effort");
+  });
+
+  it("keeps a queued native request's captured model and effort after the chat changes", async () => {
+    const bin = fakeCodex();
+    const { rt } = await runtimeWith(bin, true);
+    const chat = rt.createChat("queued", { agentId: "codex", model: "captured", effort: "high" });
+    rt.queue.setPaused(true);
+    const queued = rt.enqueue({ text: "remember this selection", chat: chat.id });
+    expect(queued.continuity).toMatchObject({ model: "captured", effort: "high" });
+    rt.setChatAgent(chat.id, "codex", "later", "low");
+    rt.queue.setPaused(false);
+    await rt.drainPromptQueue();
+    await until(() => rt.log.list({ kinds: ["run_complete"] }).length === 1 && !rt.anyBusy());
+    expect(rpcOf(bin, "turn/start")[0]).toMatchObject({ model: "captured", effort: "high" });
+  });
+
   it("plans natively and keeps the proposed plan under .loom/plans/, not in the repo", async () => {
     const bin = fakeCodex({ script: [started, codexItem({ type: "plan", text: "# Add a cache layer\n\n- step one" }), codexTokens(10, 0, 1), codexDone()] });
     const { rt, dir } = await runtimeWith(bin);

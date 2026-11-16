@@ -58,6 +58,22 @@ describe("loom agents --json", () => {
   });
 });
 
+
+describe("chat selection commands", () => {
+  it("creates, changes and clears a chat's model and effort", async () => {
+    const chat = JSON.parse(await runCli(["chat:create", "review", "--agent", "machine", "--model", "echo-fast", "--effort", "low", "--json"]));
+    expect(chat).toMatchObject({ title: "review", agentId: "machine", model: "echo-fast", effort: "low" });
+    const changed = JSON.parse(await runCli(["chat:agent", chat.id, "machine", "--model", "echo-deep", "--effort", "high", "--json"]));
+    expect(changed).toMatchObject({ model: "echo-deep", effort: "high" });
+    const defaults = JSON.parse(await runCli(["chat:agent", "review", "machine", "--json"]));
+    expect(defaults.agentId).toBe("machine");
+    expect(defaults).not.toHaveProperty("model");
+    expect(defaults).not.toHaveProperty("effort");
+    const cleared = JSON.parse(await runCli(["chat:agent", chat.id, "--clear", "--json"]));
+    expect(cleared).not.toHaveProperty("agentId");
+  });
+});
+
 describe("loom agents:add", () => {
   it("prints every named session and pins its model, including for non-model kinds", async () => {
     const output = await runCli(["agents:add", "echo", "--as", "opus", "--model", "claude-opus-5-5", "--count", "3", "--role", "worker"]);

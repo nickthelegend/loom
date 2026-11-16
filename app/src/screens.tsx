@@ -1809,7 +1809,7 @@ export function ProjectScreen(props: {
                 holder={project.holder}
                 onSelect={setSelected}
               />
-              <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
+              <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} chat={chats.find((c) => c.id === chatId) ?? null} onChanged={() => { refreshProject(); reloadChats(); }} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>

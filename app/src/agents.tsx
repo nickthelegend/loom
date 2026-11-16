@@ -10,7 +10,7 @@ import { SvgXml } from "react-native-svg";
 import { BRAND_MARK_ALIAS, BRAND_MARKS } from "./brand-marks";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { getAgentModels, setAgentModel, type AgentStatus, type Creds } from "./api";
+import { getAgentModels, setAgentModel, setChatAgent, type AgentStatus, type Chat, type Creds } from "./api";
 import { TAP } from "./components";
 import { Sheet } from "./observatory";
 import { T, hue, radii } from "./theme";
@@ -248,8 +248,12 @@ export function AgentPicker(props: {
 /**
  * The model chip beside the agent: what it runs on, and a searchable list to
  * change it — the desktop composer's model picker. "Default" unpins it.
+ *
+ * In a thread (#370) it sets that chat's model, not the agent's: picking pins the thread to this
+ * agent on that model, so two threads on one agent can run different models. Main follows the
+ * baton and can't be pinned, so there it still sets the agent's own model, for every chat.
  */
-export function ModelPicker(props: { creds: Creds; projectId: string; agent: AgentStatus | null; onChanged: () => void }) {
+export function ModelPicker(props: { creds: Creds; projectId: string; agent: AgentStatus | null; chat?: Chat | null; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<string[] | null>(null);
   const [q, setQ] = useState("");
@@ -265,10 +269,15 @@ export function ModelPicker(props: { creds: Creds; projectId: string; agent: Age
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   }, [open, a?.id]);
   if (!a || a.tier !== "adapter") return null;
+  const thread = props.chat && props.chat.id !== "main" ? props.chat : null;
+  // what this chat actually runs on: its own pin when it's bound to this agent, else the agent's
+  const mine = thread && thread.agentId === a.id ? thread : null;
+  const current = mine ? mine.model ?? a.model : a.model;
   const pick = async (model: string) => {
     setBusy(model || "default");
     try {
-      await setAgentModel(props.creds, props.projectId, a.id, model);
+      if (thread) await setChatAgent(props.creds, props.projectId, thread.id, a.id, { ...(model ? { model } : {}), ...(mine?.effort ? { effort: mine.effort } : {}) });
+      else await setAgentModel(props.creds, props.projectId, a.id, model);
       setOpen(false);
       props.onChanged();
     } catch (e) {
@@ -288,17 +297,18 @@ export function ModelPicker(props: { creds: Creds; projectId: string; agent: Age
   );
   return (
     <>
-      <TouchableOpacity onPress={() => setOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Model: ${a.model ?? "default"}. Change model`}
+      <TouchableOpacity onPress={() => setOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Model${thread ? " for this chat" : ""}: ${current ?? "default"}. Change model`}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 34, paddingHorizontal: 11, borderRadius: radii.pill, borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised, maxWidth: 170 }}>
-        <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{a.model ? a.model.split("/").pop() : "Default"}</Text>
+        <Text style={{ color: mine?.model ? T.text : T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{current ? current.split("/").pop() : "Default"}</Text>
         <Text style={{ color: T.faint, fontSize: 10 }}>▼</Text>
       </TouchableOpacity>
-      <Sheet title={`${agentLabel(a.kind)} · model`} visible={open} onClose={() => setOpen(false)}>
+      <Sheet title={`${agentLabel(a.kind)} · model${thread ? " · this chat" : ""}`} visible={open} onClose={() => setOpen(false)}>
         {models && !models.length ? null : <TextInput value={q} onChangeText={setQ} placeholder={`Filter ${models ? models.length : ""} models…`} placeholderTextColor={T.faint} autoCapitalize="none" autoCorrect={false}
           style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14, marginBottom: 6 }} />}
         {err ? <Text style={{ color: T.err, fontSize: 12.5, marginBottom: 6 }}>{err}</Text> : null}
-        {!needle ? row("Default — the agent's own choice", "", !a.model) : null}
-        {models == null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 12 }} /> : shown.map((m) => row(m, m, a.model === m))}
+        {thread ? <Text style={{ color: T.faint, fontSize: 12, marginBottom: 6, lineHeight: 17 }}>For this chat only{mine ? "" : ` — it will answer with ${a.id}`}. Other chats keep their own.</Text> : null}
+        {!needle ? row(thread ? `Default — ${a.model ? a.model.split("/").pop() : "the agent's own choice"}` : "Default — the agent's own choice", "", thread ? !mine?.model : !a.model) : null}
+        {models == null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 12 }} /> : shown.map((m) => row(m, m, (thread ? mine?.model : a.model) === m))}
         {models && shown.length === 80 ? <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 6 }}>Showing 80 — type to narrow.</Text> : null}
         {models && !models.length ? <Text style={{ color: T.faint, fontSize: 12, marginTop: 8, lineHeight: 17 }}>{agentLabel(a.kind)} doesn&apos;t list its models, so it runs on its own default.</Text> : null}
       </Sheet>

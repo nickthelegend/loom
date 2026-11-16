@@ -301,6 +301,21 @@ function TaskCard(props: {
       {task.hold ? (
         <HoldBanner hold={task.hold} now={props.now} busy={props.busy} onStopWaiting={props.onStopWaiting} />
       ) : null}
+      {/* the worker's own word on how it's going (#374): checkpoint, needs input, stuck, done */}
+      {task.lastReport ? (() => {
+        const r = task.lastReport;
+        const look = r.kind === "stuck" ? { label: "stuck", tint: T.err } : r.kind === "needs_input" ? { label: "needs input", tint: T.warn }
+          : r.kind === "done" ? { label: "says done", tint: T.ok } : { label: "checkpoint", tint: T.thread };
+        return (
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingVertical: 6, paddingHorizontal: 9, borderRadius: radii.key - 2,
+            backgroundColor: T.raised, borderLeftWidth: 2, borderLeftColor: look.tint }}
+            accessibilityLabel={`${task.agent} reports ${look.label}${r.text ? `: ${r.text}` : ""}, ${ago(new Date(r.at).toISOString())}`}>
+            <Text style={{ color: look.tint, fontSize: 11.5, fontWeight: "700" }}>{look.label}</Text>
+            <Text style={{ color: T.dim, fontSize: 12, flex: 1, lineHeight: 17 }} numberOfLines={open ? undefined : 2}>{r.text}</Text>
+            <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }}>{ago(new Date(r.at).toISOString())}</Text>
+          </View>
+        );
+      })() : null}
       {/* the agent's report is markdown: plain in the three-line preview, rendered when held open */}
       {detail && open && !task.error ? (
         <Markdown text={detail} />

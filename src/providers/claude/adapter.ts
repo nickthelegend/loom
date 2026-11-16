@@ -52,6 +52,7 @@ import { spawnHarness, stopHarness, type HarnessProcess } from "../process.js";
 export interface ClaudeAdapterOptions {
   /** Side conversations expose only read tools, without settings, hooks or MCP servers. */
   readOnly?: boolean;
+  env?: Record<string, string>;
   /** Path to the claude binary, when it isn't `claude` on PATH. */
   bin?: string;
   /** Claude permission mode, overriding the runtime mode; e.g. "acceptEdits". */
@@ -281,7 +282,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       } : {}),
       spawnClaudeCodeProcess: spawnOptions => {
         const proc = spawnHarness(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd ?? input.cwd,
-          env: spawnOptions.env as NodeJS.ProcessEnv });
+          env: { ...spawnOptions.env as NodeJS.ProcessEnv, ...this.options.env } });
         session.proc = proc;
         guardNativeOutput(proc.child, error => {
           session.failure = error.message;
@@ -456,7 +457,8 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     if (s.turn) throw new ProviderError("validation", "sendTurn", "a claude turn is already running in this chat",
       { provider: this.provider, instanceId: this.instanceId, threadId: input.threadId, mayHaveStarted: false });
     const model = input.modelSelection?.model;
-    if (model && model !== s.info.model) {
+    // An explicit default clears a previous override; a default turn on a default session sends nothing.
+    if (input.modelSelection && Object.hasOwn(input.modelSelection, "model") && model !== s.info.model) {
       try { await s.query.setModel(model); }
       catch (error) { throw refuse(`claude could not switch to model ${model}: ${(error as Error).message}`, error); }
       s.info = { ...s.info, model };
