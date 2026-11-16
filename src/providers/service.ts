@@ -25,6 +25,7 @@ import type { SessionDirectory } from "./directory.js";
 import { ProviderError, isProviderError } from "./errors.js";
 
 export interface EnsureSessionInput {
+  forkFrom?: { resumeCursor: string; lastTurnId?: string; resumeSessionAt?: string };
   threadId: ThreadId;
   instanceId: InstanceId;
   /** Used when starting fresh or when the binding has none recorded. */
@@ -122,20 +123,22 @@ export class ProviderService {
 
   private async start(adapter: ProviderAdapter, input: EnsureSessionInput): Promise<EnsuredSession> {
     const binding = this.directory.get(input.threadId, input.instanceId);
-    const cursor = binding?.resumeCursor ?? undefined;
+    const fork = !binding?.resumeCursor ? input.forkFrom : undefined;
+    const cursor = binding?.resumeCursor ?? fork?.resumeCursor ?? undefined;
     const cwd = binding?.runtimePayload?.cwd ?? input.cwd;
     const model = Object.hasOwn(input, "model") ? input.model : binding?.runtimePayload?.model;
     const launch = async (resumeCursor: unknown) => {
       this.directory.upsert({ threadId: input.threadId, instanceId: input.instanceId, provider: adapter.provider,
-        status: "starting", resumeCursor: resumeCursor ?? null, runtimePayload: { cwd, ...(model ? { model } : {}) },
+        status: "starting", resumeCursor: fork ? null : resumeCursor ?? null, runtimePayload: { cwd, ...(model ? { model } : {}) },
         runtimeMode: input.runtimeMode });
       try {
         return await adapter.startSession({ threadId: input.threadId, instanceId: input.instanceId, cwd,
           runtimeMode: input.runtimeMode, ...(model || input.effort ? { modelSelection: { ...(model ? { model } : {}), ...(input.effort ? { effort: input.effort } : {}) } } : {}),
-          ...(resumeCursor !== undefined ? { resumeCursor } : {}) });
+          ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+          ...(fork && resumeCursor !== undefined ? { forkSession: true, lastTurnId: fork.lastTurnId, resumeSessionAt: fork.resumeSessionAt } : {}) });
       } catch (error) {
         this.directory.upsert({ threadId: input.threadId, instanceId: input.instanceId, provider: adapter.provider,
-          status: "error", resumeCursor: resumeCursor ?? null, runtimePayload: { cwd, ...(model ? { model } : {}) }, runtimeMode: input.runtimeMode });
+          status: "error", resumeCursor: fork ? null : resumeCursor ?? null, runtimePayload: { cwd, ...(model ? { model } : {}) }, runtimeMode: input.runtimeMode });
         // Starting a session never submits a turn, whatever went wrong.
         if (isProviderError(error)) throw error;
         throw new ProviderError("transport", "ensureSession", error instanceof Error ? error.message : String(error),

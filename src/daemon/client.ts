@@ -186,6 +186,22 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats`, { title, ...opts });
   }
 
+  branches(id: string, chat: string): Promise<import("../core/chat-branches.js").BranchListing> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/branches`);
+  }
+
+  createBranch(id: string, chat: string, fromEventId: number, mode: "edit" | "retry", text?: string): Promise<{ branch: import("../types.js").ChatBranch }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/branches`, { fromEventId, mode, ...(text !== undefined ? { text } : {}) });
+  }
+
+  branchRewindPreview(id: string, chat: string, branch: string): Promise<import("../core/checkpoint.js").RewindPreview> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/branches/${encodeURIComponent(branch)}/rewind`);
+  }
+
+  activateBranch(id: string, chat: string, branch: string, rewindFiles = false): Promise<{ active: string; rewind?: RestoreResult }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/branches/${encodeURIComponent(branch)}/activate`, { rewindFiles });
+  }
+
   /** Replaces the chat selection; null unbinds, omitted model/effort use agent defaults. */
   setChatAgent(id: string, chat: string, agentId: string | null, opts: { model?: string; effort?: string } = {}): Promise<{ chat: ChatInfo }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/agent`, { agentId, ...opts });

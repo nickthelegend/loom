@@ -1023,6 +1023,40 @@ describe("web app · PR feedback per chat (#378)", () => {
   });
 });
 
+describe("web app · versions of a message (#375)", () => {
+  it("editing a prompt makes a new version, and ‹ › switches back to the original reply", async () => {
+    const stamp = Date.now();
+    const call = (method: string, p: string, body?: unknown) => fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+      method, headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    }).then((r) => r.json());
+    const chat = ((await call("POST", "/chats", { title: `versions ${stamp}`, agentId: "plannerbot" })) as { chat: { id: string } }).chat.id;
+    try {
+      await call("POST", "/messages", { text: `first ${stamp}`, chat, agentId: "plannerbot" });
+      const m = mount({ hash: `#p/${projectId}` });
+      m.window.localStorage.setItem(`loomChat:${projectId}`, chat);
+      await waitUntil(() => !!$(m, `.crow[data-chat="${chat}"]`));
+      click($(m, `.crow[data-chat="${chat}"]`));
+      const bubbles = () => [...m.window.document.querySelectorAll("#feed .msg .bubble")].map((b) => b.textContent ?? "");
+      await waitUntil(() => bubbles().some((t) => t.includes(`echo(plannerbot): first ${stamp}`)), { timeoutMs: 15_000 });
+      // edit the prompt: it goes out as a sibling, and the thread shows the new version
+      m.window.prompt = () => `second ${stamp}`;
+      const mine = [...m.window.document.querySelectorAll("#feed .msg.user")].find((u) => (u.textContent ?? "").includes(`first ${stamp}`))!;
+      click(mine.querySelector(".uedit"));
+      await waitUntil(() => bubbles().some((t) => t.includes(`echo(plannerbot): second ${stamp}`)), { timeoutMs: 15_000 });
+      expect(bubbles().some((t) => t.includes(`first ${stamp}`))).toBe(false);
+      await waitUntil(() => text(m, "#feed .brpager .brn") === "2/2", { timeoutMs: 10_000 });
+      // back to the original — conversation only; nothing to rewind here
+      click($(m, '#feed .brpager [aria-label="previous version"]'));
+      await waitUntil(() => bubbles().some((t) => t.includes(`echo(plannerbot): first ${stamp}`)), { timeoutMs: 15_000 });
+      await waitUntil(() => text(m, "#feed .brpager .brn") === "1/2");
+      expect(bubbles().some((t) => t.includes(`second ${stamp}`))).toBe(false);
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await fetch(`${baseUrl}/api/projects/${projectId}/chats/${chat}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
+    }
+  }, 60_000);
+});
+
 describe("web app · the sidebar collapses", () => {
   it("gives each project a caret that hides and shows its chats, and remembers", async () => {
     const m = mount({ hash: `#p/${projectId}` });

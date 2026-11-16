@@ -836,6 +836,61 @@ program
     console.log(opts.json ? JSON.stringify(chat) : `${pc.green("✓")} ${chat.title}: ${chat.agentId ?? "follows the baton"}${chat.model ? ` · ${chat.model}` : ""}${chat.effort ? ` · ${chat.effort}` : ""}`);
   });
 
+async function branchChat(client: DaemonClient, project: ProjectStatus, name: string): Promise<string> {
+  const { chats } = await client.chats(project.id);
+  const chat = chats.find(c => c.id === name) ?? chats.find(c => c.title.toLowerCase() === name.toLowerCase());
+  if (!chat) fail(`no chat "${name}" in ${project.name}`);
+  return chat!.id;
+}
+
+program
+  .command("chat:branches")
+  .description("list in-place conversation branches")
+  .option("--chat <chat>", "chat id or title", "main")
+  .option("--json", "print branches and per-message sibling choices")
+  .action(async (opts: { chat: string; json?: boolean }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    const out = await client.branches(project.id, await branchChat(client, project, opts.chat));
+    if (opts.json) return void console.log(JSON.stringify(out));
+    for (const branch of out.branches) console.log(`${branch.id === out.active ? "*" : " "} ${branch.id}  ${branch.parent === null ? "original" : `from ${branch.parent} through event ${branch.forkEventId}`}${branch.label ? ` · ${branch.label}` : ""}`);
+  });
+
+for (const mode of ["edit", "retry"] as const) {
+  program
+    .command(mode === "edit" ? "chat:edit <eventId> <text...>" : "chat:retry <eventId>")
+    .description(mode === "edit" ? "edit a user message and send on a new branch" : "retry an agent reply on a new branch")
+    .option("--chat <chat>", "chat id or title", "main")
+    .action(async (eventId: string, wordsOrOpts: string[] | { chat: string }, editOpts?: { chat: string }) => {
+      const opts = (mode === "edit" ? editOpts : wordsOrOpts) as { chat: string };
+      const client = await ensureDaemon(), project = await currentProject(client);
+      const out = await client.createBranch(project.id, await branchChat(client, project, opts.chat), Number(eventId), mode,
+        Array.isArray(wordsOrOpts) ? wordsOrOpts.join(" ") : undefined);
+      console.log(JSON.stringify(out));
+    });
+}
+
+program
+  .command("chat:branch <branchId>")
+  .description("switch conversation history; files change only with --rewind-files")
+  .option("--chat <chat>", "chat id or title", "main")
+  .option("--preview", "show the fork checkpoint diff without switching")
+  .option("--rewind-files", "show the diff, then restore the fork checkpoint when switching")
+  .option("-y, --yes", "apply the file rewind without prompting")
+  .action(async (branch: string, opts: { chat: string; preview?: boolean; rewindFiles?: boolean; yes?: boolean }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    const chat = await branchChat(client, project, opts.chat);
+    if (opts.preview || opts.rewindFiles) {
+      const preview = await client.branchRewindPreview(project.id, chat, branch);
+      console.log(preview.diff || "No file changes.");
+      if (opts.preview) return;
+      if (!opts.yes) {
+        if (!process.stdin.isTTY) fail("file rewind requires --yes in a non-interactive shell");
+        if (!await confirm("Restore these files and switch branches?")) return;
+      }
+    }
+    console.log(JSON.stringify(await client.activateBranch(project.id, chat, branch, opts.rewindFiles)));
+  });
+
 program
   .command("chat:instructions [text...]")
   .description("standing guidance for one conversation, sent with every turn in it whichever agent answers (approach: Nuphos). No text: show them")

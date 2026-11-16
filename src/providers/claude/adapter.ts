@@ -269,6 +269,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       includePartialMessages: true,
       ...this.permissions(session, input.runtimeMode),
       ...(resume ? { resume, ...(input.forkSession ? { forkSession: true, sessionId } : {}) } : { sessionId }),
+      ...(input.forkSession && input.resumeSessionAt ? { resumeSessionAt: input.resumeSessionAt } : {}),
       ...(model ? { model } : {}),
       ...(input.modelSelection?.effort ? { effort: input.modelSelection.effort as NonNullable<Options["effort"]> } : {}),
       ...(mcpServers && Object.keys(mcpServers).length ? { mcpServers } : {}),
@@ -640,7 +641,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
           const itemId = message.id ? `${message.id}:${index}` : undefined;
           const extra = { ...at, ...(itemId ? { itemId } : {}) };
           if (block.type === "text" && typeof block.text === "string" && main) {
-            this.emit(threadId, "item.completed", { itemType: "assistant_message", status: "completed", detail: block.text }, extra);
+            this.emit(threadId, "item.completed", { itemType: "assistant_message", status: "completed", detail: block.text, nativeMessageId: msg.uuid }, extra);
           } else if (block.type === "thinking" && typeof block.thinking === "string" && main) {
             this.emit(threadId, "item.completed", { itemType: "reasoning", status: "completed", detail: block.thinking }, extra);
           } else if (block.type === "tool_use" && typeof block.id === "string") {

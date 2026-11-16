@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **In-place chat branches (#375).** Edit a prompt or retry a reply through the daemon API and `loom chat:edit` / `loom chat:retry`; list and switch with `loom chat:branches` / `loom chat:branch`. History, replay and extraction follow active ancestry, native resume cursors stay with their branch, and file rewinds require an explicit request with a checkpoint diff preview. API sibling metadata supports upcoming web/phone arrow controls. Approach credit: Agent Orchestrator (Apache-2.0).
+
 - Start assigned GitHub or Linear issues in separate chats or queued orchestra goals with `loom intake` (#382). Owner/device APIs expose issue and session links; a durable ledger prevents repeat starts, PRs link back to their issues, and optional intake schedules are disabled by default. Linear supports environment or stored provider keys.
 
 - **Several accounts per agent CLI (#379).** Register Claude Code and Codex accounts with `loom accounts add`, sign in with `loom accounts login`, and select them with `loom agents:add --account` or `options.configDir`. The owner/unscoped accounts API stores only labels and paths and asks CLIs for sign-in status. Quota Relay tries another account of the same CLI before switching kinds; Orchestra spreads fleet copies across accounts and persists the selection in `workerDetails`. Web and phone screens are separate. Approach credit: Agent Orchestrator's account switching (Apache-2.0).

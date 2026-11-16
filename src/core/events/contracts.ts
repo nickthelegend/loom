@@ -1,6 +1,10 @@
 import type { EventKind, LoomEvent, NewEvent } from "../../types.js";
 
 export interface ListOpts {
+  /** Internal audit/branch navigation reads. Chat reads otherwise follow active ancestry. */
+  allBranches?: boolean;
+  /** Project-wide context projections use each chat's active lineage; audits/accounting keep every event. */
+  activeLineages?: boolean;
   since?: number; // exclusive event id
   /** Only events older than this id (exclusive) — paging a thread backwards. */
   before?: number;
@@ -23,7 +27,7 @@ export interface ListOpts {
  * business being able to append. */
 export interface EventStore {
   append(
-    e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string },
+    e: Required<Omit<NewEvent, "agentId" | "chat" | "branch">> & { agentId?: string; chat?: string; branch?: string },
   ): LoomEvent;
   list(opts?: ListOpts): LoomEvent[];
   /** How many events match, without reading them (limit is ignored). */

@@ -80,10 +80,13 @@ export interface LoomEvent {
   agentId?: string;
   /** Conversation this belongs to. Absent means the main chat. */
   chat?: string;
+  /** Conversation branch; absent means root "0". */
+  branch?: string;
   payload: Record<string, unknown>;
 }
 
 export type NewEvent = {
+  branch?: string;
   kind: EventKind;
   agentId?: string;
   chat?: string;
@@ -91,8 +94,20 @@ export type NewEvent = {
   ts?: number;
 };
 
+/** The parent is visible through forkEventId (inclusive), followed by this branch's events. */
+export interface ChatBranch {
+  id: string;
+  parent: string | null;
+  forkEventId: number;
+  createdAt: number;
+  label?: string;
+}
+
 /** A named conversation inside a project. */
 export interface ChatInfo {
+  branches?: ChatBranch[];
+  /** Absent means the root branch "0". */
+  activeBranch?: string;
   /** PR feedback automation: absent means "ci". PATCH chats/:chat accepts off, ci, or ci+reviews. */
   prFeedback?: PrFeedbackMode;
   id: string;
@@ -464,6 +479,9 @@ export interface ProjectInfo {
 // ---------------------------------------------------------------------------
 
 export interface SendInput {
+  branch?: string;
+  /** Captured parent cursor and last retained native turn/message, only for a new branch session. */
+  branchFork?: { resumeCursor: string; lastTurnId?: string; resumeSessionAt?: string };
   text: string;
   /**
    * A limit for this one turn, when the default won't do — an orchestrator's estimate for a long
@@ -531,6 +549,9 @@ export interface ResolvedMcpServer {
 }
 
 export interface AdapterEvent {
+  chat?: string;
+  /** Warm provider sessions keep their branch even when inactive. */
+  branch?: string;
   kind: EventKind;
   payload: Record<string, unknown>;
 }
