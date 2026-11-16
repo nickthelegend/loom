@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
+
 ### Fixed
 
 - **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
