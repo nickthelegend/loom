@@ -686,6 +686,34 @@ describe("web app · My issues (#382)", () => {
   });
 });
 
+describe("web app · open in editor (#407)", () => {
+  it("lists the computer's editors in the Explorer menu, last-used first, and opens the file in the one you pick", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    const posted: unknown[] = [];
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
+      if (u.endsWith("/api/editors")) return json({ editors: [{ id: "code", label: "VS Code" }, { id: "zed", label: "Zed" }], lastEditor: "zed" });
+      if (u.endsWith("/open-in")) { posted.push(JSON.parse(String(init?.body))); return json({ editor: "code", path: "/x/README.md" }); }
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    if (!$(m, '.rvbtn[data-view="explorer"].on')) { await waitUntil(() => !!$(m, '.rvbtn[data-view="explorer"]')); click($(m, '.rvbtn[data-view="explorer"]')); }
+    await waitUntil(() => !!$(m, '[data-file="README.md"]'));
+    // the list is fetched when the Explorer draws; give it a moment to land
+    await new Promise((r) => setTimeout(r, 150));
+    $(m, '[data-file="README.md"]')!.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }));
+    await waitUntil(() => !!$(m, ".menupop"));
+    const labels = [...m.window.document.querySelectorAll(".menupop .pickrow, .menupop button")].map((b) => (b.textContent ?? "").trim()).filter((l) => l.startsWith("Open in ") && l !== "Open in terminal");
+    expect(labels.slice(0, 2)).toEqual(["Open in Zed", "Open in VS Code"]);
+    click([...m.window.document.querySelectorAll(".menupop .pickrow, .menupop button")].find((b) => (b.textContent ?? "").includes("Open in VS Code")) as HTMLElement);
+    await waitUntil(() => posted.length === 1);
+    expect(posted[0]).toEqual({ editor: "code", path: "README.md" });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · accounts (#379)", () => {
   it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
     const m = mount();
