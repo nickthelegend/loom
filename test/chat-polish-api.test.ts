@@ -29,7 +29,8 @@ beforeAll(async () => {
   const launcher = `require('node:fs').writeFileSync(${JSON.stringify(path.join(bin, "argv.json"))}, JSON.stringify(process.argv.slice(2)));\n`;
   if (process.platform === "win32") {
     fs.writeFileSync(path.join(bin, "launcher.cjs"), launcher);
-    fs.writeFileSync(path.join(bin, "code.cmd"), `@"${process.execPath}" "%dp0%launcher.cjs" %*\r\n`);
+    // like VS Code's own bin\code.cmd: %~dp0 is this file's folder, so it runs through cmd.exe
+    fs.writeFileSync(path.join(bin, "code.cmd"), `@"${process.execPath}" "%~dp0launcher.cjs" %*\r\n`);
   } else fs.writeFileSync(path.join(bin, "code"), `#!${process.execPath}\n${launcher}`, { mode: 0o755 });
   vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
   daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
