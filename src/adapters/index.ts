@@ -9,6 +9,7 @@ import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../t
 import { AntigravityCliAdapter } from "./antigravity-cli.js";
 import { AntigravityBridge } from "./bridges/antigravity.js";
 import { KiroBridge } from "./bridges/kiro.js";
+import { DemoAdapter } from "./demo.js";
 import { EchoAdapter } from "./echo.js";
 import { GrokAdapter } from "./grok.js";
 import { AcpAdapter } from "./acp.js";
@@ -51,6 +52,7 @@ export function tierForKind(kind: string): "adapter" | "bridge" | null {
   return tiers.get(kind) ?? null;
 }
 
+registerAgentKind("demo", (cfg, dir) => new DemoAdapter(cfg.id, dir, cfg.options));
 registerAgentKind("echo", (cfg, dir) => new EchoAdapter(cfg.id, "echo", dir, cfg.options));
 // Codex and Claude Code run as warm provider sessions (src/providers/).
 registerAgentKind("claude-code", (cfg, dir) => new ProviderAgent(cfg.id, "claude-code", dir, cfg.options));

@@ -998,6 +998,9 @@ export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/a
 /** A brand-new project under the computer's Loom projects folder: git, a README, a first commit. */
 export const createProject = (c: Creds, name: string, agents?: Array<{ kind: string; model?: string; count?: number }>) =>
   api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify(agents?.length ? { name, agents } : { name }) });
+/** The demo project (#402): a small todo app with three scripted demo agents — no keys, no CLIs. Reused if it exists. */
+export const tryDemo = (c: Creds) =>
+  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/try", { method: "POST", body: "{}" });
 /** Clone a repo on the computer, in the background; poll the job until it's done. */
 export const cloneProject = (c: Creds, url: string, name?: string) =>
   api<{ jobId: string; dir: string }>(c, "/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url, name } : { url }) });

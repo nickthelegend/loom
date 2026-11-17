@@ -112,7 +112,9 @@ export class RuntimeAccounting {
       entry.tokensIn += tin;
       entry.tokensOut += tout;
       this.costsByAgent.set(agentId, entry);
-      const priced = this.pricedTurn.get(agentId) || Number(event.payload.costUsd ?? 0) > 0;
+      // Scripted demo usage has a known zero price; never fetch vendor prices for it.
+      const priced = this.pricedTurn.get(agentId) || Number(event.payload.costUsd ?? 0) > 0
+        || (event.payload.simulated === true && event.payload.costUsd === 0);
       this.pricedTurn.delete(agentId);
       if (!priced && (tin || tout) && event.payload.model) {
         const byModel = this.unpriced.get(agentId) ?? new Map();

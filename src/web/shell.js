@@ -17,6 +17,7 @@ import { drawStatusbar,loadGithub,loadLoomPad,loadUpdate } from './statusbar.js'
 import { openTaskModal } from './tasks.js';
 import { THEME_BTN,bindTheme } from './theme.js';
 import { emptyArt } from './transcript.js';
+import { TRY_BTN, bindTryDemo } from './try-demo.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
 import { openShareLive } from './share-live.js';
@@ -90,7 +91,8 @@ import { openTriggers } from './triggers-ui.js';
     // the sidebar foot is where that happens — and Loom with nothing to drive
     // is a window with nothing in it. Once only; the button is always there.
     try {
-      if (!localStorage.getItem(SETUP_SEEN_KEY)) {
+      // ...unless this window was opened to walk through the demo, which ends at Setup anyway.
+      if (!localStorage.getItem(SETUP_SEEN_KEY) && !(state.demoTourWanted && state.demoTourWanted())) {
         localStorage.setItem(SETUP_SEEN_KEY, "1");
         setTimeout(openSetupModal, 400);
       }
@@ -163,7 +165,9 @@ import { openTriggers } from './triggers-ui.js';
     var dmain = document.getElementById("dmain");
     function drawEmpty(){
       dmain.innerHTML = '<div class="dempty"><div class="biglogo">loom</div><div class="hair"></div>' +
-        "<div>select a project to open its workspace</div></div>";
+        (state.projects && state.projects.length ? "<div>select a project to open its workspace</div>"
+          : '<div>no projects yet \u2014 open one with <b class="mono">loom init</b>, or see Loom work first</div>' + TRY_BTN) + "</div>";
+      bindTryDemo(dmain);
     }
     /**
      * Search the open project's conversations.
@@ -235,7 +239,8 @@ import { openTriggers } from './triggers-ui.js';
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
         el._drawn = null;
-        el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
+        el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span><div style="margin-top:10px">' + TRY_BTN + "</div></div>";
+        bindTryDemo(el);
         return;
       }
       var shown = !filter ? state.projects : state.projects.filter(function(p){

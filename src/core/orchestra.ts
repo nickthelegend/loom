@@ -85,7 +85,7 @@ export function parseAgentSpec(value: string, rosterIds: string[] = []): Orchest
   const copies = /[x×](\d+)$/.exec(spec);
   const count = copies ? Number(copies[1]) : 1;
   if (!Number.isSafeInteger(count) || count < 1 || count > 100) throw new Error("worker count must be an integer from 1 to 100");
-  if (copies) spec = spec.slice(0, copies.index);
+  if (copies) spec = spec.slice(0, copies.index).trimEnd();
   const match = /^(team:|acp:)?([^@:#]+)(?:@([^@:#\s]+))?(?::([^@:#\s]+))?$/.exec(spec);
   if (!match) throw new Error(`invalid agent spec "${value}" — use agent[@model][:effort][xN]`);
   const agent = `${match[1] ?? ""}${match[2]!.trim()}`;
@@ -2714,7 +2714,7 @@ export class OrchestraEngine {
       });
       if (e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
-        if (usd > 0) {
+        if (Number.isFinite(usd) && usd >= 0) {
           run.costUsd += usd;
           const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
           if (task) task.costUsd = (task.costUsd ?? 0) + usd;

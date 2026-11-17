@@ -729,6 +729,48 @@ describe("web app · Loom for agents (#405)", () => {
   });
 });
 
+describe("web app · the demo walkthrough (#402)", () => {
+  it("opens a demo project with ?tour=1 and walks it: sends, steers the running turn, shows Agents, turns on Developer mode", async () => {
+    process.env.LOOM_DEMO_DURATION_MS = "1500";
+    const r = await fetch(`${baseUrl}/api/try`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ dir: path.join(tmpDir("try-dom"), "loom-demo") }),
+    });
+    const { project } = (await r.json()) as { project: { id: string; dir: string; agents: Array<{ kind: string }> } };
+    expect(project.agents.every((a) => a.kind === "demo")).toBe(true);
+    const m = mount({ hash: `?tour=1#p/${project.id}` });
+    const feed = () => text(m, "#feed");
+    try {
+      await waitUntil(() => text(m, "#tourcard").includes("Ask for something"), { timeoutMs: 15_000 });
+      expect(m.window.location.search).toBe(""); // a reload won't start it again
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Watch it work"));
+      await waitUntil(() => feed().includes("I'm Loom's demo agent"), { timeoutMs: 20_000 });
+      // the edit is real
+      await waitUntil(() => fs.readFileSync(path.join(project.dir, "styles.css"), "utf8").includes("prefers-color-scheme: dark"));
+      await waitUntil(() => !!$(m, "#tournext") && ($(m, "#steer") as HTMLElement).style.display === "none");
+      click($(m, "#tournext"));
+      await waitUntil(() => text(m, "#tourcard").includes("Steer while it works"));
+      click($(m, "#touract"));
+      await waitUntil(() => feed().includes("Steering received: Also cover an empty list"), { timeoutMs: 20_000 });
+      await waitUntil(() => text(m, "#tourcard").includes("Your agents"));
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Bring your own agents"));
+      expect($(m, '.tab[data-tab="fleet"]')!.classList.contains("active")).toBe(true);
+      click($(m, "#touract"));
+      await waitUntil(() => !$(m, "#tourcard"));
+      expect(m.window.localStorage.getItem("loomDevMode")).toBe("1");
+      await waitUntil(() => !!$(m, '.tab[data-tab="orchestra"]'));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem("loomDevMode");
+      delete process.env.LOOM_DEMO_DURATION_MS;
+      await fetch(`${baseUrl}/api/projects/${project.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } }).catch(() => {});
+    }
+  }, 60_000);
+});
+
 describe("web app · accounts (#379)", () => {
   it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
     const m = mount();
