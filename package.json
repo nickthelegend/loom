@@ -27,6 +27,7 @@
   ],
   "files": [
     "dist",
+    "templates",
     "docs/**/*.md",
     "docs/refactoring/brain-benchmark*.json",
     "CHANGELOG.md",

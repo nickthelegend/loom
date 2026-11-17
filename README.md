@@ -51,6 +51,39 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Try it
+
+With Node 22.5+ and Git installed, no agent CLI, API key, or repository is needed:
+
+```sh
+npx @loompad/cli try
+# Or, after installing Loom:
+loom try --no-open
+```
+
+This starts the daemon, copies a tiny todo app to `<projectsRoot>/loom-demo`,
+creates its first Git commit, seeds a shared decision, and opens the project URL
+with `?tour=1`. Three **Demo — scripted, offline, free** agents use `demo-smart`
+and `demo-fast` models. Ask “add dark mode”, “add a todo filter”, “write tests”,
+or “explain this repo”. File edits and diffs are real; command output and token
+counts are simulated, and cost is always $0.00. Each turn streams for about three
+seconds so you can steer or interrupt it. Connect a real agent for custom work.
+
+Use `--dir <path>` to choose a destination and `--agents 1..8` to size a new demo.
+Running it again reuses the demo's files, history and roster. Existing unrelated
+folders are refused. Run `npm test` inside the demo for actual verification.
+Demo also works in Orchestra, races and comparisons, including fleets such as
+`demo@demo-smart x2, demo@demo-fast x2`. Tests can shorten streaming by setting
+`LOOM_DEMO_DURATION_MS=0` (milliseconds; default 3000, maximum 6000).
+
+For web and phone clients, authenticated `POST /api/try` accepts
+`{ "dir": "/optional/absolute/path", "agents": 3 }` or `{}` and returns
+`{ "project": { "id", "name", "dir", "agents": [{ "id": "demo-1", "kind": "demo", "role": "demo", "options": { "model": "demo-smart" } }] } }`
+(with the full roster). It permits owner/admin and unscoped own devices, and
+refuses guests and project-scoped devices. Open `/app?tour=1#p/<project.id>` and
+use an `agents[].id` as `agentId` on the existing send/steer endpoints. The web
+and phone walkthrough screens are separate from this API.
+
 ## One link — a teammate, their agents, your repo
 
 Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a
@@ -1024,7 +1057,8 @@ detects at least two roles.
 | Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
 | Cursor | — | `cursor-agent --print` | 🔜 coming soon |
 | **Model (API)** | adapter (full-duplex) | `POST /v1/chat/completions`, streamed — any OpenAI-compatible provider | ✅ no CLI to install; tools are read-only unless you allow more (see [below](#agents-that-are-models)) |
-| Echo | adapter (demo/tests) | in-process | ✅ |
+| Demo | adapter (scripted, offline, free) | in-process; real edits, simulated commands and tokens | ✅ `loom try`; `demo-smart` and `demo-fast` |
+| Echo | adapter (tests only) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
 **Context and limits.** For Claude Code and Codex, the composer shows the chosen

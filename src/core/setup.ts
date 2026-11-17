@@ -179,6 +179,7 @@ export async function probeAuth(kind: string, env: NodeJS.ProcessEnv = {}): Prom
       if (!fs.existsSync(file)) return { authed: false, detail: "no grok session on this machine" };
       return grokAuth(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, GrokEntry>);
     }
+    if (kind === "demo") return { authed: true, detail: "scripted, offline, free" };
     if (kind === "model") {
       // There is nothing to log in to: a model agent is usable when some
       // provider on this machine has a key. Saying "couldn't confirm it's
@@ -396,7 +397,9 @@ export async function setupReport(): Promise<SetupReport> {
     // roster is not ready, and saying it is was the exact shape of today's
     // wasted afternoon. Unknown counts as ready — don't cry wolf over a probe
     // that timed out.
-    ready: agents.some((a) => a.found && a.authed !== false),
+    // The demo agent is always there and always "signed in"; it lets you try Loom, it doesn't make
+    // this machine ready to do real work.
+    ready: agents.some((a) => a.kind !== "demo" && a.found && a.authed !== false),
   };
 }
 

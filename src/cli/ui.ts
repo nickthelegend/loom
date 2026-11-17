@@ -2,6 +2,7 @@
  * CLI rendering — one place that turns log events into terminal lines.
  */
 
+import { DEMO_LABEL } from "../adapters/demo.js";
 import { PERMISSION_PROFILES } from "../core/permissions.js";
 import pc from "picocolors";
 import type { LoomEvent, ProjectStatus } from "../types.js";
@@ -160,7 +161,7 @@ export function formatAgentRow(a: ProjectStatus["agents"][number]): string {
   const baton = a.holdsBaton ? pc.magenta(" ⟵ baton") : "";
   const busy = a.busy ? pc.yellow(" (busy)") : "";
   const tier = a.tier === "bridge" ? pc.dim(" [bridge]") : a.readOnly ? pc.dim(" [read-only]") : "";
-  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)} — ${a.role}${tier}${busy}${baton}${signInNote(a)}`;
+  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind === "demo" ? DEMO_LABEL : a.kind)} — ${a.role}${tier}${busy}${baton}${signInNote(a)}`;
 }
 
 /** A complete agent roster entry for `loom agents`. */
@@ -170,7 +171,7 @@ export function formatAgentRosterRow(a: ProjectStatus["agents"][number]): string
   // a read-only model agent can answer, not change files — say that, not "can hold" (#257)
   const baton = a.tier !== "adapter" ? pc.dim("cannot hold") : a.signedOut ? pc.red("signed out — can't hold until you sign in")
     : a.readOnly ? pc.yellow("read-only (answers, can't edit)") : pc.green("can hold");
-  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}${accessNote(a)}`;
+  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind === "demo" ? DEMO_LABEL : a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}${accessNote(a)}`;
 }
 
 /** The permission mode in effect and what it lets the agent do here (loom agents:mode to change it). */

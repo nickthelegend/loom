@@ -3,6 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { TryProjectInput, TryProjectResult } from "../core/demo-project.js";
 import type { IntakeIssue, IntakeMode, IntakeSource } from "../core/intake.js";
 import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
@@ -239,6 +240,10 @@ export class DaemonClient {
 
   addProject(dir: string, name?: string): Promise<{ project: { id: string } }> {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
+  }
+
+  tryProject(input: TryProjectInput = {}): Promise<TryProjectResult> {
+    return this.request("POST", "/api/try", { ...input });
   }
 
   newProject(input: NewProjectInput): Promise<CreatedProject> {
@@ -1265,8 +1270,9 @@ async function startDaemon(): Promise<DaemonClient> {
   // Built install → node dist/cli/index.js; dev checkout → tsx src/cli/index.ts.
   const [entry, extraArgs] = existsSync(compiled)
     ? [compiled, [] as string[]]
-    : [devSource, ["--import", "tsx"]];
-  const child = spawn(process.execPath, [...extraArgs, entry, "daemon"], {
+    : [devSource, ["--import", import.meta.resolve("tsx")]];
+  const saved = readDaemonConfig();
+  const child = spawn(process.execPath, [...extraArgs, entry, "daemon", "--host", saved?.host ?? "127.0.0.1", "--port", String(saved?.port ?? DEFAULT_PORT)], {
     detached: true,
     stdio: "ignore",
     env: process.env,

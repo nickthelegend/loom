@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Try Loom without an agent account (#402).** `loom try` and `POST /api/try` create a bundled todo project with free, offline Demo agents, real edits, simulated streaming and usage, steering, interruption, and Orchestra/race/compare support. Demo models are offered by the shared agent catalog. Web and phone tour screens are separate work.
+
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 
 ### Fixed

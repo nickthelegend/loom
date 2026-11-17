@@ -328,6 +328,28 @@ async function printMachineAgents(json: boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 
 program
+  .command("try")
+  .description("try Loom with a scripted, offline, free demo project")
+  .option("--dir <path>", "demo directory (default: <projectsRoot>/loom-demo)")
+  .option("--no-open", "print the URL without opening a browser")
+  .option("--agents <n>", "number of demo agents in a new project (1–8)", "3")
+  .action(async (opts: { dir?: string; open: boolean; agents: string }) => {
+    const agents = Number(opts.agents);
+    if (!Number.isInteger(agents) || agents < 1 || agents > 8) fail("agents must be an integer from 1 to 8");
+    const client = await ensureDaemon();
+    const { project } = await client.tryProject({ ...(opts.dir ? { dir: path.resolve(opts.dir) } : {}), agents });
+    const url = `${client.baseUrl}/app?tour=1#p/${encodeURIComponent(project.id)}`;
+    console.log(`Demo — scripted, offline, free\n${url}`);
+    console.log(`Project: ${project.dir}\nAgents: ${project.agents.map(a => `${a.id}@${a.options?.model ?? "demo-smart"}`).join(", ")}`);
+    const quotedDir = process.platform === "win32" ? `"${project.dir}"` : "'" + project.dir.replaceAll("'", "'\\''") + "'";
+    console.log(`\nNext:\n  cd ${quotedDir}\n  loom send "add dark mode" --agent ${project.agents[0]!.id} --wait\n  loom send "add a todo filter" --wait\n  loom log`);
+    if (opts.open) {
+      const { openInBrowser } = await import("../hub/supabase-client.js");
+      openInBrowser(url);
+    }
+  });
+
+program
   .command("new <name>")
   .description("create and register a project under the daemon's projectsRoot")
   .option("--agent <spec...>", "agents: kind[@model][xN] (repeatable)")
