@@ -1001,6 +1001,9 @@ export const createProject = (c: Creds, name: string, agents?: Array<{ kind: str
 /** The demo project (#402): a small todo app with three scripted demo agents — no keys, no CLIs. Reused if it exists. */
 export const tryDemo = (c: Creds) =>
   api<{ project: { id: string; name: string; dir: string } }>(c, "/api/try", { method: "POST", body: "{}" });
+/** Get started (#403): each step derived on the computer from what you've really done. */
+export interface OnboardingStep { id: string; title: string; done: boolean; detail: string; action: string; optional?: boolean }
+export const getOnboarding = (c: Creds) => api<{ steps: OnboardingStep[]; dismissed: boolean }>(c, "/api/onboarding");
 /** Clone a repo on the computer, in the background; poll the job until it's done. */
 export const cloneProject = (c: Creds, url: string, name?: string) =>
   api<{ jobId: string; dir: string }>(c, "/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url, name } : { url }) });

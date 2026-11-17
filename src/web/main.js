@@ -82,6 +82,7 @@ import { isSplitShortcut } from './splits.js';
     if (!isDesktop()) return route();
     // The desktop shell navigates with replaceState, so this only fires for a
     // hash someone typed or pasted — honour it instead of ignoring the URL.
+    if (location.hash === "#home" && state.goHome) return state.goHome();
     var m = location.hash.match(/^#p\/(.+)$/);
     if (!m || !state.selectProject) return;
     var known = (state.projects || []).some(function(p){ return p.id === m[1]; });

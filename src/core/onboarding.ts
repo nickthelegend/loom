@@ -64,7 +64,7 @@ export async function onboardingReport(opts: OnboardingOptions = {}): Promise<On
   return { dismissed: readDaemonConfig()?.onboarding?.dismissed ?? false, steps: [
     { id: "demo", title: "Try the demo", done: demo, detail: demo ? "Demo project created" : "Try Loom with free, offline agents", action: "try" },
     { id: "agent", title: "Connect an agent", done: agent, detail: agent ? "An agent is signed in or a provider is configured" : tried ? "Demo tried; connect a real agent to do your own work" : "Install and sign in to an agent, or configure a model provider", action: "install-agent" },
-    { id: "project", title: "Open a project", done: projects.length > 0, detail: `${projects.length} project(s) registered`, action: "open-project" },
+    { id: "project", title: "Open a project", done: projects.length > 0, detail: projects.length ? `${projects.length} project${projects.length === 1 ? "" : "s"} on this computer` : "Start one, clone one, or open a folder", action: "open-project" },
     { id: "message", title: "Finish a chat turn", done: message, detail: message ? "A chat has a finished turn" : "Send a message and let an agent finish", action: "send-message" },
     { id: "fleet", title: "Run a fleet", done: fleet, detail: fleet ? "A run has started at least two workers" : "Run Orchestra, compare or race with two or more workers", action: "run-fleet" },
     { id: "phone", title: "Pair your phone", done: phone, detail: phone ? "A device is paired" : "Pair a device to take Loom with you", action: "pair-phone" },

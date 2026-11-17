@@ -772,6 +772,44 @@ describe("web app · Loom for agents (#405)", () => {
   });
 });
 
+describe("web app · Home and Get started (#403)", () => {
+  it("shows the checklist from /api/onboarding with the next step lit, your projects, and one-click installs in Setup", async () => {
+    const m = mount({ hash: "#home" });
+    const installs: unknown[] = [];
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      const json = (v: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } }));
+      if (u.endsWith("/api/onboarding")) return json({ dismissed: false, steps: [
+        { id: "demo", title: "Try the demo", done: true, detail: "Demo project created", action: "try" },
+        { id: "agent", title: "Connect an agent", done: false, detail: "Install and sign in to an agent", action: "install-agent" },
+        { id: "project", title: "Open a project", done: true, detail: "1 project on this computer", action: "open-project" },
+        { id: "share", title: "Share with someone", done: false, detail: "Optionally share", action: "share", optional: true },
+      ] });
+      if (u.endsWith("/api/setup")) return realFetch(input, init).then((r) => r.json()).then((j: any) => json({ ...j, ready: false,
+        agents: [{ kind: "codex", label: "Codex", found: false, authed: null, install: "npm i -g @openai/codex" }] }));
+      if (u.endsWith("/api/setup/install")) { installs.push(JSON.parse(String(init?.body))); return json({ ok: true, version: "codex 1.0" }); }
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    await waitUntil(() => m.window.document.querySelectorAll("#hstart .hstep").length === 4);
+    expect(text(m, "#hstart .hprog")).toBe("2 of 4");
+    const next = $(m, "#hstart .hstep.next")!;
+    expect(next.textContent).toContain("Connect an agent");
+    expect(next.querySelector('[data-home="install-agent"]')!.textContent).toBe("Set up agents");
+    expect(text(m, "#hstart")).toContain("optional");
+    // your projects, one click from Home
+    await waitUntil(() => !!$(m, `#hprojects [data-proj="${projectId}"]`));
+    // the next step opens Setup, where a missing npm-installable CLI installs in one click
+    click(next.querySelector('[data-home="install-agent"]') as HTMLElement);
+    await waitUntil(() => !!$(m, '#setpane [data-install="codex"]'));
+    click($(m, '#setpane [data-install="codex"]'));
+    await waitUntil(() => installs.length === 1);
+    expect(installs[0]).toEqual({ kind: "codex" });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · accounts (#379)", () => {
   it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
     const m = mount();
