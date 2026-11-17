@@ -36,7 +36,9 @@ jobs:
           # waits on every desktop job: one starved runner meant no release at
           # all. (This is not the QEMU problem noted above — that is about
           # building *Linux/Windows* from macOS, which still needs its own host.)
-          - os: macos-14
+          # macos-latest, not a pinned image: GitHub retired macos-14 ("configuration
+          # 'macos-14-arm64-us-default' is not supported") and cancelled the 2.0.0 build at start.
+          - os: macos-latest
             label: macOS (arm64 + x64)
             args: --mac dmg --arm64 --x64
           - os: windows-latest
