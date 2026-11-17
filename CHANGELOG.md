@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-11-17
+
+**Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,
+steering, Ask several and a model scoreboard; `loom try` and a guided walkthrough for someone
+with no agents or keys; Home with Get started and one-click agent installs; Loom skills and an MCP
+server so agents can drive Loom; and a phone app that starts anything from anywhere. Release
+notes: docs/release-notes/v2.0.0.md. How the feature set was chosen: docs/v2/LOOM-2.md.
+
 ### Added
 
 - **Get started progress and agent installs (#403).** `loom setup` / `--json` and `/api/onboarding` derive demo, agent, project, chat, fleet, phone, skills and optional sharing progress from real state, with persistent dismiss/restore. Owner/admin-only `loom setup install <kind>` and `/api/setup/install` run fixed npm commands, stream WebSocket progress and verify the installed version. `/api/setup/requirements` reports runtime tools, global npm permissions and disk space. Web and phone screens remain separate work. Approach credit: Agent Orchestrator and T3 Code.

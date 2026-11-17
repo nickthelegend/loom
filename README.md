@@ -4,6 +4,19 @@
 [![npm](https://img.shields.io/npm/v/@loompad/cli)](https://www.npmjs.com/package/@loompad/cli)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+> **Loom 2 is here.** Every agent, every model, as many as you want: two Claude Code on Opus next
+> to two Codex on GPT‑5.6 in one Orchestra run, steered from your desk or your phone, with a
+> scoreboard of which model wins, and skills and an MCP server so agents can drive Loom themselves.
+> Try it with no agents and no keys:
+>
+> ```bash
+> npm i -g @loompad/cli && loom try
+> ```
+>
+> [loompad.tech](https://loompad.tech) · [download](https://loompad.tech/download) ·
+> [phone app](https://loompad.tech/mobile) · [what's new](docs/release-notes/v2.0.0.md) ·
+> [how 2.0 was chosen](docs/v2/LOOM-2.md)
+
 **The shared-memory layer for AI dev environments.** Every coding agent — Claude Code,
 OpenCode, Antigravity, Codex, … — keeps its own brain in its own files. Loom makes them
 **one brain**: connect your ADEs, and their memory, decisions, and context become a
@@ -2866,14 +2879,14 @@ Keys are **never** in here: a provider's API key lives in `~/.loom/providers.jso
 
 ## Skills for your agents
 
-Loom ships seven skills from [loom-skills](https://github.com/nickthelegend/loom-skills)
+Loom ships eight skills from [loom-skills](https://github.com/nickthelegend/loom-skills)
 (MIT): `loom`, `loom-agents`, `loom-orchestrate`, `loom-chain`, `loom-automation`,
 `loom-collaborate`, and `loom-ops`. They teach agent CLIs how to drive Loom.
 These commands work outside a project and do not start a daemon:
 
 ```sh
 loom skills agents                         # installed/current status for every agent
-loom skills install loom --agent codex     # install or update all seven skills
+loom skills install loom --agent codex     # install or update all eight skills
 loom skills install loom --agent all --dry-run
 loom skills uninstall loom --agent codex
 ```

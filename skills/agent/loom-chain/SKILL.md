@@ -5,6 +5,8 @@ description: Run and merge Loom goals sequentially across several projects with 
 
 # Chain goals across projects
 
+Require Loom ≥ 2.0.0.
+
 A chain starts one orchestra per line, waits for it, scans its diff for secrets,
 and merges it into that project's branch before starting the next line.
 This changes working branches. Confirm the requested scope includes those merges;
@@ -28,6 +30,15 @@ Only these line options are parsed: `-o` / `--orchestrator`, `-w` / `--workers`,
 `-p` / `--parallel`, `--solo`, and `--max-usd`.
 The bracket parser splits on whitespace; avoid values requiring shell quoting.
 Choose agents that are available in each target project.
+
+Loom 2 accepts `agent[@model][:effort][xN]`, saved fleets such as `-w @parser`,
+and `-w best:2`. In brackets use compact specs such as
+`-w codex@MODEL_ID:highx2,opencode`; spaces inside a fleet value are not parsed.
+On the shell, quote a value containing spaces. Replace MODEL_ID with an available
+model and inspect the expanded workers in each project's preflight result.
+Saved fleets are machine-wide, while best-model selection uses each project's
+30-day history and falls back to its roster if evidence is insufficient.
+See [loom-orchestrate](../loom-orchestrate/SKILL.md) for fleet selection and limits.
 
 ## Check before a long run
 
