@@ -27,6 +27,7 @@
   ],
   "files": [
     "dist",
+    "skills/agent",
     "docs/**/*.md",
     "docs/refactoring/brain-benchmark*.json",
     "CHANGELOG.md",

@@ -2693,6 +2693,57 @@ required, and the defaults are the behaviour Loom had before the key existed:
 Keys are **never** in here: a provider's API key lives in `~/.loom/providers.json`
 (mode 0600) or the environment, because this file is committed.
 
+## Skills for your agents
+
+Loom ships seven skills from [loom-skills](https://github.com/nickthelegend/loom-skills)
+(MIT): `loom`, `loom-agents`, `loom-orchestrate`, `loom-chain`, `loom-automation`,
+`loom-collaborate`, and `loom-ops`. They teach agent CLIs how to drive Loom.
+These commands work outside a project and do not start a daemon:
+
+```sh
+loom skills agents                         # installed/current status for every agent
+loom skills install loom --agent codex     # install or update all seven skills
+loom skills install loom --agent all --dry-run
+loom skills uninstall loom --agent codex
+```
+
+`--agent` accepts `claude-code`, `codex`, `grok`, `opencode`, or `all` (the default).
+Claude Code uses `~/.claude/skills`, Codex and OpenCode share `~/.agents/skills`, and
+Grok uses `~/.grok/skills`. Install creates absent directories. Uninstalling for
+Codex also removes those shared skills from OpenCode. Only folders with the exact
+`.loom-skills-managed` signature from upstream's installer are replaced or removed;
+unmanaged name conflicts are reported and left alone, even with `--force`.
+
+Use `loom skills agents --target /path/to/skills` to inspect an additional directory.
+For install/uninstall, `--target` selects only that directory unless `--agent` is also
+given. Install and uninstall support `--dry-run`; status and changes support `--json`. Custom
+targets are local CLI operations. Existing `loom skills install <git-url|dir>` still
+installs a project skill as before.
+
+At daemon startup, managed copies in the standard directories are updated if older
+than the bundle; missing installs and newer versions are left alone. To disable this,
+set `"agentSkills": { "autoUpdate": false }` in `~/.loom/daemon.json` (or
+`$LOOM_HOME/daemon.json`). Manual installation remains available. Version stamps
+record the upstream commit and its date; upstream managed copies without stamps
+are upgraded on the next start.
+
+For clients, `GET /api/agent-skills` returns `{ version, autoUpdate, agents }`;
+each agent has `{ agent, dir, skills }`, and each skill has
+`{ id, installed, managed, current, version }`. Owner/admin sessions can
+`POST /api/agent-skills/install` or `/uninstall` with `{ "agents": ["codex"] }`.
+The response is `{ dryRun, results }`, with `{ dir, id, action, error? }` per skill.
+Actions are `installed`, `updated`, `removed`, `unchanged`, `conflict`, or `error`;
+HTTP 200 may include partial failures. Refresh status after an operation. Unscoped
+paired devices may read status; scoped tokens and guests cannot access these APIs.
+The exported `installAgentSkills` helper is ready for an onboarding skills step.
+
+Maintainers can refresh the vendored bundle with
+`node scripts/sync-agent-skills.mjs /path/to/loom-skills` or pass a git URL to clone
+its current `main`. With no argument it uses the upstream URL. The script copies
+whole skill folders, the MIT license, and `skills/agent/version.json`; local source
+skills must be committed so that the stamp identifies the copied version.
+Startup installation approach credit: Agent Orchestrator (Apache-2.0).
+
 ## Odds and ends that pull their weight
 
 - **Agents drive Loom through MCP (#404).** `loom connect claude` (or `codex`,

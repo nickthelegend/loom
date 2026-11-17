@@ -27,6 +27,17 @@ Agent Orchestrator's full Apache-2.0 license text:
 https://github.com/Untrivial-ai/agent-orchestrator/blob/main/LICENSE
 (also reproduced at the end of this file).
 
+The bundled skill installation and startup refresh in `src/core/agent-skills.ts`
+also follow Agent Orchestrator's `backend/internal/skillassets/skillassets.go`
+approach. The implementation is written for Loom's managed-marker contract.
+
+## Loom skills — MIT License
+
+The seven folders in `skills/agent/` are copied from
+https://github.com/nickthelegend/loom-skills (Copyright (c) 2026 Nivesh Gajengi).
+The upstream revision is recorded in `skills/agent/version.json`; the full MIT
+license is included in `skills/agent/LICENSE`.
+
 ## T3 Code — MIT License
 
 - Project: https://github.com/pingdotgg/t3code

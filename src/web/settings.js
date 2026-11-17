@@ -41,6 +41,7 @@ import { devMode, setDevMode } from './mode.js';
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "accounts", label: "Accounts", icon: ICONS.team },
+      { id: "agentskills", label: "Loom for agents", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
       { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
@@ -218,6 +219,70 @@ import { devMode, setDevMode } from './mode.js';
             });
           };
         });
+      }).catch(fail);
+    }
+
+    // ---- Loom for agents: the bundled Loom skills in each agent CLI (#405) ----
+    // GET /api/agent-skills lists every destination; Codex and OpenCode share ~/.agents/skills, so
+    // rows are grouped by directory. A folder of the same name that Loom didn't install is the
+    // user's own and is never touched — it shows as "yours" rather than as something to fix.
+    var SKILL_AGENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", grok: "Grok" };
+    function renderAgentSkills(){
+      busy();
+      sapi("/api/agent-skills").then(function(r){
+        var groups = [];
+        (r.agents || []).forEach(function(a){
+          var g = groups.filter(function(x){ return x.dir === a.dir; })[0];
+          if (!g) { g = { dir: a.dir, agents: [], skills: a.skills || [] }; groups.push(g); }
+          g.agents.push(a.agent);
+        });
+        var total = groups.length ? groups[0].skills.length : 0;
+        var h = '<div class="setphead">Loom for agents</div>' +
+          '<div class="setpsub">Teach Claude Code, Codex, OpenCode and Grok to drive Loom. These ' + total + ' skills cover projects, chats, fleets, Orchestra, triggers, teams and safe operations, so you can ask an agent to do it for you.</div>';
+        groups.forEach(function(g){
+          var cur = g.skills.filter(function(k){ return k.current; }).length;
+          var old = g.skills.filter(function(k){ return k.managed && !k.current; }).length;
+          var mine = g.skills.filter(function(k){ return k.installed && !k.managed; }).length;
+          var st = cur === g.skills.length ? "ok" : cur || old ? "warn" : "off";
+          var detail = cur === g.skills.length ? "all " + cur + " installed and current"
+            : old ? old + " can be updated" + (cur ? " \u00b7 " + cur + " current" : "")
+            : cur ? cur + " of " + g.skills.length + " installed"
+            : "not installed";
+          if (mine) detail += " \u00b7 " + mine + " folder" + (mine === 1 ? " is" : "s are") + " your own and left alone";
+          var names = g.agents.map(function(a){ return brandMark(a) + " " + esc(SKILL_AGENT_LABEL[a] || a); }).join(" &amp; ");
+          var act = cur === g.skills.length ? "" : '<button class="btn sm" data-skillsdo="install" data-skillsfor="' + esc(g.agents.join(",")) + '">' + (old || cur ? "Update" : "Install") + "</button>";
+          var rm = cur || old ? '<button class="btn ghost sm" data-skillsdo="uninstall" data-skillsfor="' + esc(g.agents.join(",")) + '" title="removes only the skills Loom installed">Remove</button>' : "";
+          h += '<div class="srow2 skillrow"><span class="sdot ' + st + '"></span><div class="sbody">' +
+            '<div class="st">' + names + "</div>" +
+            '<div class="sd">' + esc(detail) + " \u00b7 <code>" + esc(g.dir) + "</code></div>" +
+            '<div class="sd skillchips">' + g.skills.map(function(k){
+              return '<span class="skchip' + (k.current ? " on" : k.installed && !k.managed ? " mine" : k.managed ? " old" : "") + '" title="' + esc(k.current ? "installed, current" : k.installed && !k.managed ? "your own folder \u2014 Loom leaves it alone" : k.managed ? "installed, an older version" : "not installed") + '">' + esc(k.id) + "</span>";
+            }).join("") + "</div></div>" +
+            '<div class="acctacts">' + act + rm + "</div></div>";
+        });
+        var anyMissing = groups.some(function(g){ return g.skills.some(function(k){ return !k.current && !(k.installed && !k.managed); }); });
+        h += '<div class="pillrow">' + (anyMissing ? '<button class="btn sm" id="skillsall">Install for every agent</button>' : "") +
+          '<span class="hintx">' + (r.autoUpdate ? "Loom keeps the skills it installed up to date when it starts." : "Automatic updates are off.") +
+          " From a terminal: <code>loom skills install loom</code>.</span></div>";
+        pane.innerHTML = h;
+        function run(action, agents){
+          sapi("/api/agent-skills/" + action, { method: "POST", body: JSON.stringify({ agents: agents }) }).then(function(res){
+            var bad = (res.results || []).filter(function(x){ return x.action === "conflict" || x.action === "error"; });
+            var did = (res.results || []).filter(function(x){ return x.action !== "unchanged" && x.action !== "conflict" && x.action !== "error"; }).length;
+            toast(bad.length ? bad.length + " skipped: " + (bad[0].error || bad[0].action) : action === "install" ? (did ? "skills installed" : "already current") : "skills removed");
+            renderAgentSkills();
+          }).catch(function(e){ toast(e.message); });
+        }
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-skillsdo]"), function(b){
+          b.onclick = function(){
+            var action = b.getAttribute("data-skillsdo"), agents = b.getAttribute("data-skillsfor").split(",");
+            if (action === "install") return run(action, agents);
+            askConfirm("Remove the Loom skills from " + agents.map(function(a){ return SKILL_AGENT_LABEL[a] || a; }).join(" and ") + "?\n\nOnly the folders Loom installed are removed; your own skills stay.", { ok: "Remove" })
+              .then(function(ok){ if (ok) run(action, agents); });
+          };
+        });
+        var all = document.getElementById("skillsall");
+        if (all) all.onclick = function(){ run("install", Object.keys(SKILL_AGENT_LABEL)); };
       }).catch(fail);
     }
 
@@ -990,6 +1055,7 @@ import { devMode, setDevMode } from './mode.js';
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
       else if (cur === "accounts") renderAccounts();
+      else if (cur === "agentskills") renderAgentSkills();
       else if (cur === "cloud") renderCloud();
       else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();

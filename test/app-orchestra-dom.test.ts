@@ -686,6 +686,49 @@ describe("web app · My issues (#382)", () => {
   });
 });
 
+describe("web app · Loom for agents (#405)", () => {
+  it("groups agents that share a skills folder, flags outdated and your own skills, and installs", async () => {
+    const m = mount();
+    const posted: unknown[] = [];
+    const skills = (state: "on" | "old" | "none" | "mine") => ["loom", "loom-ops"].map((id) => ({
+      id, installed: state !== "none", managed: state === "on" || state === "old", current: state === "on", version: null,
+    }));
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
+      if (u.endsWith("/api/agent-skills")) return json({ version: { revision: "abc", committedAt: "2026-11-17T00:00:00Z" }, autoUpdate: true, agents: [
+        { agent: "claude-code", dir: "/h/.claude/skills", skills: skills("on") },
+        { agent: "codex", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "opencode", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "grok", dir: "/h/.grok/skills", skills: [{ id: "loom", installed: true, managed: false, current: false, version: null }, { id: "loom-ops", installed: false, managed: false, current: false, version: null }] },
+      ] });
+      if (u.endsWith("/api/agent-skills/install")) { posted.push(JSON.parse(String(init?.body))); return json({ dryRun: false, results: [{ dir: "/h/.agents/skills", id: "loom", action: "updated" }] }); }
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="agentskills"]'));
+    click($(m, '.setnav [data-sec="agentskills"]'));
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .skillrow").length === 3);
+    const rows = [...m.window.document.querySelectorAll("#setpane .skillrow")].map((r) => r.textContent ?? "");
+    expect(rows[0]).toContain("all 2 installed and current");
+    expect(rows[1]).toContain("Codex");
+    expect(rows[1]).toContain("OpenCode");
+    expect(rows[1]).toContain("2 can be updated");
+    expect(rows[2]).toContain("1 folder is your own and left alone");
+    // the current row has nothing to install; the shared Codex/OpenCode row offers Update for both
+    expect(m.window.document.querySelectorAll('#setpane .skillrow')[0].querySelector('[data-skillsdo="install"]')).toBeNull();
+    const update = m.window.document.querySelectorAll("#setpane .skillrow")[1].querySelector('[data-skillsdo="install"]') as HTMLElement;
+    expect(update.textContent).toBe("Update");
+    click(update);
+    await waitUntil(() => posted.length === 1);
+    expect(posted[0]).toEqual({ agents: ["codex", "opencode"] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · accounts (#379)", () => {
   it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
     const m = mount();

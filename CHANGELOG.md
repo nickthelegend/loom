@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Loom as an MCP server (#404).** `loom mcp-server` serves the agent tools over stdio, and `POST /mcp` serves the same tools with existing bearer authentication and project scope. `loom connect` registers Loom through Claude Code, Codex, OpenCode or Grok's CLI, with dry-run and listing support. The `loomTools` project option attaches temporary project-scoped credentials; Orchestra workers receive native report and memory tools automatically. Includes request-correlated waits, chat-message API, daemon-backed tests, and MCP setup/API documentation. Design reference: T3 Code's MCP server/toolkits (MIT).
 
+- **Skills for agents (#405).** Bundle the seven MIT Loom skills with a version stamp and sync script. `loom skills agents`, `install loom`, and `uninstall loom` inspect and manage agent CLI installs without a daemon, protect unmanaged folders, and support dry runs. Owner/admin install APIs and a shared onboarding helper accompany automatic startup updates of older managed copies (`agentSkills.autoUpdate`, default true). Startup installation approach credit: Agent Orchestrator (Apache-2.0). Web and phone screens are separate work.
+
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 
 ### Fixed
