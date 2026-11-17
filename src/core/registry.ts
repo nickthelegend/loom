@@ -358,6 +358,8 @@ export interface DaemonConfig {
   projectsRoot?: string;
   /** Refresh existing managed agent skills on daemon start; defaults to true. */
   agentSkills?: { autoUpdate?: boolean };
+  /** Hiding the checklist never changes its derived progress. */
+  onboarding?: { dismissed: boolean };
   adminToken: string;
   clients: PairedClient[];
   pid?: number;

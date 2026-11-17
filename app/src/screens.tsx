@@ -52,6 +52,7 @@ import { FilesView } from "./files";
 import { TerminalView } from "./terminal";
 import { SideSheet } from "./side";
 import { NewProjectSheet } from "./new-project";
+import { GetStartedCard } from "./get-started";
 import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
@@ -439,6 +440,8 @@ export function BoardScreen(props: {
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  // bumps on every refresh so Get started re-reads what's done (#403)
+  const [startKey, setStartKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [daemon, setDaemon] = useState<DaemonReachability | null>(null);
@@ -461,6 +464,7 @@ export function BoardScreen(props: {
   const lastApprovals = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
+    setStartKey((k) => k + 1);
     const probe = pingDaemon(props.creds);
     // an older daemon has no /api/activity: the banner just never shows
     void getActivity(props.creds)
@@ -685,6 +689,22 @@ export function BoardScreen(props: {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Get started (#403): the computer's checklist, with what the phone can do from here */}
+        <GetStartedCard
+          creds={props.creds}
+          refreshKey={startKey}
+          hasProjects={projects.length > 0}
+          onNewProject={() => setNewProjectOpen(true)}
+          onOpenFirst={() => { if (projects[0]) props.onOpen(projects[0]); }}
+          onProjectCreated={(id) => {
+            void getProjects(props.creds).then(({ projects: fresh }) => {
+              setProjects(fresh);
+              const made = fresh.find((p) => p.id === id);
+              if (made) props.onOpen(made);
+            }).catch(() => void refresh());
+          }}
+        />
 
         {/* projects — and + Project, which starts or clones one on the computer (#371) */}
         <View>

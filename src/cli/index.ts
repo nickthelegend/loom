@@ -6,6 +6,7 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
+import { formatOnboarding } from "../core/onboarding.js";
 import { listFleets, saveFleet, removeFleet, expandSavedFleets } from "../core/fleets.js";
 import { scoreboardWindow, bestFleet } from "../core/scoreboard.js";
 import { configDirPath, isAccountKind } from "../core/accounts.js";
@@ -344,6 +345,20 @@ async function printMachineAgents(json: boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 // init / projects / agents
 // ---------------------------------------------------------------------------
+
+const setup = program.command("setup")
+  .description("show the Get started checklist, or install an agent CLI")
+  .option("--json", "print the checklist as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const report = await (await ensureDaemon()).onboarding();
+    console.log(opts.json ? JSON.stringify(report, null, 2) : formatOnboarding(report));
+  });
+setup.command("install <kind>")
+  .description("install codex, claude-code, opencode or grok-code on the daemon's machine")
+  .action(async (kind: string) => {
+    const result = await (await ensureDaemon()).installAgent(kind);
+    console.log(`${kind} installed: ${result.version}`);
+  });
 
 program
   .command("try")

@@ -79,12 +79,22 @@ export interface SetupReport {
   ready: boolean;
 }
 
+/** Fixed argv only; shared by the hints and the owner-only installer.
+ * Package sources: developers.openai.com/codex/cli, code.claude.com/docs/en/setup,
+ * opencode.ai/docs, docs.x.ai/build/enterprise. No request can supply argv.
+ */
+export const AGENT_INSTALLS = {
+  "claude-code": { command: "npm", args: ["i", "-g", "@anthropic-ai/claude-code"], bin: "claude" },
+  codex: { command: "npm", args: ["i", "-g", "@openai/codex"], bin: "codex" },
+  opencode: { command: "npm", args: ["i", "-g", "opencode-ai"], bin: "opencode" },
+  // Grok ships as a native binary with its own installer (docs.x.ai), not an npm package: no one-click install.
+} as const;
+export type InstallKind = keyof typeof AGENT_INSTALLS;
+
 const INSTALL: Record<string, string> = {
-  "claude-code": "npm i -g @anthropic-ai/claude-code",
-  codex: "install Codex.app, or npm i -g @openai/codex",
-  opencode: "curl -fsSL https://opencode.ai/install | bash",
-  "grok-code": "install the grok CLI from docs.x.ai",
+  ...Object.fromEntries(Object.entries(AGENT_INSTALLS).map(([kind, spec]) => [kind, [spec.command, ...spec.args].join(" ")])),
   "antigravity-cli": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  "grok-code": "install the grok CLI from docs.x.ai",
   // Nothing to install for this one — what it needs is a provider with a key.
   model: "loom providers:set openrouter --key <your key>",
 };
@@ -344,7 +354,7 @@ export function grokAuth(entries: Record<string, GrokEntry>, now = Date.now()): 
   return { authed: false, detail: `grok's session expired ${new Date(latest).toISOString().slice(0, 10)} and hasn't renewed` };
 }
 
-export async function setupReport(): Promise<SetupReport> {
+export async function setupAgents(): Promise<AgentStatus[]> {
   const p = platform();
   const available = await detectAdes();
 
@@ -356,9 +366,7 @@ export async function setupReport(): Promise<SetupReport> {
         kind: a.kind,
         label: a.label,
         found,
-        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai"
-          : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex"
-          : p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
+        install: p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
           : INSTALL[a.kind] ?? "",
         authed: auth.authed,
         ...(auth.detail ? { authDetail: auth.detail } : {}),
@@ -366,6 +374,13 @@ export async function setupReport(): Promise<SetupReport> {
       };
     }),
   );
+
+  return agents;
+}
+
+export async function setupReport(): Promise<SetupReport> {
+  const p = platform();
+  const agents = await setupAgents();
 
   // Bridges are probed live: "installed" says nothing useful about an app whose
   // debugger has to be asked for at launch.

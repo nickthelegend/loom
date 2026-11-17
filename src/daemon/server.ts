@@ -95,6 +95,9 @@ import { registerRoutingRoutes } from './routes/routing.js';
 import { createRuntimeHandler } from './routes/runtime-handler.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerServersRoutes } from './routes/servers.js';
+import { SetupInstaller, type SetupCommandRunner } from "../core/setup-install.js";
+import type { OnboardingOptions } from "../core/onboarding.js";
+import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerSetupRoutes } from './routes/setup.js';
 import { registerSpecsRoutes } from './routes/specs.js';
 import { registerTaskDeliveryRoutes } from './routes/task-delivery.js';
@@ -129,6 +132,8 @@ const BOOT_ID = `${process.pid}-${Date.now().toString(36)}`;
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
 
 export interface DaemonOptions {
+  /** Injectable machine probes/process boundary; HTTP never accepts these overrides. */
+  setup?: { run?: SetupCommandRunner; agents?: OnboardingOptions["agents"] };
   host?: string;
   port?: number;
   /** Bind to the Tailscale interface instead of localhost. */
@@ -156,6 +161,8 @@ const TOOL_WRITES = [
 ];
 
 export class LoomDaemon {
+  private setupInstaller: SetupInstaller;
+  private setupOptions: DaemonOptions["setup"];
   private app = express();
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -300,6 +307,8 @@ export class LoomDaemon {
   private gh: DaemonOptions["gh"];
 
   constructor(opts: DaemonOptions = {}) {
+    this.setupOptions = opts.setup;
+    this.setupInstaller = new SetupInstaller(opts.setup?.run);
     this.team = new TeamLink({
       projects: listProjects,
       ...opts.teamOptions,
@@ -549,7 +558,8 @@ export class LoomDaemon {
       res.status(403).json({ error: "this token is not scoped to that project" });
     });
     registerMcpRoutes(app, () => ({ host: this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host.includes(":") ? `[${this.host}]` : this.host, port: this.port }));
-    registerSetupRoutes(app, ctx);
+    registerSetupRoutes(app, ctx, this.setupInstaller, this.setupOptions?.run);
+    registerOnboardingRoutes(app, { agents: this.setupOptions?.agents, hasTeamInvite: () => this.team.hasInvites() });
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
     registerScoreboardRoutes(app);
@@ -1203,6 +1213,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    this.setupInstaller.close();
     this.presence.close();
     await this.closeProjects();
     this.triggers.stop();

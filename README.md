@@ -84,6 +84,70 @@ refuses guests and project-scoped devices. Open `/app?tour=1#p/<project.id>` and
 use an `agents[].id` as `agentId` on the existing send/steer endpoints. The web
 and phone walkthrough screens are separate from this API.
 
+### Get started and agent installs
+
+`loom setup` prints a checklist with ✓/○ progress and the next command for each
+open step. `loom setup --json` returns the same report used by web and phone.
+Progress comes from actual state: a demo project's `.loom/demo.json`, a real CLI
+found and signed in (or an explicitly configured provider), a registered project,
+a finished chat turn, a run that started two or more workers, a paired device,
+and all bundled Loom skills current in at least one agent directory. A demo agent
+alone means “tried”; it does not complete the real-agent step. Sharing is optional.
+
+```sh
+loom setup
+loom setup install codex
+codex login
+loom setup --json
+```
+
+The installer runs a fixed command on the **daemon's machine**, then runs the
+CLI's `--version` to verify it is reachable on that machine's PATH. Sign-in is
+separate. Supported kinds and exact commands:
+
+| Kind | Command |
+| --- | --- |
+| `codex` | `npm i -g @openai/codex` |
+| `claude-code` | `npm i -g @anthropic-ai/claude-code` |
+| `opencode` | `npm i -g opencode-ai` |
+
+These are the publishers' documented packages ([Codex](https://developers.openai.com/codex/cli),
+[Claude Code](https://code.claude.com/docs/en/setup), [OpenCode](https://opencode.ai/docs/)).
+Loom never invokes sudo or accepts a package name, command, path or argument override. If
+npm reports EACCES, configure a user-owned npm prefix or Node version manager and restart
+Loom with its bin directory on PATH. Grok and Antigravity ship native installers, so they
+keep their manual install hints.
+
+API contract for web/phone clients (screens are separate work):
+
+- `GET /api/onboarding` → `{ steps: [{ id, title, done, detail, action, optional? }], dismissed }`.
+  Ordered IDs/actions are `demo`/`try`, `agent`/`install-agent`,
+  `project`/`open-project`, `message`/`send-message`, `fleet`/`run-fleet`,
+  `phone`/`pair-phone`, `skills`/`skills`, `share`/`share`. Only share has
+  `optional: true`. Actions are stable button keys, not executable commands.
+- `POST /api/onboarding/dismiss` and `/restore` → `{ dismissed }`. Owner/admin
+  only; stored in `daemon.json`, independently of progress.
+- `POST /api/setup/install { "kind": "codex" }` → `{ ok: true, version }`.
+  Owner/admin only; paired devices, scoped tokens and guests receive 403.
+  Unknown kinds or extra fields receive 400; a simultaneous install of the same
+  kind receives 409. Failure returns HTTP 500 with `{ ok: false, version: null, error }`.
+  Installs time out after ten minutes; version detection has a ten-second deadline.
+- Subscribe to `/ws` before installing. Unscoped clients receive
+  `{ type: "setup:install", kind, phase }`: `started` adds `command`, `output`
+  adds `stream: "stdout" | "stderr"` and `line`, and `finished` adds the install
+  result. Frames are transient; the HTTP response is authoritative.
+- `GET /api/setup/requirements` → `{ node, git, npm, disk }`. Every item has
+  `ok`, `detail`, `fix` (empty when okay); detected tools also have `version`.
+  npm adds `prefix` and `needsSudo` (null if unknown). Disk adds `freeBytes`
+  (null if unknown) and `minimumBytes` (512 MiB), checked on the global npm
+  install filesystem, or LOOM_HOME when npm is unavailable.
+
+Checklist and requirement reads permit owner/admin and unscoped paired devices;
+guests and scoped tokens cannot inspect machine-wide progress. The exported types
+and route comments in `src/core/onboarding.ts`, `src/core/setup-install.ts`, and
+`src/daemon/routes/{onboarding,setup}.ts` define the response/event shapes.
+
+
 ## One link — a teammate, their agents, your repo
 
 Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a

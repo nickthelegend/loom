@@ -110,6 +110,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     }
 
     // ---- Setup: what this machine still needs (from the daemon) --------------
+    var ONE_CLICK = { "claude-code": 1, codex: 1, opencode: 1 };
     function srow(st, title, detail, cmd){
       return '<div class="srow2"><span class="sdot ' + st + '"></span>' +
         '<div class="sbody"><div class="st">' + title + "</div>" +
@@ -139,7 +140,11 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             : a.authed === true ? "signed in \u00b7 ready to take a turn"
             : a.authed === false ? (a.authDetail || "signed out") + " \u2014 it will refuse every turn until you:"
             : "installed \u2014 couldn\u2019t confirm it\u2019s signed in:";
-          h += srow(st, brandMark(a.kind) + " " + esc(a.label), esc(detail), !a.found ? a.install : a.authed === true ? "" : a.auth);
+          var row = srow(st, brandMark(a.kind) + " " + esc(a.label), esc(detail), !a.found ? a.install : a.authed === true ? "" : a.auth);
+          // One click instead of a command to copy (#403): only the npm-installable CLIs, only for
+          // the admin console on this machine; the daemon runs a fixed command and never sudo.
+          if (!a.found && state.admin && ONE_CLICK[a.kind]) row = row.replace(/<\/div><\/div>$/, '</div><div class="acctacts"><button class="btn sm" data-install="' + esc(a.kind) + '">Install</button></div></div>');
+          h += row;
         });
         h += '<div class="sgrouph">Agents you drive in their own window</div>';
         s.bridges.forEach(function(b){
@@ -161,6 +166,18 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         pane.innerHTML = h;
         document.getElementById("setuprecheck").onclick = renderSetup;
         bindTryDemo(pane);
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-install]"), function(b){
+          b.onclick = function(){
+            var kind = b.getAttribute("data-install");
+            b.disabled = true; b.textContent = "Installing\u2026";
+            var note = document.createElement("div"); note.className = "sd"; note.textContent = "npm is installing it \u2014 a minute or two.";
+            b.closest(".srow2").querySelector(".sbody").appendChild(note);
+            sapi("/api/setup/install", { method: "POST", body: JSON.stringify({ kind: kind }) }).then(function(r){
+              toast(r.ok ? "installed " + (r.version || kind) + " \u2014 now sign it in" : (r.error || "the install failed"));
+              renderSetup();
+            }).catch(function(e){ toast(e.message); renderSetup(); });
+          };
+        });
         Array.prototype.forEach.call(pane.querySelectorAll("[data-trydemo]"), function(b){
           var go = b.onclick; b.onclick = function(){ close(); go(); };
         });

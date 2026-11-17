@@ -3,6 +3,8 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { OnboardingReport } from "../core/onboarding.js";
+import { INSTALL_TIMEOUT_MS, type InstallResult, type SetupRequirements } from "../core/setup-install.js";
 import type { Scoreboard, ScoreboardWindow } from "../core/scoreboard.js";
 import type { SavedFleet } from "../core/fleets.js";
 import type { TryProjectInput, TryProjectResult } from "../core/demo-project.js";
@@ -255,6 +257,18 @@ export class DaemonClient {
 
   addProject(dir: string, name?: string): Promise<{ project: { id: string } }> {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
+  }
+
+  onboarding(): Promise<OnboardingReport> { return this.request("GET", "/api/onboarding"); }
+
+  dismissOnboarding(dismissed: boolean): Promise<{ dismissed: boolean }> {
+    return this.request("POST", `/api/onboarding/${dismissed ? "dismiss" : "restore"}`, {});
+  }
+
+  setupRequirements(): Promise<SetupRequirements> { return this.request("GET", "/api/setup/requirements"); }
+
+  installAgent(kind: string): Promise<InstallResult> {
+    return this.request("POST", "/api/setup/install", { kind }, INSTALL_TIMEOUT_MS + 30_000);
   }
 
   tryProject(input: TryProjectInput = {}): Promise<TryProjectResult> {
