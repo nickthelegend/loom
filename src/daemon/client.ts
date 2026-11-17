@@ -3,6 +3,9 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { Scoreboard, ScoreboardWindow } from "../core/scoreboard.js";
+import type { SavedFleet } from "../core/fleets.js";
+import type { TryProjectInput, TryProjectResult } from "../core/demo-project.js";
 import type { IntakeIssue, IntakeMode, IntakeSource } from "../core/intake.js";
 import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
@@ -254,6 +257,10 @@ export class DaemonClient {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
   }
 
+  tryProject(input: TryProjectInput = {}): Promise<TryProjectResult> {
+    return this.request("POST", "/api/try", { ...input });
+  }
+
   newProject(input: NewProjectInput): Promise<CreatedProject> {
     return this.request("POST", "/api/projects/new", { ...input });
   }
@@ -332,6 +339,14 @@ export class DaemonClient {
    * The parent keeps the baton — this is one turn borrowing another pair of
    * hands, not a handoff.
    */
+  scoreboard(project = "all", window: ScoreboardWindow = "30d"): Promise<Scoreboard> {
+    return this.request("GET", `/api/scoreboard?project=${encodeURIComponent(project)}&window=${encodeURIComponent(window)}`);
+  }
+
+  fleets(): Promise<{ fleets: SavedFleet[] }> { return this.request("GET", "/api/fleets"); }
+  saveFleet(name: string, spec: string): Promise<{ fleet: SavedFleet }> { return this.request("PUT", "/api/fleets", { name, spec }); }
+  removeFleet(name: string): Promise<{ removed: true }> { return this.request("DELETE", "/api/fleets", { name }); }
+
   // ── orchestra (core/orchestra.ts) ──
 
   orchestraRuns(id: string): Promise<{ runs: OrchestraRun[]; active: string | null }> {
@@ -1280,8 +1295,9 @@ async function startDaemon(): Promise<DaemonClient> {
   // Built install → node dist/cli/index.js; dev checkout → tsx src/cli/index.ts.
   const [entry, extraArgs] = existsSync(compiled)
     ? [compiled, [] as string[]]
-    : [devSource, ["--import", "tsx"]];
-  const child = spawn(process.execPath, [...extraArgs, entry, "daemon"], {
+    : [devSource, ["--import", import.meta.resolve("tsx")]];
+  const saved = readDaemonConfig();
+  const child = spawn(process.execPath, [...extraArgs, entry, "daemon", "--host", saved?.host ?? "127.0.0.1", "--port", String(saved?.port ?? DEFAULT_PORT)], {
     detached: true,
     stdio: "ignore",
     env: process.env,

@@ -733,6 +733,102 @@ describe("web app · Loom for agents (#405)", () => {
   });
 });
 
+describe("web app · the demo walkthrough (#402)", () => {
+  it("opens a demo project with ?tour=1 and walks it: sends, steers the running turn, shows Agents, turns on Developer mode", async () => {
+    process.env.LOOM_DEMO_DURATION_MS = "1500";
+    const r = await fetch(`${baseUrl}/api/try`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ dir: path.join(tmpDir("try-dom"), "loom-demo") }),
+    });
+    const { project } = (await r.json()) as { project: { id: string; dir: string; agents: Array<{ kind: string }> } };
+    expect(project.agents.every((a) => a.kind === "demo")).toBe(true);
+    const m = mount({ hash: `?tour=1#p/${project.id}` });
+    const feed = () => text(m, "#feed");
+    try {
+      await waitUntil(() => text(m, "#tourcard").includes("Ask for something"), { timeoutMs: 15_000 });
+      expect(m.window.location.search).toBe(""); // a reload won't start it again
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Watch it work"));
+      await waitUntil(() => feed().includes("I'm Loom's demo agent"), { timeoutMs: 20_000 });
+      // the edit is real
+      await waitUntil(() => fs.readFileSync(path.join(project.dir, "styles.css"), "utf8").includes("prefers-color-scheme: dark"));
+      await waitUntil(() => !!$(m, "#tournext") && ($(m, "#steer") as HTMLElement).style.display === "none");
+      click($(m, "#tournext"));
+      await waitUntil(() => text(m, "#tourcard").includes("Steer while it works"));
+      click($(m, "#touract"));
+      await waitUntil(() => feed().includes("Steering received: Also cover an empty list"), { timeoutMs: 20_000 });
+      await waitUntil(() => text(m, "#tourcard").includes("Your agents"));
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Bring your own agents"));
+      expect($(m, '.tab[data-tab="fleet"]')!.classList.contains("active")).toBe(true);
+      click($(m, "#touract"));
+      await waitUntil(() => !$(m, "#tourcard"));
+      expect(m.window.localStorage.getItem("loomDevMode")).toBe("1");
+      await waitUntil(() => !!$(m, '.tab[data-tab="orchestra"]'));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem("loomDevMode");
+      delete process.env.LOOM_DEMO_DURATION_MS;
+      await fetch(`${baseUrl}/api/projects/${project.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } }).catch(() => {});
+    }
+  }, 60_000);
+});
+
+describe("web app · saved fleets and the model scoreboard (#406)", () => {
+  it("saves the fleet rows under a name, adds the saved fleet as one chip, and opens the scoreboard", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    const admin = readDaemonConfig()!.adminToken;
+    try {
+      m.window.prompt = () => "squad";
+      await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+      await ready(m, '#cmode [data-cmode="orch"]');
+      click($(m, '#cmode [data-cmode="orch"]'));
+      await waitUntil(() => shown($(m, "#corch")) && !!$(m, "#cowfleetadd"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+      expect($(m, "#cfsave")).toBeNull(); // nothing to save yet
+      ($(m, "#cfagent") as HTMLSelectElement).value = "execbot";
+      ($(m, "#cfmodel") as HTMLInputElement).value = "gpt-5.6";
+      ($(m, "#cfcount") as HTMLSelectElement).value = "2";
+      click($(m, "#cfadd"));
+      await waitUntil(() => !!$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfsave"));
+      click($(m, "#cfsave"));
+      const fleets = async () => ((await (await fetch(`${baseUrl}/api/fleets`, { headers: { Authorization: `Bearer ${admin}` } })).json()) as { fleets: Array<{ name: string; spec: string }> }).fleets;
+      await waitUntil(async () => (await fleets()).some((f) => f.name === "squad"));
+      expect((await fleets()).find((f) => f.name === "squad")!.spec).toBe("execbot@gpt-5.6x2");
+      // take the row out, then add the saved fleet back as one chip that goes out as @squad
+      await waitUntil(() => !$(m, "#cmenu.cfleet"));
+      click($(m, "#cowk .cowfleet"));
+      await waitUntil(() => !$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, '#cfsaved [data-saved="squad"]'));
+      click($(m, '#cfsaved [data-saved="squad"]'));
+      await waitUntil(() => text(m, "#cowk .cowfleet").includes("squad"));
+      expect(text(m, "#cowk .cowfleet")).toContain("saved fleet");
+      expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ saved: "squad", spec: "execbot@gpt-5.6x2" }]);
+      // the scoreboard opens from the same row, for this project, and can widen to all. A fresh
+      // window shows the first-run Setup dialog on its own; the scoreboard rightly won't open over it.
+      if ($(m, "#sclose")) { click($(m, "#sclose")); await waitUntil(() => !$(m, ".scrim")); }
+      click($(m, "#corch [data-scoreboard]"));
+      await waitUntil(() => !!$(m, ".scoremodal"));
+      // the board reads every project's log; a loaded CI runner can take a while
+      await waitUntil(() => !$(m, "#sbtable .loader"), { timeoutMs: 35_000 });
+      expect($(m, '#sbscope button.on')!.getAttribute("data-v")).toBe(projectId);
+      click($(m, '#sbscope [data-v="all"]'));
+      await waitUntil(() => $(m, '#sbscope button.on')!.getAttribute("data-v") === "all");
+      click($(m, "#sbx"));
+      await waitUntil(() => !$(m, ".scoremodal"));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem(`loomOrch:${projectId}`);
+      await fetch(`${baseUrl}/api/fleets?name=squad`, { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } }).catch(() => {});
+    }
+  });
+});
+
 describe("web app · Loom tools for a project (#404)", () => {
   it("turns the project's loomTools on and off from Preferences", async () => {
     const m = mount({ hash: `#p/${projectId}` });

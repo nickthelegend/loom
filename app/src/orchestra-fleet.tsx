@@ -6,15 +6,16 @@
 
 import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { getAgentModels, type AgentStatus, type Creds } from "./api";
+import { getAgentModels, getFleets, type AgentStatus, type Creds } from "./api";
 import { agentLabel } from "./agents";
 import { TAP } from "./components";
 import { T, radii } from "./theme";
 
-export interface FleetRow { agent: string; model: string; count: number }
+/** A row is either agent/model/count, or a saved fleet by name (#406), which the daemon expands. */
+export interface FleetRow { agent: string; model: string; count: number; saved?: string; spec?: string }
 
-/** What the daemon reads: agent[@model][xN]. */
-export const fleetSpec = (f: FleetRow) => f.agent + (f.model ? `@${f.model}` : "") + (f.count > 1 ? `x${f.count}` : "");
+/** What the daemon reads: agent[@model][xN], or @name for a saved fleet. */
+export const fleetSpec = (f: FleetRow) => f.saved ? `@${f.saved}` : f.agent + (f.model ? `@${f.model}` : "") + (f.count > 1 ? `x${f.count}` : "");
 
 export function FleetEditor(props: {
   creds: Creds;
@@ -29,6 +30,14 @@ export function FleetEditor(props: {
   const [count, setCount] = useState(2);
   const [models, setModels] = useState<string[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Array<{ name: string; spec: string }>>([]);
+
+  useEffect(() => {
+    if (!adding) return;
+    let gone = false;
+    void getFleets(props.creds).then((r) => { if (!gone) setSaved(r.fleets); }).catch(() => { /* older computer, or a scoped device */ });
+    return () => { gone = true; };
+  }, [adding]);
 
   useEffect(() => {
     if (!adding || !agent) return;
@@ -62,11 +71,11 @@ export function FleetEditor(props: {
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {props.rows.map((f, i) => (
             <TouchableOpacity key={`${fleetSpec(f)}:${i}`} onPress={() => props.onChange(props.rows.filter((_, j) => j !== i))}
-              activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${f.count} ${f.agent} on ${f.model || "its default model"} — tap to remove`}
+              activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={f.saved ? `saved fleet ${f.saved} — tap to remove` : `${f.count} ${f.agent} on ${f.model || "its default model"} — tap to remove`}
               style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 34, paddingHorizontal: 11, borderRadius: 999,
                 borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised }}>
-              <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "700" }}>{agentLabel(kind(f.agent))}</Text>
-              <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{f.model ? f.model.split("/").pop() : "default"}</Text>
+              <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "700" }}>{f.saved ? f.saved : agentLabel(kind(f.agent))}</Text>
+              <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{f.saved ? "saved fleet" : f.model ? f.model.split("/").pop() : "default"}</Text>
               {f.count > 1 && <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "800" }}>×{f.count}</Text>}
               <Text style={{ color: T.faint, fontSize: 13 }}>✕</Text>
             </TouchableOpacity>
@@ -83,6 +92,18 @@ export function FleetEditor(props: {
         </TouchableOpacity>
       ) : (
         <View style={{ gap: 8, padding: 12, borderRadius: radii.key, borderWidth: 1, borderColor: T.line2, backgroundColor: T.panel }}>
+          {saved.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: T.dim, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.4 }}>SAVED FLEETS</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {saved.map((f) => chip(`${f.name} · ${f.spec}`, false, () => {
+                  props.onChange([...props.rows, { agent: "", model: "", count: 1, saved: f.name, spec: f.spec }]);
+                  setAdding(false);
+                }, `saved:${f.name}`))}
+              </View>
+              <Text style={{ color: T.dim, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.4, marginTop: 4 }}>OR BUILD ONE</Text>
+            </View>
+          )}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
             {props.agents.map((a) => chip(agentLabel(a.kind) + (a.id !== a.kind ? ` · ${a.id}` : ""), a.id === agent, () => { setAgent(a.id); setModel(""); }, a.id))}
           </ScrollView>

@@ -1249,20 +1249,22 @@ export class ProjectRuntime {
       const liveRun = runId ? this.continuity?.isLiveRun(runId) : true;
       const chat = (runId ? this.continuity?.eventChat(runId) : undefined) ?? e.chat ?? this.turns.turnChat.get(agent.id);
       let payload = e.payload;
-      // Enrich the completed turn so its gen_ai span carries system + model +
+      // Enrich terminal outcomes so accounting and gen_ai spans carry system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
       // here; the model prefers what the adapter actually used, else the
-      // configured override; the cost is the turn_cost stashed a moment ago.
+      // requested override, then the configured default; cost comes from turn_cost.
       const p = e.payload as Record<string, unknown>;
       if (liveRun && e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
         if (usd > 0) this.turns.pendingCost.set(agent.id, usd);
-      } else if (liveRun && e.kind === "run_complete") {
+      } else if (liveRun && (e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted"))) {
         const model =
           (typeof p.model === "string" && p.model) ||
+          this.turns.turnModel.get(agent.id) ||
           (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
         const cost = this.turns.pendingCost.get(agent.id);
         this.turns.pendingCost.delete(agent.id);
+        this.turns.turnModel.delete(agent.id);
         payload = {
           ...p,
           adapter: cfg.kind,
@@ -2514,7 +2516,7 @@ export class ProjectRuntime {
   private async commitTurn(agentId: string, files: string[]): Promise<void> { return this.turns.commitTurn(agentId, files); }
 
   private extractMemory(agentId: string, files: string[]): void {
-    if (!this.continuity) this.briefings.extractMemory(agentId, files);
+    if (!this.continuity && this.agent(agentId)?.kind !== "demo") this.briefings.extractMemory(agentId, files);
   }
 
   workingTree(): Promise<WorkingTree> {
@@ -2584,7 +2586,7 @@ export class ProjectRuntime {
       this.captureTurnDiff(event.agentId);
       // A reply that claims the tests (or build, or lint) pass gets checked —
       // against what the turn ran, and a clean re-run — without being asked.
-      if (!event.payload.error && this.proofs.wantsAuto(event))
+      if (!event.payload.simulated && !event.payload.error && this.proofs.wantsAuto(event))
         void this.proofs.prove(event.chat ?? MAIN_CHAT, { at: event.id, auto: true }).catch((err) =>
           logbook.warn("proof", "couldn't check the turn", String(err), this.info.id));
       if (!this.continuity) void this.captureAgentDecisions(event.agentId).catch(() => { });
@@ -2690,7 +2692,8 @@ export class ProjectRuntime {
     const branch = this.log.activeBranch(chat);
     const turnText = this.turns.turnText.get(agentId) ?? "";
     this.turns.turnText.delete(agentId);
-    if (turnText.trim().length < 100) return;
+    // A free offline demo must not trigger a paid background extractor.
+    if (this.agent(agentId)?.kind === "demo" || turnText.trim().length < 100) return;
     const lastTurn = this.log.list({ kinds: ["run_complete"], agentId, limit: 1 })[0];
     const p = (lastTurn?.payload ?? {}) as Record<string, unknown>;
     let filesChanged: string[] = [];

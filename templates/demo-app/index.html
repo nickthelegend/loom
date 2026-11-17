@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loom Todos</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <h1>Todos</h1>
+    <form><input aria-label="New todo" placeholder="What needs doing?" required><button>Add</button></form>
+    <label>Show <select id="filter"><option value="all">All</option><option value="active">Active</option><option value="completed">Completed</option></select></label>
+    <ul></ul>
+    <p id="count"></p>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

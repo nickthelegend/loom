@@ -51,6 +51,39 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Try it
+
+With Node 22.5+ and Git installed, no agent CLI, API key, or repository is needed:
+
+```sh
+npx @loompad/cli try
+# Or, after installing Loom:
+loom try --no-open
+```
+
+This starts the daemon, copies a tiny todo app to `<projectsRoot>/loom-demo`,
+creates its first Git commit, seeds a shared decision, and opens the project URL
+with `?tour=1`. Three **Demo — scripted, offline, free** agents use `demo-smart`
+and `demo-fast` models. Ask “add dark mode”, “add a todo filter”, “write tests”,
+or “explain this repo”. File edits and diffs are real; command output and token
+counts are simulated, and cost is always $0.00. Each turn streams for about three
+seconds so you can steer or interrupt it. Connect a real agent for custom work.
+
+Use `--dir <path>` to choose a destination and `--agents 1..8` to size a new demo.
+Running it again reuses the demo's files, history and roster. Existing unrelated
+folders are refused. Run `npm test` inside the demo for actual verification.
+Demo also works in Orchestra, races and comparisons, including fleets such as
+`demo@demo-smart x2, demo@demo-fast x2`. Tests can shorten streaming by setting
+`LOOM_DEMO_DURATION_MS=0` (milliseconds; default 3000, maximum 6000).
+
+For web and phone clients, authenticated `POST /api/try` accepts
+`{ "dir": "/optional/absolute/path", "agents": 3 }` or `{}` and returns
+`{ "project": { "id", "name", "dir", "agents": [{ "id": "demo-1", "kind": "demo", "role": "demo", "options": { "model": "demo-smart" } }] } }`
+(with the full roster). It permits owner/admin and unscoped own devices, and
+refuses guests and project-scoped devices. Open `/app?tour=1#p/<project.id>` and
+use an `agents[].id` as `agentId` on the existing send/steer endpoints. The web
+and phone walkthrough screens are separate from this API.
+
 ## One link — a teammate, their agents, your repo
 
 Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a
@@ -287,6 +320,29 @@ run-detail responses retain `workers: string[]` of instance ids and add
 `workerDetails`, and task events and `/subagents` include task selections.
 Absent selections mean provider defaults; older runs may lack `workerDetails`.
 Web and phone fleet controls can use these fields without parsing instance ids.
+
+**Saved fleets.** Store a comma-separated spec once in `LOOM_HOME/fleets.json`
+(default `~/.loom`), then use `@name` in orchestra, compare or chain worker specs:
+
+```sh
+loom fleets:save mixed "claude-code@claude-opus-5-5x2,codex@gpt-5.6-solx2"
+loom fleets
+loom orchestrate "implement the feature" -w @mixed
+loom compare "solve this bug" -w @mixed --wait
+loom chain goals.txt -w @mixed
+loom fleets:rm mixed
+```
+
+Saving validates `agent[@model][:effort][xN]` syntax; availability is checked in
+the target project when running. An orchestrator may use `-o @name` when the fleet
+resolves to exactly one agent. Saving an existing name replaces it. Names are
+case-sensitive (letters, digits, `_`, `-`, up to 64 characters, starting with a
+letter or digit); saved specs contain concrete rows, not other fleet references.
+`GET /api/fleets` returns `{ fleets: [{ name, spec }] }` sorted by name;
+`PUT /api/fleets` with `{ name, spec }` returns `{ fleet: { name, spec } }`;
+`DELETE /api/fleets` with `{ name }` (or `?name=...`) returns `{ removed: true }`.
+These user-wide endpoints require an owner or unscoped paired device. Invalid
+input returns 400, and deleting a missing fleet returns 404.
 
 **Ask several coding agents.** `loom compare` gives the same prompt to 2–8 entrants,
 each in its own worktree, using Orchestra's race mode. Names, kinds and aliases
@@ -1024,7 +1080,8 @@ detects at least two roles.
 | Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
 | Cursor | — | `cursor-agent --print` | 🔜 coming soon |
 | **Model (API)** | adapter (full-duplex) | `POST /v1/chat/completions`, streamed — any OpenAI-compatible provider | ✅ no CLI to install; tools are read-only unless you allow more (see [below](#agents-that-are-models)) |
-| Echo | adapter (demo/tests) | in-process | ✅ |
+| Demo | adapter (scripted, offline, free) | in-process; real edits, simulated commands and tokens | ✅ `loom try`; `demo-smart` and `demo-fast` |
+| Echo | adapter (tests only) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
 **Context and limits.** For Claude Code and Codex, the composer shows the chosen
@@ -1963,6 +2020,56 @@ loom scorecard --days 7
 
 The same numbers are on every agent in `/api/projects/:id/insights/turns` as
 `trust`.
+
+## Model scoreboard
+
+Compare models across turns and race/compare picks in this project or every
+registered project:
+
+```sh
+loom scoreboard                         # this project, last 30 days
+loom scoreboard --all --window 7d
+loom scoreboard --all --window all --json
+loom compare "solve this bug" --best 2   # opt in to the project's best models
+loom orchestrate "implement the feature" -w best:3
+```
+
+The table groups by `kind@model`, sorted by win rate descending, then observed
+cost per turn ascending. It includes finished/interrupted/errored percentages,
+median and p90 duration, total and average reported cost, tokens, race entries,
+wins, win rate, tasks done and review pass rate. JSON also groups by model alone.
+`--best N` and `-w best:N` use the project's last 30 days and require at least five
+entries for every selected model. Only kinds on the project's enabled roster are
+eligible. If fewer than N qualify, compare retains `-w` (including saved fleets),
+or uses the project roster; orchestra uses the roster. Compare still requires
+2–8 expanded entrants. API compare accepts an optional numeric `best` alongside
+optional `entrants`; orchestra accepts `workers: ["best:3"]`.
+
+`GET /api/scoreboard?project=<id|all>&window=<7d|30d|all>` defaults to `all` and
+`30d`. Its response is `{ project, projects, window, since, generatedAt,
+byKindModel, byModel }`. `projects` lists included project ids, timestamps use
+milliseconds, and `since` is null for `all`. Rows contain `key`, `model`, `kind`
+(only in `byKindModel`), `turns`, `finished`, `interrupted`, `errored`,
+`finishedRate`, `interruptedRate`, `erroredRate`, `medianMs`, `p90Ms`,
+`totalCostUsd`, `costedTurns`, `avgCostUsd`, `inputTokens`, `outputTokens`, `tokens`,
+`entries`, `wins`, `winRate`, `tasksDone`, `reviews`, `reviewsPassed`, and
+`reviewPassRate`. Rates are fractions from 0 to 1; a rate, duration or average
+without observations is null. Missing historical models use `unknown`.
+
+Turn timestamps select the window; duration percentiles use reported durations
+from all outcomes (p90 uses nearest rank). Costs sum reported values, including
+failed turns; the per-turn average divides by `costedTurns`, so missing costs are
+not treated as free. Race entries use task start time (run creation for older
+records); their wins count the kept/applied task in that same entry cohort.
+Unpicked races still count entries. Ordinary orchestra tasks count as done at
+completion; reviews use the latest recorded landing review of the integrated
+run for each completed task, at review time. Skipped or missing reviews do not
+count as passes. No pass is inferred from an agent saying “done”.
+
+Guests cannot access the scoreboard. Project-scoped devices can read their own
+projects; `project=all` includes only projects permitted by their token. Fleet
+and scoreboard response contracts are also documented in
+`src/daemon/routes/scoreboard.ts` and `src/core/scoreboard.ts` for UI clients.
 
 ## Replay: a run you can send anyone
 

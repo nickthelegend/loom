@@ -6,6 +6,8 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
+import { listFleets, saveFleet, removeFleet, expandSavedFleets } from "../core/fleets.js";
+import { scoreboardWindow, bestFleet } from "../core/scoreboard.js";
 import { configDirPath, isAccountKind } from "../core/accounts.js";
 import { agentSkillAgents, agentSkillsStatus, installAgentSkills, parseSkillAgents, uninstallAgentSkills } from "../core/agent-skills.js";
 import { spawn } from "../core/process.js";
@@ -342,6 +344,28 @@ async function printMachineAgents(json: boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 // init / projects / agents
 // ---------------------------------------------------------------------------
+
+program
+  .command("try")
+  .description("try Loom with a scripted, offline, free demo project")
+  .option("--dir <path>", "demo directory (default: <projectsRoot>/loom-demo)")
+  .option("--no-open", "print the URL without opening a browser")
+  .option("--agents <n>", "number of demo agents in a new project (1–8)", "3")
+  .action(async (opts: { dir?: string; open: boolean; agents: string }) => {
+    const agents = Number(opts.agents);
+    if (!Number.isInteger(agents) || agents < 1 || agents > 8) fail("agents must be an integer from 1 to 8");
+    const client = await ensureDaemon();
+    const { project } = await client.tryProject({ ...(opts.dir ? { dir: path.resolve(opts.dir) } : {}), agents });
+    const url = `${client.baseUrl}/app?tour=1#p/${encodeURIComponent(project.id)}`;
+    console.log(`Demo — scripted, offline, free\n${url}`);
+    console.log(`Project: ${project.dir}\nAgents: ${project.agents.map(a => `${a.id}@${a.options?.model ?? "demo-smart"}`).join(", ")}`);
+    const quotedDir = process.platform === "win32" ? `"${project.dir}"` : "'" + project.dir.replaceAll("'", "'\\''") + "'";
+    console.log(`\nNext:\n  cd ${quotedDir}\n  loom send "add dark mode" --agent ${project.agents[0]!.id} --wait\n  loom send "add a todo filter" --wait\n  loom log`);
+    if (opts.open) {
+      const { openInBrowser } = await import("../hub/supabase-client.js");
+      openInBrowser(url);
+    }
+  });
 
 program
   .command("new <name>")
@@ -2101,6 +2125,9 @@ async function checkChain(client: DaemonClient, projects: Array<{ id: string; na
     const roster = project.agents.filter((a) => (a as { enabled?: boolean }).enabled !== false);
     const installed = new Set((await client.availableAgents(p.id)).ades.filter((a) => a.installed !== false).map((a) => a.kind));
     const find = (name: string) => {
+      const expanded = expandSavedFleets([name]);
+      if (expanded.length !== 1) throw new Error("an orchestrator requires exactly one spec");
+      name = expanded[0]!;
       const spec = parseAgentSpec(name, roster.map((a) => a.id));
       if (spec.count !== 1) throw new Error("an orchestrator must have count 1");
       const n = spec.agent.toLowerCase();
@@ -2119,8 +2146,12 @@ async function checkChain(client: DaemonClient, projects: Array<{ id: string; na
     catch (e) { c.errors.push((e as Error).message); }
     if (!orch) c.errors.push(flags.orchestrator ? `no agent "${flags.orchestrator}" to orchestrate here` : "no agents here to orchestrate");
     else c.orchestrator = flags.orchestrator ? orch.id : `${orch.id} (default)`;
-    const names = flags.workers ? flags.workers.split(",").map((w) => w.trim()).filter(Boolean) : roster.map((a) => a.id);
+    let names = flags.workers ? flags.workers.split(",").map((w) => w.trim()).filter(Boolean) : roster.map((a) => a.id);
     try {
+      if (names.some(w => w.startsWith("best:"))) {
+        if (names.length !== 1 || !/^best:\d+$/.test(names[0]!)) throw new Error("use best:N as the entire worker fleet");
+        names = bestFleet((await client.scoreboard(p.id)).byKindModel, Number(names[0]!.slice(5)), roster.map(a => a.id), kind => roster.some(a => a.kind === kind));
+      }
       const workers = expandWorkerSpecs(names, find, roster.map((a) => a.id));
       for (const w of workers) {
         const mode = find(w.id.replace(/#\d+$/, ""))?.permissions ?? "default";
@@ -2197,14 +2228,15 @@ program
   .command("compare <promptOrRun>")
   .description("ask several agents in their own worktrees, or inspect/keep an existing comparison")
   .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] entrants (2–8 after expansion); starts a new comparison")
+  .option("--best <n>", "use the top n models with at least five entries in this project over 30 days; otherwise use -w or the roster")
   .option("--wait", "wait for all entrants, then print the comparison")
   .option("--keep <task>", "wait and apply this task; without -w the argument is an existing run id")
-  .action(async (promptOrRun: string, opts: { workers?: string; wait?: boolean; keep?: string }) => {
+  .action(async (promptOrRun: string, opts: { workers?: string; best?: string; wait?: boolean; keep?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
-      let run = opts.workers !== undefined
-        ? (await client.compare(project.id, { prompt: promptOrRun, entrants: opts.workers.split(",").map((w) => w.trim()) })).run
+      let run = opts.workers !== undefined || opts.best !== undefined
+        ? (await client.compare(project.id, { prompt: promptOrRun, ...(opts.workers !== undefined ? { entrants: opts.workers.split(",").map((w) => w.trim()) } : {}), ...(opts.best !== undefined ? { best: Number(opts.best) } : {}) })).run
         : (await client.orchestraRun(project.id, promptOrRun)).run;
       if (!run.compare) throw new Error(`${run.id} is not a comparison`);
       console.log(`comparison ${run.id}`);
@@ -2259,7 +2291,7 @@ program
   .command("orchestrate <goal>")
   .description("one orchestrator plans the goal; many worker agents build it in parallel, each in its own worktree")
   .option("-o, --orchestrator <agent>", "agent[@model][:effort] who plans and reviews (default: claude-code if present)")
-  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] fleets (default: every agent in the project)")
+  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN], @saved-fleet or best:N (default: every agent in the project)")
   .option("-p, --parallel <n>", "tasks running at once (1-12, default 4)")
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
@@ -3365,7 +3397,7 @@ program
   .option("--keep-going", "carry on to the next project when one fails")
   .option("--json", "print a JSON summary at the end")
   .option("-o, --orchestrator <agent>", "who plans every run (a line can say otherwise: `<project> :: [-o grok-code] <goal>`)")
-  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] fleets for every run")
+  .option("-w, --workers <agents>", "comma-separated fleet specs, @saved-fleet or best:N for every run")
   .option("-p, --parallel <n>", "tasks at once in each run")
   .option("--solo", "keep every run's tasks on this machine")
   .option("--max-usd <n>", "stop a run when it has spent this much")
@@ -4811,6 +4843,55 @@ program
       const { spawn: sp } = await import("node:child_process");
       sp(process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open", [out], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).on("error", () => {}).unref();
     }
+  });
+
+program
+  .command("fleets")
+  .description("list saved fleets in LOOM_HOME")
+  .option("--json", "print saved fleets as JSON")
+  .action((opts: { json?: boolean }) => {
+    const fleets = listFleets();
+    if (opts.json) return void console.log(JSON.stringify({ fleets }));
+    if (!fleets.length) return void console.log("no saved fleets — loom fleets:save <name> <spec>");
+    for (const f of fleets) console.log(`${f.name.padEnd(20)} ${f.spec}`);
+  });
+
+program
+  .command("fleets:save <name> <spec>")
+  .description("save or replace a named fleet of agent[@model][:effort][xN] specs")
+  .action((name: string, spec: string) => {
+    try { const fleet = saveFleet(name, spec); console.log(`saved @${fleet.name}: ${fleet.spec}`); }
+    catch (err) { fail((err as Error).message); }
+  });
+
+program
+  .command("fleets:rm <name>")
+  .description("remove a saved fleet")
+  .action((name: string) => {
+    try { if (!removeFleet(name)) fail(`unknown fleet "${name}"`); console.log(`removed @${name}`); }
+    catch (err) { fail((err as Error).message); }
+  });
+
+program
+  .command("scoreboard")
+  .description("model results across turns, races and orchestra tasks")
+  .option("--all", "include every project")
+  .option("--window <window>", "7d, 30d or all", "30d")
+  .option("--json", "print both kind@model and model-only standings as JSON")
+  .action(async (opts: { all?: boolean; window: string; json?: boolean }) => {
+    const window = scoreboardWindow(opts.window);
+    const client = await ensureDaemon();
+    const project = opts.all ? "all" : (await currentProject(client)).id;
+    const board = await client.scoreboard(project, window);
+    if (opts.json) return void console.log(JSON.stringify(board));
+    if (!board.byKindModel.length) return void console.log("no model results in this window");
+    const pct = (n: number | null) => n === null ? "—" : `${(n * 100).toFixed(1)}%`;
+    const usd = (n: number | null) => n === null ? "—" : `$${n.toFixed(4)}`;
+    const ms = (n: number | null) => n === null ? "—" : `${(n / 1000).toFixed(1)}s`;
+    console.table(board.byKindModel.map(r => ({ model: r.key, turns: r.turns, finished: pct(r.finishedRate),
+      interrupted: pct(r.interruptedRate), errored: pct(r.erroredRate), median: ms(r.medianMs), p90: ms(r.p90Ms),
+      cost: usd(r.totalCostUsd), "cost/turn": usd(r.avgCostUsd), tokens: r.tokens, entries: r.entries, wins: r.wins,
+      "win rate": pct(r.winRate), "tasks done": r.tasksDone, "review pass": pct(r.reviewPassRate) })));
   });
 
 program

@@ -122,6 +122,8 @@ export class RuntimeTurns {
    * run_complete, a diff) still belong to the chat that prompted them.
    */
   turnChat = new Map<string, string>();
+  /** The requested model survives errors and interrupts that omit provider metadata. */
+  turnModel = new Map<string, string | undefined>();
 
   // A turn's cost lands on a `turn_cost` status just before its `run_complete`
   // (the CLI reports it mid-stream). We hold it here so the completed turn — and
@@ -513,6 +515,7 @@ export class RuntimeTurns {
 
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);
+    this.turnModel.set(target, model ?? undefined);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
     this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started", ...(opts.requestId ? { requestId: opts.requestId } : {}) } });
     this.host.log.append({
@@ -638,6 +641,7 @@ export class RuntimeTurns {
       return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: request.id };
     }
     this.busySince.set(target, Date.now()); this.turnChat.set(target, chat);
+    this.turnModel.set(target, request.model ?? undefined);
     this.inFlight.add(request.id);
     const preparation = new AbortController(); this.preparing.set(target, preparation);
     const assertPrepared = () => { if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
