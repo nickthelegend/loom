@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.stubEnv("USERPROFILE", home);
   vi.stubEnv("LOOM_HOME", tmpDir("agent-skills-daemon"));
   vi.stubEnv("LOOM_NO_NOTIFY", "1");
+  // HOME is fake here, so the startup refresh the suite normally turns off is safe to run
+  vi.stubEnv("LOOM_NO_AGENT_SKILLS_UPDATE", "");
 });
 afterEach(async () => {
   await daemon?.close();

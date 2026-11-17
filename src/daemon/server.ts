@@ -823,9 +823,9 @@ export class LoomDaemon {
     if (this.swap && Date.now() - this.swap.at < 120_000) logbook.info("daemon", `updated ${describeSwap(this.swap)} — no turns were interrupted`);
     else this.swap = null;
     this.writeConfig();
-    // Never from a test run: those daemons share the developer's real HOME, and this writes to
-    // ~/.claude/skills and friends. LOOM_NO_AGENT_SKILLS_UPDATE=1 opts any other daemon out too.
-    if (!process.env.VITEST && !process.env.LOOM_NO_AGENT_SKILLS_UPDATE && readDaemonConfig()?.agentSkills?.autoUpdate !== false) {
+    // LOOM_NO_AGENT_SKILLS_UPDATE=1 skips it: the test suite sets it (its daemons share the
+    // developer's real HOME, and this writes to ~/.claude/skills and friends).
+    if (!process.env.LOOM_NO_AGENT_SKILLS_UPDATE && readDaemonConfig()?.agentSkills?.autoUpdate !== false) {
       try {
         const { results } = updateManagedAgentSkills();
         const updated = results.filter(r => r.action === "updated").length;
