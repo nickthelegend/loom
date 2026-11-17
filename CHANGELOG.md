@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Loom as an MCP server (#404).** `loom mcp-server` serves the agent tools over stdio, and `POST /mcp` serves the same tools with existing bearer authentication and project scope. `loom connect` registers Loom through Claude Code, Codex, OpenCode or Grok's CLI, with dry-run and listing support. The `loomTools` project option attaches temporary project-scoped credentials; Orchestra workers receive native report and memory tools automatically. Includes request-correlated waits, chat-message API, daemon-backed tests, and MCP setup/API documentation. Design reference: T3 Code's MCP server/toolkits (MIT).
+
 - **Model scoreboard and saved fleets (#406).** `loom scoreboard` and `GET /api/scoreboard` aggregate model turns, costs, tokens, race/compare picks and recorded orchestra reviews across projects and 7-day, 30-day or all-time windows. Save reusable fleets with `loom fleets:save`, manage them through `/api/fleets`, and use `@name` in orchestra, compare and chain. Opt in to evidence-based selection with `loom compare --best N` or orchestra `-w best:N`; insufficient history retains the configured fleet. API contracts are documented for web and phone clients; screens are separate work.
 
 - **Try Loom without an agent account (#402).** `loom try` and `POST /api/try` create a bundled todo project with free, offline Demo agents, real edits, simulated streaming and usage, steering, interruption, and Orchestra/race/compare support. Demo models are offered by the shared agent catalog. Web and phone tour screens are separate work.

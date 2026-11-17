@@ -31,6 +31,8 @@
  * task's agent output streams into that task's own chat.
  */
 
+import { writeLoomMcpSession } from "./loom-tools.js";
+import type { McpServerConfig } from "../types.js";
 import { intakePrBody, recordIntakeRun } from "./intake.js";
 import { listAccounts, resolveAgentAccount, type Account } from "./accounts.js";
 import { recordOpenedPr } from "./pr-feedback.js";
@@ -435,6 +437,8 @@ export interface OrchestraHost {
   projectName: string;
   /** Reachable daemon origin for worker report commands. */
   apiUrl?(): string;
+  mcps?(): McpServerConfig[];
+  loomTools?(): boolean;
   projectDir: string;
   /** `orchestra.worktreeDir` from the project's config, if set. */
   worktreeDir?(): string | undefined;
@@ -1957,7 +1961,13 @@ export class OrchestraEngine {
         chat: run.chat,
         payload: { text, author: "loom", orchestra: { runId: run.id, to: "orchestrator" } },
       });
-      await agent.send({ text, ...(briefing ? { briefing } : {}) } satisfies SendInput);
+      const mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.mcps?.(), this.host.loomTools?.() ? {
+        project: this.host.projectId, api: this.host.apiUrl?.() ?? "",
+      } : undefined) : null;
+      try {
+        await agent.send({ text, ...(briefing ? { briefing } : {}),
+          ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) } satisfies SendInput);
+      } finally { mcp?.cleanup(); }
       reply = this.turnText.get(key) ?? "";
       this.turnText.delete(key); // read once per turn; reset before the next
     } catch (err) {
@@ -2515,7 +2525,13 @@ export class OrchestraEngine {
           ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
         })
       : undefined;
-    await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}) });
+    const mcp = agent.capabilities.mcp && this.host.apiUrl?.() ? writeLoomMcpSession(this.host.mcps?.(), {
+      project: this.host.projectId, api: this.host.apiUrl(), run: run.id, task: task.id,
+    }) : null;
+    try {
+      await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
+        ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) });
+    } finally { mcp?.cleanup(); }
     if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
     // paused mid-turn (pauseTask): not finished, nothing to integrate yet
     if ((task.status as TaskStatus) === "pending") {

@@ -8,7 +8,7 @@ import * as checkpoints from "../../core/checkpoint.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import { push as gitPush, stageAndCommitFiles } from "../../core/git.js";
 import { logbook } from "../../core/logbook.js";
-import { writeMcpSession } from "../../core/mcp.js";
+import { writeLoomMcpSession } from "../../core/loom-tools.js";
 import {
   PromptQueue
 } from "../../core/prompt-queue.js";
@@ -104,6 +104,7 @@ export interface RuntimeTurnsHost {
   agentInstructions: (agentId: string) => string;
   /** This conversation's standing instructions block ("" when it has none). */
   chatInstructions: (chat: string) => string;
+  apiUrl: () => string;
   healthyMcps: () => McpServerConfig[];
   appendIfOpen: (event: Parameters<EventJournal["append"]>[0]) => void;
   agents: ReadonlyMap<string, AnyAgent>;
@@ -502,7 +503,7 @@ export class RuntimeTurns {
         ...(opts.length ? { length: opts.length } : {}),
         ...(opts.by ? { by: opts.by } : {}),
       });
-      return { agentId: target, queued: this.host.queue.length, queueId: item.id };
+      return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: `queue:${item.id}` };
     }
 
     // A user reply to a paused route's question resumes the route — and to an
@@ -516,13 +517,13 @@ export class RuntimeTurns {
     this.turnChat.set(target, chat);
     this.turnModel.set(target, model ?? undefined);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
-    this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started" } });
+    this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started", ...(opts.requestId ? { requestId: opts.requestId } : {}) } });
     this.host.log.append({
       kind: "message",
       chat,
       payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
     });
-    let mcp: ReturnType<typeof writeMcpSession> = null;
+    let mcp: ReturnType<typeof writeLoomMcpSession> = null;
     try {
       await this.host.ensureStarted(target);
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
@@ -544,7 +545,7 @@ export class RuntimeTurns {
       // adapter hands to its CLI. Null when nothing is configured — or when this
       // adapter's CLI has no flag for it, because an "MCP attached" note on a
       // turn that dropped the config would be the same lie in a new place.
-      mcp = agent.capabilities.mcp ? writeMcpSession(this.host.healthyMcps()) : null;
+      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl() } : undefined) : null;
       // The thread's model, only ever to an adapter that can act on it — see
       // bindable(), which is where a model that couldn't be honoured is refused.
       const input: SendInput = {
@@ -585,7 +586,7 @@ export class RuntimeTurns {
         // turn succeeded, failed or was interrupted — a temp file per turn that
         // nothing removes is a slow leak of the project's server URLs.
         .finally(() => mcp?.cleanup());
-      return { agentId: target };
+      return { agentId: target, ...(opts.requestId ? { requestId: opts.requestId } : {}) };
     } catch (error) {
       mcp?.cleanup();
       this.host.dispatchFailed(agent, chat, error);
@@ -645,7 +646,7 @@ export class RuntimeTurns {
     const preparation = new AbortController(); this.preparing.set(target, preparation);
     const assertPrepared = () => { if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
       throw new ContinuityError("conflict", "native dispatch preparation was cancelled or replaced"); };
-    let mcp: ReturnType<typeof writeMcpSession> = null, runId: string | undefined;
+    let mcp: ReturnType<typeof writeLoomMcpSession> = null, runId: string | undefined;
     try {
       const options = structuredClone(this.host.nativeOptions(target));
       const holder = this.host.validHolder();
@@ -671,7 +672,7 @@ export class RuntimeTurns {
       };
       if (prepared.packet.budget.overflow === "mandatory") return finishOverflow();
       if (!this.host.isCurrentAgent(agent)) throw new Error("native target was replaced before submission");
-      mcp = agent.capabilities.mcp ? writeMcpSession(this.host.healthyMcps()) : null;
+      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl() } : undefined) : null;
       let continuity: NonNullable<SendInput["continuity"]>;
       // Reassembly is safe only before submission intent exists. Never retry a
       // submitted action automatically, even when its acknowledgement is lost.
@@ -695,7 +696,7 @@ export class RuntimeTurns {
       // Never consume a legacy handoff briefing into the new packet path.
       this.host.pendingBriefings.delete(target);
       if (source === "user") { this.host.routes.onUserMessage(target, chat); this.host.releaseQuestionHold(target); }
-      this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started" } });
+      this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started", requestId: request.id } });
       void Promise.resolve().then(() => {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");

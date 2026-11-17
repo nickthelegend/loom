@@ -267,6 +267,16 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             '<div class="acctacts">' + act + rm + "</div></div>";
         });
         var anyMissing = groups.some(function(g){ return g.skills.some(function(k){ return !k.current && !(k.installed && !k.managed); }); });
+        // Loom's own MCP server (#404): registered with each CLI by the CLI's own `mcp add`
+        h += '<div class="sgrouph">Loom\u2019s tools (MCP)</div>' +
+          '<div class="snote">Let one agent drive the others: start a fleet on other models, follow it, read and add to the brain. Run one of these in a terminal on this computer.</div>' +
+          [["claude-code", "Claude Code"], ["codex", "Codex"], ["opencode", "OpenCode"], ["grok", "Grok"]].map(function(a){
+            var cmd = "loom connect " + a[0];
+            return '<div class="srow2 mcprow"><span class="sdot info"></span><div class="sbody"><div class="st">' + brandMark(a[0]) + " " + esc(a[1]) + "</div>" +
+              '<code class="scmd">' + esc(cmd) + "</code></div>" +
+              '<div class="acctacts"><button class="btn ghost sm" data-copycmd="' + esc(cmd) + '">Copy</button></div></div>';
+          }).join("") +
+          '<div class="hintx">Or point any MCP client at <code>' + esc(location.origin) + '/mcp</code> with a Loom token. <code>loom connect --list</code> shows which agents have it.</div>';
         h += '<div class="pillrow">' + (anyMissing ? '<button class="btn sm" id="skillsall">Install for every agent</button>' : "") +
           '<span class="hintx">' + (r.autoUpdate ? "Loom keeps the skills it installed up to date when it starts." : "Automatic updates are off.") +
           " From a terminal: <code>loom skills install loom</code>.</span></div>";
@@ -286,6 +296,9 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             askConfirm("Remove the Loom skills from " + agents.map(function(a){ return SKILL_AGENT_LABEL[a] || a; }).join(" and ") + "?\n\nOnly the folders Loom installed are removed; your own skills stay.", { ok: "Remove" })
               .then(function(ok){ if (ok) run(action, agents); });
           };
+        });
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-copycmd]"), function(b){
+          b.onclick = function(){ copyText(b.getAttribute("data-copycmd")); toast("copied"); };
         });
         var all = document.getElementById("skillsall");
         if (all) all.onclick = function(){ run("install", Object.keys(SKILL_AGENT_LABEL)); };
@@ -423,6 +436,9 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         hh += '<div class="prow"><div class="pl"><div class="pt">MCP servers</div>' +
           '<div class="pd">Tools your agents can call — GitHub, Linear, Slack, databases. Claude Code and Codex use them.</div></div>' +
           '<div class="pc"><button class="btn outline sm" type="button" data-tools="mcp">' + ICONS.plug + "Manage servers</button></div></div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Loom tools for agents</div>' +
+          '<div class="pd">Give the agents Loom runs here the Loom MCP tools: start agents on other models, message them, run an Orchestra, search and add to the brain. Each turn gets its own credential that can only read this project and use those tools. Orchestra workers always get them.</div></div>' +
+          '<div class="pc">' + seg("loomtools", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.loomTools ? "on" : "off") + "</div></div>";
         var agents = cfg.agents || [];
         hh += '<div class="prow"><div class="pl"><div class="pt">Default agent</div>' +
           '<div class="pd">Who receives a message when nobody holds the baton.</div></div>' +
@@ -432,6 +448,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         pp.innerHTML = hh;
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        bindSeg("loomtools", function(v){ patchCfg({ loomTools: v === "on" }, v === "on" ? "Agents here can use Loom's tools" : "Loom tools off for this project"); });
         var ext = document.getElementById("extmodel");
         if (ext) {
           var cur = cfg.brain.model || "haiku";

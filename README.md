@@ -2792,6 +2792,7 @@ required, and the defaults are the behaviour Loom had before the key existed:
 | [`maxConcurrentGoals`](#more-than-one-goal-when-they-cant-collide) | goals side by side, when their paths can't collide |
 | [`safety.snapshotBeforeRoutes`](#routing--multi-hop-pipelines) | checkpoint brain+board+config before a fleet runs unattended |
 | [`servers`](#the-browser-tab) | the dev servers Loom may run and preview |
+| `loomTools` | Attach project-scoped Loom MCP tools to agent turns (default false; automatic for Orchestra workers) |
 | [`mcps`](#odds-and-ends-that-pull-their-weight) | MCP servers offered to the agents whose CLI takes them |
 | [`skills`](#odds-and-ends-that-pull-their-weight) | which `SKILL.md` skills ride along in every briefing |
 | [`team`](#teams--see-each-others-agents) | which team this project publishes to |
@@ -2852,6 +2853,15 @@ Startup installation approach credit: Agent Orchestrator (Apache-2.0).
 
 ## Odds and ends that pull their weight
 
+- **Agents drive Loom through MCP (#404).** `loom connect claude` (or `codex`,
+  `opencode`, `grok`) registers `loom mcp-server` using the agent's own CLI.
+  Preview with `--dry-run`; inspect with `loom connect --list`. The same tools
+  are available at authenticated `POST /mcp`: send and steer agents, start an
+  Orchestra, compare models, search the brain, remember decisions, report worker
+  progress, and list/add board tasks. Project-scoped tokens stay scoped; guests
+  are refused. Set `loomTools: true` in project config to attach Loom tools to
+  MCP-capable agents; Orchestra workers get them automatically with temporary
+  project/run credentials. See [MCP server setup and API](docs/mcp-server.md).
 - **MCP health** — the daemon polls each project's HTTP MCP servers; a server
   that stops answering is named in the Console and **withheld from turns**
   (an absent tool the agent never saw beats a present tool that throws) until

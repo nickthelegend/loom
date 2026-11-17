@@ -724,6 +724,10 @@ describe("web app · Loom for agents (#405)", () => {
     click(update);
     await waitUntil(() => posted.length === 1);
     expect(posted[0]).toEqual({ agents: ["codex", "opencode"] });
+    // Loom's own MCP server: one `loom connect` line per agent CLI (#404)
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .mcprow").length === 4);
+    expect([...m.window.document.querySelectorAll("#setpane .mcprow .scmd")].map((c) => c.textContent)).toEqual(
+      ["loom connect claude-code", "loom connect codex", "loom connect opencode", "loom connect grok"]);
     await new Promise((r) => setTimeout(r, 200));
     expect(m.errors.join("\n")).toBe("");
   });
@@ -821,6 +825,25 @@ describe("web app · saved fleets and the model scoreboard (#406)", () => {
     } finally {
       m.window.localStorage.removeItem(`loomOrch:${projectId}`);
       await fetch(`${baseUrl}/api/fleets?name=squad`, { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } }).catch(() => {});
+    }
+  });
+});
+
+describe("web app · Loom tools for a project (#404)", () => {
+  it("turns the project's loomTools on and off from Preferences", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    try {
+      await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+      click($(m, "#setupbtn"));
+      await waitUntil(() => !!$(m, '.setnav [data-sec="preferences"]'));
+      click($(m, '.setnav [data-sec="preferences"]'));
+      await waitUntil(() => !!$(m, '#projprefs [data-seg="loomtools"]'));
+      expect($(m, '#projprefs [data-seg="loomtools"] button.on')!.getAttribute("data-val")).toBe("off");
+      click($(m, '#projprefs [data-seg="loomtools"] [data-val="on"]'));
+      await waitUntil(async () => (await rest<{ loomTools?: boolean }>("GET", "/config")).loomTools === true);
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await rest("PATCH", "/config", { loomTools: false });
     }
   });
 });

@@ -89,6 +89,21 @@ program
   .description("one CLI for all your coding agents — shared thread, shared memory, one baton")
   .version(VERSION);
 
+program.command("mcp-server")
+  .description("serve Loom tools over MCP stdio")
+  .action(async () => { const { serveMcp } = await import("./mcp-server.js"); await serveMcp(); });
+
+program.command("connect [agent]")
+  .description("register Loom MCP with claude, codex, opencode or grok")
+  .option("--dry-run", "print commands without running them")
+  .option("--list", "show which agent CLIs have Loom registered")
+  .action(async (agent: string | undefined, opts: { dryRun?: boolean; list?: boolean }) => {
+    const { connectAgent, listConnections } = await import("./connect.js");
+    if (opts.list) return listConnections(opts.dryRun);
+    if (!agent) throw new Error("choose an agent or use --list");
+    await connectAgent(agent, opts.dryRun);
+  });
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

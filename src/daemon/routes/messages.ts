@@ -6,6 +6,14 @@ import { z } from "zod";
 /** Register messages routes in the order established by LoomDaemon.routes(). */
 export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): void {
 
+  // { messages: LoomEvent[] }, oldest first, last 1–1000 message events in this chat.
+  app.get("/api/projects/:id/chats/:chat/messages", withRuntime(async (rt, req, res) => {
+    if (!rt.chats().some(c => c.id === String(req.params.chat))) return void res.status(404).json({ error: "no such chat" });
+    const n = Number(req.query.limit ?? 50);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) return void res.status(400).json({ error: "limit must be 1–1000" });
+    res.json({ messages: rt.log.list({ chat: String(req.params.chat), kinds: ["message"], limit: n }) });
+  }));
+
   /**
    * {text, chat?, agentId?} -> {steered:true}, or
    * {steered:false, queued:number, queueId:string, reason:string}.
@@ -64,6 +72,8 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
    * and effort override the chat selection only for this message; omitted or
    * blank values inherit it. Validation matches the chat binding's agent kind.
    * Queued sends retain this selection without changing the stored chat.
+   * requestId is echoed on the turn_started event for waiters. A queued legacy
+   * send returns requestId="queue:<queueId>"; native continuity retains its id.
    */
   app.post(
     "/api/projects/:id/messages",
