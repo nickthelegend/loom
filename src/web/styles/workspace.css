@@ -755,6 +755,7 @@
   .hpa{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted-foreground)}
   .hpa svg,.hpa .brand{width:14px;height:14px}
   .hps{font-size:11.5px;color:var(--muted-foreground)}
+  .hpk{font-size:10.5px;font-weight:600;border:1px solid var(--border);border-radius:5px;padding:0 5px;color:var(--foreground)}
   .hps .work{color:var(--primary);font-weight:500}
   .hps .warn{color:var(--warn);font-weight:500}
   .hscorebody{flex:1;min-width:0}

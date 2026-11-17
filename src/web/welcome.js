@@ -132,7 +132,7 @@ import { tryDemo } from './try-demo.js';
         var kinds = {}; (p.agents || []).forEach(function(a){ if (a.tier !== "bridge") kinds[a.kind] = (kinds[a.kind] || 0) + 1; });
         return '<button class="hproj" data-proj="' + esc(p.id) + '">' +
           '<span class="hpn">' + esc(p.name) + "</span>" +
-          '<span class="hpa">' + Object.keys(kinds).slice(0, 4).map(function(k){ return '<span title="' + esc(agentLabel(k, k)) + '">' + brandMark(k) + (kinds[k] > 1 ? "×" + kinds[k] : "") + "</span>"; }).join("") + "</span>" +
+          '<span class="hpa">' + Object.keys(kinds).slice(0, 4).map(function(k){ return '<span title="' + esc(agentLabel(k, k)) + '">' + (brandMark(k) || '<span class="hpk">' + esc(agentLabel(k, k).split(" ")[0]) + "</span>") + (kinds[k] > 1 ? "×" + kinds[k] : "") + "</span>"; }).join("") + "</span>" +
           '<span class="hps">' + (p.needsInput ? '<b class="warn">needs you</b>' : busy.length ? '<b class="work">' + busy.length + " working</b>" : "idle") +
             (p.costUsd > 0 ? " · " + money(p.costUsd) : "") + "</span></button>";
       }).join("") + "</div>";
