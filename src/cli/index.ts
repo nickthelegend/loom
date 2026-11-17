@@ -755,10 +755,23 @@ program
   });
 
 program
-  .command("open")
-  .description("open this machine's Loom app in the browser")
-  .action(async () => {
+  .command("open [file]")
+  .description("open Loom in the browser, or a project/file in an editor")
+  .option("--in <editor>", "editor id, or last to reuse your last choice")
+  .action(async (file: string | undefined, opts: { in?: string }) => {
     const client = await ensureDaemon();
+    if (opts.in || file) {
+      const { parseEditorTarget } = await import("../core/editors.js");
+      const project = await currentProject(client);
+      const selected = opts.in && opts.in !== "last" ? opts.in : (await client.editors()).lastEditor;
+      if (!selected) fail("choose an editor with --in (code, cursor, zed, …)");
+      const target: { path?: string; line?: number } = file ? parseEditorTarget(file) : {};
+      // CLI file paths are relative to the shell, even inside a project subdirectory.
+      if (target.path) target.path = path.resolve(target.path);
+      const result = await client.openInEditor(project.id, selected, target);
+      console.log(`Opened ${result.path} in ${result.editor}`);
+      return;
+    }
     const url = `${client.baseUrl}/app`;
     console.log(url);
     const { spawn: sp } = await import("node:child_process");
@@ -856,6 +869,22 @@ program
     if (!chat) fail(`no chat "${opts.chat}" here`);
     const out = await client.watchPr(project.id, chat.id, pr).catch((e: Error) => fail(e.message));
     console.log(`Watching ${out.pr.repo} #${out.pr.prNumber} in chat ${out.pr.chat}`);
+  });
+
+program
+  .command("chat:title <chat> [title]")
+  .description("show or set a chat title; --auto titles a default-named chat")
+  .option("--auto", "derive a title from the first user message without replacing user names")
+  .action(async (name: string, title: string | undefined, opts: { auto?: boolean }) => {
+    if (opts.auto && title !== undefined) fail("use a title or --auto, not both");
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const found = chats.find(c => c.id === name) ?? chats.find(c => c.title.toLowerCase() === name.toLowerCase());
+    if (!found) fail(`no chat "${name}" in ${project.name}`);
+    const chat = opts.auto || title !== undefined
+      ? (await client.titleChat(project.id, found.id, opts.auto ? { auto: true } : { title: title! })).chat : found;
+    console.log(chat.title);
   });
 
 program
@@ -4621,12 +4650,33 @@ program
 // ---------------------------------------------------------------------------
 
 program
+  .command("triage [command...]")
+  .description("save redacted diagnostics; optionally ask an agent or print an issue body")
+  .option("--agent <kind>", "ask this agent kind to diagnose the report in a new chat")
+  .option("--project <project>", "project id, name or registered directory (default: current project)")
+  .option("--issue", "print a ready-to-paste GitHub issue body; never post it")
+  .action(async (command: string[], opts: { agent?: string; project?: string; issue?: boolean }) => {
+    const { collectTriage, startTriageChat } = await import("./triage.js");
+    const selected = opts.project ? findProject(opts.project) : undefined;
+    if (opts.project && !selected) fail(`no project "${opts.project}"`);
+    const report = await collectTriage(selected?.dir ?? currentProjectDir(), command.join(" "));
+    console.error(`Saved ${report.file}`);
+    if (opts.issue) process.stdout.write(report.body);
+    if (opts.agent) {
+      const client = await ensureDaemon();
+      const project = selected ? (await client.project(selected.id)).project : await currentProject(client);
+      const chat = await startTriageChat(client, project, opts.agent, report.body);
+      console.error(`Diagnosis chat: ${chat.title} (${chat.id})`);
+    }
+  });
+
+program
   .command("doctor")
   .description("diagnose the environment, daemon, and current project")
   .option("--json", "print machine-readable diagnostic results")
   .option("--fix", "repair what has exactly one safe repair; report the rest")
   .action(async (opts: { json: boolean; fix?: boolean }) => {
-    const { doctorReport, envChecks, projectChecks, fixProject, compareWithDaemon, envFacts } = await import("./doctor.js");
+    const { collectDoctorReport, fixProject } = await import("./doctor.js");
     const dir = currentProjectDir();
     if (opts.fix) {
       if (!dir) {
@@ -4640,28 +4690,8 @@ program
       if (!fixed.length && !unfixable.length) console.log(pc.dim("nothing needed fixing"));
       // fall through to a fresh diagnosis, so the report reflects the repairs
     }
-    const checks = await envChecks();
-    checks.push(...(await (await import("./doctor.js")).diskChecks()));
-    const signedOut = checks.filter((c) => c.status === "fail" && /signed out/.test(c.detail)).map((c) => c.name);
-    if (dir) checks.push(...projectChecks(dir, signedOut));
-    else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
-    // The daemon is often the desktop app's, started without this shell's PATH or keys:
-    // ask it what it sees, and say where the two differ. Its provider and free-model
-    // checks run there because its keys are the ones turns use. Never starts a daemon.
-    const dcfg = readDaemonConfig();
-    if (dcfg && checks.some((c) => c.name === "daemon" && !/not responding|never started/.test(c.detail))) {
-      try {
-        const dclient = new DaemonClient(dcfg);
-        const pid = dir ? findProject(dir)?.id : undefined;
-        const theirs = await dclient.doctor(pid);
-        if (theirs.facts) checks.push(...compareWithDaemon({ checks, facts: envFacts() }, { checks: theirs.checks, facts: theirs.facts }));
-        checks.push(...theirs.checks.filter((c) => /^(provider|model):/.test(c.name)));
-      } catch (err) {
-        checks.push({ name: "daemon:env", status: "warn", detail: `couldn't ask the daemon what it sees: ${err instanceof Error ? err.message : String(err)}` });
-      }
-    }
-
-    const report = doctorReport(checks);
+    const report = await collectDoctorReport(dir);
+    const checks = report.checks;
     if (opts.json) {
       console.log(JSON.stringify(report));
       if (report.summary.failures) process.exitCode = 1;

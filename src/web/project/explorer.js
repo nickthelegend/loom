@@ -11,6 +11,7 @@ import { openTaskModal } from '../tasks.js';
 import { permBadge,permOf } from '../permissions.js';
 import { relClock } from '../transcript.js';
 import { addAgents } from './add-agent.js';
+import { editorItems, loadEditors } from '../editors.js';
 
 /** explorer behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -88,6 +89,7 @@ export function createExplorer(view) {
     }
 
     function drawExplorer(el){
+      loadEditors(); // warm the "Open in …" list before the first right-click
       railTitle('<span class="b">' + esc(state.project ? state.project.name : "Explorer") + "</span>");
       if (!view.expl.kids["."]) { el.innerHTML = LOADER; loadDir("."); return; }
       el.innerHTML = renderTreeLevel(".", 0) || '<div class="rempty">this project has no files yet</div>';
@@ -149,6 +151,8 @@ export function createExplorer(view) {
       if (state.termRun && root) {
         items.push({ label: "Open in terminal", icon: ICONS.terminal, run: function(){ state.termRun("cd " + JSON.stringify(file ? abs.replace(/\/[^\/]*$/, "") : abs)); } });
       }
+      // VS Code, Cursor, Zed… on the computer the project lives on (#407)
+      editorItems(view.pid, rel, ICONS.code).forEach(function(it){ items.push(it); });
       openMenu(x, y, items);
     }
 

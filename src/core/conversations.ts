@@ -23,6 +23,7 @@ export class ConversationStore {
       // numbered, not "New chat" — the button already says New chat, and a
       // sidebar of identical rows tells you nothing
       title: title.trim().slice(0, 60) || `Chat ${(state.chats ?? []).length + 2}`,
+      titleSource: title.trim() ? "user" : "default",
       createdAt: Date.now(),
       ...(bound ? { agentId: bound.agentId } : {}),
       ...(bound?.model ? { model: bound.model } : {}),
@@ -57,12 +58,20 @@ export class ConversationStore {
     return chat;
   }
 
-  renameChat(id: string, title: string): ChatInfo | null {
+  hasDefaultTitle(id: string): boolean {
+    const chat = this.chats().find(c => c.id === id);
+    return !!chat && id !== MAIN_CHAT && (chat.titleSource === "default" ||
+      chat.titleSource === undefined && /^Chat \d+$/.test(chat.title));
+  }
+
+  renameChat(id: string, title: string, automatic = false): ChatInfo | null {
+    if (automatic && !this.hasDefaultTitle(id)) return null;
     if (id === MAIN_CHAT) return null; // main's name is not yours to change
     const state = readProjectState(this.projectDir);
     const chat = (state.chats ?? []).find((c) => c.id === id);
     if (!chat) return null;
     chat.title = title.trim().slice(0, 60) || chat.title;
+    chat.titleSource = automatic ? "auto" : "user";
     writeProjectState(this.projectDir, state);
     return chat;
   }
