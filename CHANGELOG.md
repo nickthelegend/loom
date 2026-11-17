@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Chat titles, editor launchers, and diagnostic bundles (#407).** Default-named chats receive local titles after their first finished turn; `chatTitles: "model"` opts into bounded provider generation with local fallback. `loom chat:title` shows/sets titles without automatic overwrites of user names. Owner/unscoped editor discovery and project launch APIs back `loom open --in`, remember the last editor, and reject path/symlink escapes. `loom triage` saves redacted doctor results, versions and recent logs, optionally starts a diagnosis chat, and prints (never posts) issue bodies. Web/phone screens are separate work. Approach credit: T3 Code (MIT) for titles, editor labels and triage; Agent Orchestrator (Apache-2.0) for Open in Editor.
+
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 
 ### Fixed

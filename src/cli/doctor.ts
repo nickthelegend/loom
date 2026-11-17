@@ -15,6 +15,7 @@ import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { setupReport } from "../core/setup.js";
 import {
   agentConfigWarnings,
+  findProject,
   listProjects,
   loomHome,
   readDaemonConfig,
@@ -28,6 +29,7 @@ import { isAdapter, type AgentConfig, type LoomEvent } from "../types.js";
 import { ADES } from "../core/ades.js";
 import { isPool } from "../core/free-pool.js";
 import { BUILTIN_PROVIDERS, listProviders, modelsUrl, requestHeaders, resolveProvider } from "../core/providers.js";
+import { DaemonClient } from "../daemon/client.js";
 import { BUILD_REV } from "../daemon/server.js";
 
 export interface Check {
@@ -466,4 +468,30 @@ export async function diskChecks(): Promise<Check[]> {
   if (!orphans.length) return [ok("orchestra", "no orphaned worktrees")];
   const total = orphans.reduce((n, o) => n + o.bytes, 0);
   return [warn("orchestra", `${orphans.length} orchestra folder${orphans.length === 1 ? "" : "s"} from projects no longer registered (${fmtBytes(total)}): ${orphans.map((o) => `${o.id} ${fmtBytes(o.bytes)}`).join(", ")} — loom orchestra:clean removes them`)];
+}
+
+/** The same read-only report used by doctor --json and triage; never starts a daemon. */
+export async function collectDoctorReport(dir: string | null): Promise<DoctorReport> {
+  const checks = await envChecks();
+  checks.push(...(await diskChecks()));
+  const signedOut = checks.filter((c) => c.status === "fail" && /signed out/.test(c.detail)).map((c) => c.name);
+  if (dir) checks.push(...projectChecks(dir, signedOut));
+  else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
+  // The daemon is often the desktop app's, started without this shell's PATH or keys:
+  // ask it what it sees, and say where the two differ. Its provider and free-model
+  // checks run there because its keys are the ones turns use. Never starts a daemon.
+  const dcfg = readDaemonConfig();
+  if (dcfg && checks.some((c) => c.name === "daemon" && !/not responding|never started/.test(c.detail))) {
+    try {
+      const dclient = new DaemonClient(dcfg);
+      const pid = dir ? findProject(dir)?.id : undefined;
+      const theirs = await dclient.doctor(pid);
+      if (theirs.facts) checks.push(...compareWithDaemon({ checks, facts: envFacts() }, { checks: theirs.checks, facts: theirs.facts }));
+      checks.push(...theirs.checks.filter((c) => /^(provider|model):/.test(c.name)));
+    } catch (err) {
+      checks.push({ name: "daemon:env", status: "warn", detail: `couldn't ask the daemon what it sees: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  return doctorReport(checks);
 }

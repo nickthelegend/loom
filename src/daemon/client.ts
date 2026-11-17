@@ -183,6 +183,18 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/move`, { to, ...opts }, 24 * 60 * 60_000);
   }
 
+  editors(): Promise<{ editors: import("../core/editors.js").EditorInfo[]; lastEditor: string | null }> {
+    return this.request("GET", "/api/editors");
+  }
+
+  openInEditor(id: string, editor: string, target: { path?: string; line?: number } = {}): Promise<{ editor: string; path: string; line?: number }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/open-in`, { editor, ...target });
+  }
+
+  titleChat(id: string, chat: string, input: { title: string } | { auto: true }): Promise<{ chat: ChatInfo }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/rename`, input);
+  }
+
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
   }
@@ -778,11 +790,12 @@ export class DaemonClient {
   }
 
   /** Model and effort override the chat selection for this message only, including when queued. */
-  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string } = {}): Promise<{ agentId: string }> {
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string } = {}): Promise<{ agentId: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
+      ...(opts.chat ? { chat: opts.chat } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
     });

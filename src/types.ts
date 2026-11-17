@@ -105,6 +105,8 @@ export interface ChatBranch {
 
 /** A named conversation inside a project. */
 export interface ChatInfo {
+  /** Explicit provenance protects user names, even ones spelled "Chat N". */
+  titleSource?: "default" | "user" | "auto";
   /** Source tombstone after POST chats/:chat/move. Continue on the named device. */
   movedTo?: { device: string; name: string; at: number; jobId: string };
   branches?: ChatBranch[];
@@ -277,6 +279,8 @@ export interface BrainConfig {
 import type { ServerConfig } from "./core/servers.js";
 
 export interface ProjectConfig {
+  /** Local titles by default; model opts into a bounded provider request. */
+  chatTitles?: "local" | "model";
   name: string;
   agents: AgentConfig[];
   /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */

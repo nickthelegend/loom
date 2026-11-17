@@ -17,6 +17,7 @@ import { BatonManager } from "../core/baton.js";
 import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { Brain } from "../core/brain.js";
 import { helperText } from "../core/provider-text.js";
+import { generateChatTitle } from "../core/chat-titles.js";
 import { ConversationStore } from "../core/conversations.js";
 import { SideChats, SideChatError } from "../core/side-chats.js";
 import { sideDriver } from "./side.js";
@@ -630,6 +631,7 @@ export class ProjectRuntime {
     });
     // a goal or a route that ends frees the head of the queue
     log.onEvent((e) => {
+      if (e.kind === "run_complete") void this.autoTitleChat(e.chat ?? MAIN_CHAT).catch(() => {});
       if (e.kind === "orchestra" || e.kind === "route_completed" || e.kind === "route_failed") this.kickQueue();
     });
   }
@@ -2248,7 +2250,26 @@ export class ProjectRuntime {
     return { agentId: found.agentId, ...(found.model ? { model: found.model } : {}), ...(found.effort ? { effort: found.effort } : {}) };
   }
 
-  renameChat(id: string, title: string): ChatInfo | null { return this.conversations.renameChat(id, title); }
+  private readonly titlingChats = new Set<string>();
+
+  async autoTitleChat(id: string): Promise<ChatInfo | null> {
+    if (!this.conversations.hasDefaultTitle(id) || this.titlingChats.has(id)) return null;
+    const first = this.log.list({ chat: id, kinds: ["message"], limit: 0 }).find(e => e.payload.author === "user");
+    if (typeof first?.payload.text !== "string") return null;
+    this.titlingChats.add(id);
+    try {
+      const title = await generateChatTitle(first.payload.text, this.config.chatTitles);
+      if (this.closed) return null;
+      return this.renameChat(id, title, true);
+    } finally { this.titlingChats.delete(id); }
+  }
+
+  renameChat(id: string, title: string, automatic = false): ChatInfo | null {
+    const chat = this.conversations.renameChat(id, title, automatic);
+    // Use the status event envelope so existing subscribers receive metadata changes.
+    if (chat) this.appendIfOpen({ kind: "status", chat: id, payload: { state: "chat_renamed", title: chat.title, titleSource: chat.titleSource } });
+    return chat;
+  }
 
   deleteChat(id: string): boolean {
     if (this.movingChats.has(id)) throw new ChatMoveError("busy: chat is moving");

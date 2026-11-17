@@ -344,6 +344,9 @@ export interface ProviderModel {
   free: boolean;
   /** AgentRouter reports these per model; most providers don't. */
   endpoints?: string[];
+  /** Provider-reported USD per token; absent means unknown. */
+  inputCost?: number;
+  outputCost?: number;
 }
 
 /** How long a model list is believed before asking again. */
@@ -376,7 +379,7 @@ function readCache(): Record<string, CachedModels> {
  */
 export async function fetchModels(
   p: ResolvedProvider,
-  opts: { refresh?: boolean; fetchImpl?: typeof fetch } = {},
+  opts: { refresh?: boolean; fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
 ): Promise<{ models: ProviderModel[]; cached: boolean; error?: string }> {
   const cache = readCache();
   const hit = cache[p.id];
@@ -385,7 +388,7 @@ export async function fetchModels(
   }
   const doFetch = opts.fetchImpl ?? fetch;
   try {
-    const res = await doFetch(modelsUrl(p), { headers: requestHeaders(p) });
+    const res = await doFetch(modelsUrl(p), { headers: requestHeaders(p), signal: opts.signal });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       // A stale list beats no list: the models probably still exist, and the
@@ -393,7 +396,7 @@ export async function fetchModels(
       return { models: hit?.models ?? [], cached: Boolean(hit), error: explainStatus(res.status, body, p) };
     }
     const body = (await res.json()) as {
-      data?: Array<{ id?: string; supported_endpoint_types?: string[] }>;
+      data?: Array<{ id?: string; supported_endpoint_types?: string[]; pricing?: { prompt?: string; completion?: string } }>;
     };
     const models: ProviderModel[] = (body.data ?? [])
       .map((m) => String(m.id ?? ""))
@@ -404,12 +407,14 @@ export async function fetchModels(
           id,
           provider: p.id,
           free: p.free(id),
+          ...(raw?.pricing?.prompt != null && Number.isFinite(Number(raw.pricing.prompt)) && Number(raw.pricing.prompt) >= 0 ? { inputCost: Number(raw.pricing.prompt) } : {}),
+          ...(raw?.pricing?.completion != null && Number.isFinite(Number(raw.pricing.completion)) && Number(raw.pricing.completion) >= 0 ? { outputCost: Number(raw.pricing.completion) } : {}),
           ...(raw?.supported_endpoint_types ? { endpoints: raw.supported_endpoint_types } : {}),
         };
       })
       .sort((a, b) => a.id.localeCompare(b.id));
     try {
-      const next = { ...cache, [p.id]: { at: Date.now(), models } };
+      const next = { ...readCache(), [p.id]: { at: Date.now(), models } };
       fs.mkdirSync(path.dirname(cacheFile()), { recursive: true });
       fs.writeFileSync(cacheFile(), JSON.stringify(next));
     } catch {
