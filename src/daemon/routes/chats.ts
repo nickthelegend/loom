@@ -371,11 +371,22 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
     }),
   );
 
+  /** POST {auto: true} generates from the first user message only while the title is
+   * default; POST {title: string} sets a user name. Returns {chat: ChatInfo}.
+   * Both emit a WS event: kind "status", chat: id, payload {state: "chat_renamed", title, titleSource}.
+   * Automatic requests never replace user names; an unchanged chat is returned.
+   */
   app.post(
     "/api/projects/:id/chats/:chatId/rename",
     withRuntime(async (rt, req, res) => {
-      const { title } = (req.body ?? {}) as { title?: string };
-      if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
+      const { title, auto } = req.body ?? {};
+      if (auto === true && title === undefined) {
+        const id = String(req.params.chatId);
+        const chat = await rt.autoTitleChat(id) ?? rt.chats().find(c => c.id === id);
+        if (!chat) return void res.status(404).json({ error: "no such chat" });
+        return void res.json({ chat });
+      }
+      if (auto !== undefined || typeof title !== "string" || !title.trim()) return void res.status(400).json({ error: "missing title" });
       const chat = rt.renameChat(String(req.params.chatId), title);
       if (!chat) return void res.status(400).json({ error: "cannot rename that chat" });
       res.json({ chat });

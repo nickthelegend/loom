@@ -1130,7 +1130,10 @@ detects at least two roles.
 | `loom specs` / `loom specs:run <file>` | The project's Playwright specs · run one through the daemon |
 | `loom mcp:health` | Each MCP server's live state from the background poll |
 | `loom costs --series [days]` | The spend ledger day by day, per agent |
-| `loom open` / `loom version` | Open this project in the web app · what's installed |
+| `loom open` / `loom version` | Open Loom in the web app · what's installed |
+| `loom open --in <editor> [file[:line]]` | Open the current project or file in an installed editor. `--in last` reuses this user's last choice; a file without `--in` also uses it |
+| `loom chat:title <chat> [title] [--auto]` | Show or set a chat title. `--auto` derives a title from the first prompt while the chat still has its default name |
+| `loom triage [--agent <kind>] [--project <project>] [--issue] [command...]` | Save redacted doctor results, versions and the last 200 daemon log lines in `LOOM_HOME/triage-<date>.md`. Optionally ask an agent in a new chat or print a GitHub issue body; never posts it |
 | `loom rename <name>` / `loom find <query>` | Rename the project (id never moves) · search the thread |
 
 ## Supported agents
@@ -1335,6 +1338,46 @@ Pinning does **not** take the baton. The baton is the write lock for work that
 touches the repository; a conversation doesn't need it, and taking it would
 stop whatever is actually working. The main thread still follows the baton,
 because that's what makes it the main thread.
+
+Unnamed chats receive a deterministic 3–6 word title (at most 48 characters) after
+their first finished turn, derived locally from the first user message. No network
+request is made for the default title mode. Explicit user names—including names
+like "Chat 2"—are preserved; Main stays Main. Set `"chatTitles": "model"` in
+`.loom/config.json` to opt into a provider title: Loom picks the lowest estimated
+cost from configured providers' free or priced models, requests at most eight
+output tokens, and falls back locally on unavailable pricing, failure, an invalid
+title, or a five-second deadline (including model discovery). Model prices come
+from the provider catalogue; models without known prices are not guessed.
+
+`POST /api/projects/:id/chats/:chatId/rename` accepts either `{ "title": "My title" }`
+or `{ "auto": true }`, and returns `{ "chat": ChatInfo }`. Automatic requests leave
+user names unchanged. Both successful rename paths emit a normal WebSocket event
+with `kind: "status"`, `chat: id`, and
+`payload: { state: "chat_renamed", title, titleSource }`. `titleSource` is
+`"default"`, `"user"`, or `"auto"`; legacy numbered chats without provenance are
+treated as defaults.
+
+Editors are detected on PATH and in standard app locations: VS Code (`code`),
+Cursor, Zed, Windsurf, JetBrains launchers (`idea`, `webstorm`, `pycharm`, `goland`,
+`clion`, `rider`, `phpstorm`, `rubymine`), Sublime (`subl`), and Xcode on macOS.
+`GET /api/editors` returns `{ editors: [{ id, label }], lastEditor: string | null }`.
+`POST /api/projects/:id/open-in` accepts `{ editor, path?, line? }` and returns
+`{ editor, path, line? }` after spawning the launcher. `path` defaults to the project
+root; API relative paths are project-relative, while CLI paths are shell-relative.
+Lines are positive integers. Traversal and symlink escapes are rejected. These
+endpoints admit only the owner and their own unscoped devices. The last successful
+choice is saved per OS user in `LOOM_HOME/editor.json` and shared with those devices.
+Launchers receive literal argv arrays without a shell.
+
+For support, run `loom triage --issue -- loom send "the failing prompt"` to save
+and print a redacted report. The supplied failing command is recorded, never
+executed. Add `--agent <kind> --project <id-or-name>` to open a diagnosis chat in
+that project (the current project is the default). An existing enabled agent of
+that kind is reused, or one is added. Only redacted evidence is sent to the chat.
+The report includes the same checks as `loom doctor --json`, CLI/Node/daemon
+versions, and recent logs, with tokens, keys, emails and home paths removed.
+Reports use private file permissions and remain available when the daemon is down.
+Web and phone menus can consume the API; their screens are separate work.
 
 A thread may pin a **model** and, where supported, **reasoning effort**, without
 changing the agent's defaults or restarting its current turn. Claude Code and

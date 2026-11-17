@@ -17,7 +17,7 @@ export function providerModel(ref: string): { provider: string; model: string } 
   return model && resolveProvider(provider) ? { provider, model } : null;
 }
 
-export async function providerText(ref: string, prompt: string, opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {}): Promise<string> {
+export async function providerText(ref: string, prompt: string, opts: { timeoutMs?: number; fetchImpl?: typeof fetch; signal?: AbortSignal; maxTokens?: number } = {}): Promise<string> {
   const pm = providerModel(ref);
   if (!pm) throw new Error(`${ref} isn't a configured provider/model`);
   const p = resolveProvider(pm.provider)!;
@@ -29,8 +29,8 @@ export async function providerText(ref: string, prompt: string, opts: { timeoutM
     const res = await doFetch(chatUrl(p), {
       method: "POST",
       headers: requestHeaders(p),
-      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: false, temperature: 0 }),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
+      body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: false, temperature: 0, ...(opts.maxTokens !== undefined ? { max_tokens: opts.maxTokens } : {}) }),
+      signal: opts.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 60_000),
     });
     if (p.free(model) || isPool(pm.model)) countFreeRequest();
     if (res.ok) {

@@ -9,6 +9,10 @@ are reproduced here as those licenses require.
 - Project: https://github.com/Untrivial-ai/agent-orchestrator
 - Copyright 2026 Untrivial
 
+**Additional approach credit:** the Open in Editor action in `src/core/editors.ts`
+and `src/daemon/routes/editors.ts` was inspired by Agent Orchestrator's
+`TopbarOpenEditorButton.tsx`. Loom's detection and launch implementation is original.
+
 **What Loom adapted**, in `src/core/orchestra.ts`:
 - the orchestrator/worker split (one coordinating agent and many implementation
   agents);
@@ -42,6 +46,12 @@ license is included in `skills/agent/LICENSE`.
 
 - Project: https://github.com/pingdotgg/t3code
 - Copyright (c) 2026 T3 Tools Inc.
+
+**Additional approach credit:** automatic titles (`src/core/chat-titles.ts`), editor
+labels (`src/core/editors.ts`), and support bundles (`src/cli/triage.ts`) are inspired
+by T3 Code's `ThreadTitleContext.ts`, `editorLabels.ts`, and `cli/triage.ts`.
+These are original implementations for Loom's local summariser, provider API,
+Express daemon, and commander CLI.
 
 **What Loom adapted**, in `src/core/relay-protocol.ts`, `src/core/relay-client.ts`
 and the phone app's connection manager:
