@@ -52,3 +52,17 @@ it("uses editor-specific argv and parses file:line without splitting Windows dri
   expect(parseEditorTarget("C:\\src\\file.ts")).toEqual({ path: "C:\\src\\file.ts" });
   for (const line of [0, -1, 1.5, NaN, Infinity]) expect(() => editorArgs("code", file, line)).toThrow();
 });
+
+describe("launching on Windows", () => {
+  it("runs a .cmd launcher through cmd.exe with quoted arguments, and refuses characters cmd would re-read", async () => {
+    const { launchCommand } = await import("../src/core/editors.js");
+    expect(launchCommand("/usr/bin/zed", ["a.ts:3"], "linux")).toEqual({ command: "/usr/bin/zed", args: ["a.ts:3"] });
+    if (process.platform !== "win32") return; // the cmd.exe path needs Windows' own PATHEXT and ComSpec
+    const run = launchCommand("C:\\Program Files (x86)\\Code\\bin\\code.cmd", ["--goto", "C:\\p\\a b.ts:3"]);
+    expect(run.windowsVerbatimArguments).toBe(true);
+    expect(run.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    expect(run.args[3]).toBe('""C:\\Program Files (x86)\\Code\\bin\\code.cmd" "--goto" "C:\\p\\a b.ts:3""');
+    expect(() => launchCommand("C:\\x\\code.cmd", ["C:\\p\\a&calc.ts"])).toThrow(/can't pass safely/);
+  });
+});
+

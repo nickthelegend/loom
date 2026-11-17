@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn } from "./process.js";
+import { commandInvocation, spawn } from "./process.js";
 import { ensureLoomHome, loomHome } from "./registry.js";
 
 export interface EditorInfo { id: string; label: string }
@@ -104,13 +104,32 @@ export function lastEditor(): string | null {
   catch { return null; }
 }
 
+/**
+ * Windows launchers are often .cmd files (VS Code's `code`, Cursor's `cursor`), and Node refuses to
+ * spawn those without a shell (EINVAL, since CVE-2024-27980). npm-style shims unwrap to the real
+ * binary; anything else goes through cmd.exe with every argument quoted — and since cmd re-reads
+ * that line, a path with a character it treats specially is refused rather than escaped.
+ */
+export function launchCommand(executable: string, args: string[], platform: NodeJS.Platform = process.platform): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
+  if (platform !== "win32") return { command: executable, args };
+  const unwrapped = commandInvocation(executable, args);
+  if (!/\.(cmd|bat)$/i.test(unwrapped.command)) return unwrapped;
+  for (const part of [executable, ...args]) {
+    if (/["%^&|<>!\r\n]/.test(part)) throw new Error("that path has a character the Windows editor launcher can't pass safely");
+  }
+  const line = [executable, ...args].map((part) => `"${part}"`).join(" ");
+  return { command: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], windowsVerbatimArguments: true };
+}
+
 export async function openInEditor(projectDir: string, id: string, input?: string, line?: number): Promise<{ editor: string; path: string; line?: number }> {
   const file = editorPath(projectDir, input);
   const args = editorArgs(id, file, line);
   const editor = detectEditors().find(e => e.id === id);
   if (!editor) throw new Error(`editor "${id}" is not installed`);
+  const run = launchCommand(editor.executable, args);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(editor.executable, args, { cwd: projectDir, detached: true, stdio: "ignore", shell: false });
+    const child = spawn(run.command, run.args, { cwd: projectDir, detached: true, stdio: "ignore", shell: false,
+      ...(run.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) });
     child.once("error", reject);
     child.once("spawn", () => { child.unref(); resolve(); });
   });
