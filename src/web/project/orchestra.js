@@ -9,6 +9,7 @@ import { state } from '../state.js';
 import { fleetSince,jobProgressText,loadTeam,onlineRunners,runnerAct,runnerName,teamGlobs,teamGoalOf,teamRunners } from '../team.js';
 import { durfmt,emptyArt,LAND_ST,landPill,ORCH_RUN_ST,ORCH_TASK_ST,plainPreview,settleQuestionCard } from '../transcript.js';
 import { addAgents } from './add-agent.js';
+import { openScoreboard } from './scoreboard.js';
 
 /** orchestra behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -59,9 +60,12 @@ export function createOrchestra(view) {
     // ---- Fleets: N instances of an agent on a model, beside the checked roster (#369) ----
     // A row { agent, model, count } goes to the daemon as agent@model×N; it expands there into
     // distinct workers (codex@gpt-5.6-sol, codex@gpt-5.6-sol#2…) without touching the roster.
-    function fleetSpec(f){ return f.agent + (f.model ? "@" + f.model : "") + (f.count > 1 ? "x" + f.count : ""); }
+    // A saved fleet (#406) is a row { saved: name } and goes to the daemon as "@name", where it expands.
+    function fleetSpec(f){ return f.saved ? "@" + f.saved : f.agent + (f.model ? "@" + f.model : "") + (f.count > 1 ? "x" + f.count : ""); }
     function fleetChips(c){
       return (c.fleet || []).map(function(f, i){
+        if (f.saved) return '<button type="button" class="cowchip on cowfleet" data-fleet="' + i + '" title="' + esc("saved fleet: " + (f.spec || f.saved) + " \u2014 click to remove") + '">' +
+          ICONS.agents + '<span class="cwn">' + esc(f.saved) + '</span><span class="cwset"><span class="cwmodel">saved fleet</span><span class="cwx" aria-hidden="true">\u00d7</span></span></button>';
         return '<button type="button" class="cowchip on cowfleet" data-fleet="' + i + '" title="' + esc(fleetSpec(f) + " \u2014 click to remove") + '">' +
           agentGlyph(kindOfAgent(f.agent), f.agent) + '<span class="cwn">' + esc(f.agent) + "</span>" +
           '<span class="cwset"><span class="cwmodel">' + esc(f.model || "default model") + "</span>" + (f.count > 1 ? '<span class="cwcount">\u00d7' + f.count + "</span>" : "") +
@@ -73,6 +77,7 @@ export function createOrchestra(view) {
       return a ? a.kind : id;
     }
     function wireFleet(el, c){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-scoreboard]"), function(b){ b.onclick = function(){ openScoreboard(view.pid); }; });
       Array.prototype.forEach.call(el.querySelectorAll("[data-fleet]"), function(b){
         b.onclick = function(){ c.fleet.splice(Number(b.getAttribute("data-fleet")), 1); drawOrchControls(); };
       });
@@ -92,7 +97,9 @@ export function createOrchestra(view) {
         '<div class="cfrow"><label for="cfmodel">Model</label><input id="cfmodel" list="cfmodels" placeholder="its default \u2014 or e.g. claude-opus-5-5" autocomplete="off" spellcheck="false"><datalist id="cfmodels"></datalist></div>' +
         '<div class="cfrow"><label for="cfcount">How many</label><select id="cfcount">' + [1, 2, 3, 4, 5, 6, 7, 8].map(function(n){ return '<option value="' + n + '"' + (n === 2 ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></div>" +
         '<div class="cfhint">Each is its own worker in the run, on that model. Mix as many rows as you like \u2014 two on Opus, two on GPT\u20115.6\u2026</div>' +
-        '<div class="cfact"><button type="button" class="btn sm primary" id="cfadd">Add to team</button></div>';
+        '<div class="cfact">' + ((c.fleet || []).some(function(f){ return !f.saved; }) ? '<button type="button" class="btn sm ghost" id="cfsave" title="name these fleet rows and reuse them in any project">Save fleet\u2026</button>' : "") +
+          '<button type="button" class="btn sm primary" id="cfadd">Add to team</button></div>' +
+        '<div class="cfsaved" id="cfsaved"></div>';
       m.onmousedown = function(ev){ ev.stopPropagation(); };
       var agentSel = document.getElementById("cfagent"), list = document.getElementById("cfmodels");
       function suggest(){
@@ -103,6 +110,30 @@ export function createOrchestra(view) {
       }
       agentSel.onchange = suggest;
       suggest();
+      // saved fleets (#406): yours, in every project — one click adds the whole set
+      api("/api/fleets").then(function(r){
+        var box = document.getElementById("cfsaved"); if (!box || !(r.fleets || []).length) return;
+        box.innerHTML = '<div class="cmhead">saved fleets</div>' + r.fleets.map(function(f){
+          return '<button type="button" class="cfsv" data-saved="' + esc(f.name) + '" data-spec="' + esc(f.spec) + '"><b>' + esc(f.name) + "</b><span>" + esc(f.spec) + "</span></button>";
+        }).join("");
+        Array.prototype.forEach.call(box.querySelectorAll("[data-saved]"), function(b){
+          b.onclick = function(){
+            c.fleet = (c.fleet || []).concat([{ saved: b.getAttribute("data-saved"), spec: b.getAttribute("data-spec") }]);
+            view.closeMenu(); drawOrchControls();
+          };
+        });
+      }).catch(function(){ /* an older daemon: no saved fleets */ });
+      var save = document.getElementById("cfsave");
+      if (save) save.onclick = function(){
+        var spec = (c.fleet || []).filter(function(f){ return !f.saved; }).map(fleetSpec).join(",");
+        askText("Name this fleet", { note: "Use it as @name in Orchestra, races and Ask several, in any project.", ok: "Save" }).then(function(name){
+          name = (name || "").trim(); if (!name) return;
+          api("/api/fleets", { method: "PUT", body: JSON.stringify({ name: name, spec: spec }) }).then(function(){
+            toast("saved \u2014 use it as @" + name + " anywhere");
+            view.closeMenu();
+          }).catch(function(e){ toast(e.message); });
+        });
+      };
       document.getElementById("cfadd").onclick = function(){
         var row = { agent: agentSel.value, model: document.getElementById("cfmodel").value.trim(), count: Number(document.getElementById("cfcount").value) || 1 };
         if (/[\s@#]/.test(row.model)) { toast("a model id has no spaces, @ or #"); return; }
@@ -177,7 +208,8 @@ export function createOrchestra(view) {
             return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
               agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id, a.kind) + "</span></button>";
           }).join("") + fleetChips(c) +
-          '<button type="button" class="cowchip cowadd" id="cowfleetadd" title="race several of one agent, each on a model you choose">' + ICONS.plus + "fleet</button></span>";
+          '<button type="button" class="cowchip cowadd" id="cowfleetadd" title="race several of one agent, each on a model you choose">' + ICONS.plus + "fleet</button>" +
+          '<button type="button" class="cowchip cowadd" data-scoreboard title="which model wins your races, and at what cost">' + ICONS.star + "scoreboard</button></span>";
         Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
           b.onclick = function(){ var id = b.getAttribute("data-wk"); c.off[id] = !c.off[id]; drawOrchControls(); };
         });
@@ -210,7 +242,8 @@ export function createOrchestra(view) {
           '<button type="button" class="cowchip cowadd" id="cowfleetadd" title="add N workers of one agent, each on a model you choose \u2014 e.g. two on Opus, two on GPT\u20115.6">' +
             ICONS.plus + "fleet</button>" +
           '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
-            ICONS.plus + "model</button>" + "</span>" +
+            ICONS.plus + "model</button>" +
+          '<button type="button" class="cowchip cowadd" data-scoreboard title="which model wins your races, and at what cost">' + ICONS.star + "scoreboard</button>" + "</span>" +
         '<span class="colbl" title="how many tasks run at the same time">At once</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +

@@ -686,6 +686,56 @@ describe("web app · My issues (#382)", () => {
   });
 });
 
+describe("web app · saved fleets and the model scoreboard (#406)", () => {
+  it("saves the fleet rows under a name, adds the saved fleet as one chip, and opens the scoreboard", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    const admin = readDaemonConfig()!.adminToken;
+    try {
+      m.window.prompt = () => "squad";
+      await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+      await ready(m, '#cmode [data-cmode="orch"]');
+      click($(m, '#cmode [data-cmode="orch"]'));
+      await waitUntil(() => shown($(m, "#corch")) && !!$(m, "#cowfleetadd"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+      expect($(m, "#cfsave")).toBeNull(); // nothing to save yet
+      ($(m, "#cfagent") as HTMLSelectElement).value = "execbot";
+      ($(m, "#cfmodel") as HTMLInputElement).value = "gpt-5.6";
+      ($(m, "#cfcount") as HTMLSelectElement).value = "2";
+      click($(m, "#cfadd"));
+      await waitUntil(() => !!$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfsave"));
+      click($(m, "#cfsave"));
+      const fleets = async () => ((await (await fetch(`${baseUrl}/api/fleets`, { headers: { Authorization: `Bearer ${admin}` } })).json()) as { fleets: Array<{ name: string; spec: string }> }).fleets;
+      await waitUntil(async () => (await fleets()).some((f) => f.name === "squad"));
+      expect((await fleets()).find((f) => f.name === "squad")!.spec).toBe("execbot@gpt-5.6x2");
+      // take the row out, then add the saved fleet back as one chip that goes out as @squad
+      await waitUntil(() => !$(m, "#cmenu.cfleet"));
+      click($(m, "#cowk .cowfleet"));
+      await waitUntil(() => !$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, '#cfsaved [data-saved="squad"]'));
+      click($(m, '#cfsaved [data-saved="squad"]'));
+      await waitUntil(() => text(m, "#cowk .cowfleet").includes("squad"));
+      expect(text(m, "#cowk .cowfleet")).toContain("saved fleet");
+      expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ saved: "squad", spec: "execbot@gpt-5.6x2" }]);
+      // the scoreboard opens from the same row, for this project, and can widen to all
+      click($(m, "#corch [data-scoreboard]"));
+      await waitUntil(() => !!$(m, ".scoremodal") && !text(m, "#sbtable").includes("Loading") && !$(m, "#sbtable .loader"));
+      expect($(m, '#sbscope button.on')!.getAttribute("data-v")).toBe(projectId);
+      click($(m, '#sbscope [data-v="all"]'));
+      await waitUntil(() => $(m, '#sbscope button.on')!.getAttribute("data-v") === "all");
+      click($(m, "#sbx"));
+      await waitUntil(() => !$(m, ".scoremodal"));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem(`loomOrch:${projectId}`);
+      await fetch(`${baseUrl}/api/fleets?name=squad`, { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } }).catch(() => {});
+    }
+  });
+});
+
 describe("web app · accounts (#379)", () => {
   it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
     const m = mount();
