@@ -96,6 +96,12 @@
     color:var(--muted-foreground);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
   .sgrouph:first-child{margin-top:8px}
   .srow2{display:flex;gap:10px;align-items:flex-start;padding:7px 0}
+  .skillrow .sbody{min-width:0}
+  .skillchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .skchip{font-size:10.5px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--muted-foreground);font-family:var(--font-mono)}
+  .skchip.on{border-color:color-mix(in oklab,var(--ok) 45%,transparent);color:var(--foreground)}
+  .skchip.old{border-color:color-mix(in oklab,var(--warn) 45%,transparent)}
+  .skchip.mine{border-style:dashed}
   .sdot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:6px;background:var(--muted-foreground)}
   .sdot.ok{background:var(--ok)}
   .sdot.warn{background:var(--warn)}
