@@ -720,7 +720,9 @@ describe("web app · saved fleets and the model scoreboard (#406)", () => {
       await waitUntil(() => text(m, "#cowk .cowfleet").includes("squad"));
       expect(text(m, "#cowk .cowfleet")).toContain("saved fleet");
       expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ saved: "squad", spec: "execbot@gpt-5.6x2" }]);
-      // the scoreboard opens from the same row, for this project, and can widen to all
+      // the scoreboard opens from the same row, for this project, and can widen to all. A fresh
+      // window shows the first-run Setup dialog on its own; the scoreboard rightly won't open over it.
+      if ($(m, "#sclose")) { click($(m, "#sclose")); await waitUntil(() => !$(m, ".scrim")); }
       click($(m, "#corch [data-scoreboard]"));
       await waitUntil(() => !!$(m, ".scoremodal"));
       // the board reads every project's log; a loaded CI runner can take a while
