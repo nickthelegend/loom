@@ -40,7 +40,11 @@ export async function prepareDemoProject(dir: string, count = 3): Promise<void> 
   fs.mkdirSync(dir);
   try {
     const template = fileURLToPath(new URL("../../templates/demo-app/", import.meta.url));
-    fs.cpSync(template, dir, { recursive: true, force: false, errorOnExist: true });
+    // Entry by entry into the folder we just claimed: Node 22/24 refuse a recursive copy onto an
+    // existing root when errorOnExist is set, and we still want "never overwrite" for the files.
+    for (const entry of fs.readdirSync(template)) {
+      fs.cpSync(path.join(template, entry), path.join(dir, entry), { recursive: true, force: false, errorOnExist: true });
+    }
     // npm omits .gitignore files from packages, so create this after copying.
     fs.writeFileSync(path.join(dir, ".gitignore"), ".loom/\n", { flag: "wx" });
     await projectGit(["init"], dir);
