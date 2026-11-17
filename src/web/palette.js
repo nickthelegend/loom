@@ -9,6 +9,7 @@ import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
 import { openSettingsModal } from './settings.js';
 import { state } from './state.js';
+import { openScoreboard } from './project/scoreboard.js';
 
 
   /**
@@ -75,6 +76,7 @@ import { state } from './state.js';
         if (state.openSubagents) C.push({ icon: ICONS.agents, label: "Subagents", sub: "dock", run: function(){ state.openSubagents(); } });
       }
       if (pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } });
+      C.push({ icon: ICONS.star, label: "Model scoreboard", sub: "which model wins, at what cost", run: function(){ openScoreboard(pid || null); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
       (state.projects || []).forEach(function(p){
         if (p.id === pid || !state.selectProject) return;

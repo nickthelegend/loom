@@ -78,6 +78,7 @@ import { registerIntegrationsRoutes } from './routes/integrations.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerMessagesRoutes } from './routes/messages.js';
 import { registerObservabilityRoutes } from './routes/observability.js';
+import { registerScoreboardRoutes } from "./routes/scoreboard.js";
 import { registerOrchestraRoutes } from './routes/orchestra.js';
 import { registerPairingRoutes } from './routes/pairing.js';
 import { registerProjectActionsRoutes } from './routes/project-actions.js';
@@ -522,6 +523,7 @@ export class LoomDaemon {
     registerSetupRoutes(app, ctx);
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
+    registerScoreboardRoutes(app);
     registerAgentSkillsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);

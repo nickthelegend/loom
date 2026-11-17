@@ -3,6 +3,8 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { Scoreboard, ScoreboardWindow } from "../core/scoreboard.js";
+import type { SavedFleet } from "../core/fleets.js";
 import type { TryProjectInput, TryProjectResult } from "../core/demo-project.js";
 import type { IntakeIssue, IntakeMode, IntakeSource } from "../core/intake.js";
 import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
@@ -324,6 +326,14 @@ export class DaemonClient {
    * The parent keeps the baton — this is one turn borrowing another pair of
    * hands, not a handoff.
    */
+  scoreboard(project = "all", window: ScoreboardWindow = "30d"): Promise<Scoreboard> {
+    return this.request("GET", `/api/scoreboard?project=${encodeURIComponent(project)}&window=${encodeURIComponent(window)}`);
+  }
+
+  fleets(): Promise<{ fleets: SavedFleet[] }> { return this.request("GET", "/api/fleets"); }
+  saveFleet(name: string, spec: string): Promise<{ fleet: SavedFleet }> { return this.request("PUT", "/api/fleets", { name, spec }); }
+  removeFleet(name: string): Promise<{ removed: true }> { return this.request("DELETE", "/api/fleets", { name }); }
+
   // ── orchestra (core/orchestra.ts) ──
 
   orchestraRuns(id: string): Promise<{ runs: OrchestraRun[]; active: string | null }> {
