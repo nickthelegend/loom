@@ -832,7 +832,6 @@ export class DaemonClient {
   }
 
   /** Model and effort override the chat selection for this message only, including when queued. */
-  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string } = {}): Promise<{ agentId: string }> {
   send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string; requestId?: string } = {}): Promise<{ agentId: string; queued?: number; queueId?: string; requestId?: string; answered?: boolean }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
