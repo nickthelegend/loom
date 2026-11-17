@@ -995,7 +995,13 @@ export function createComposer(view) {
         openMenu(Math.round(r.left), Math.round(r.top - 4), items);
       };
       setAuto(state.auto);
-      if (view.desktop) setTimeout(function(){ if (!pageGone() && state.startTour) state.startTour(false); }, 1200);
+      // A demo project opened from `loom try` or "Try a demo project" walks through itself (#402);
+      // anything else gets the spotlight tour, once.
+      if (view.desktop) setTimeout(function(){
+        if (pageGone()) return;
+        if (state.demoTourWanted && state.demoTourWanted()) state.startDemoTour();
+        else if (state.startTour) state.startTour(false);
+      }, 1200);
       // "Run again" from a run's own thread lands here, in Main, ready to orchestrate
       try { if (view.chatId === "main" && localStorage.getItem("loomOrchNext:" + view.pid)) { localStorage.removeItem("loomOrchNext:" + view.pid); state.cmode = "orch"; } } catch (e) {}
       // Simple mode has no Orchestrate: the composer is a chat

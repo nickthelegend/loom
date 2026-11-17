@@ -993,6 +993,9 @@
   .tourt{font-size:15px;font-weight:600;margin:4px 0 6px}
   .tourb{font-size:13px;line-height:1.55;color:var(--muted-foreground)}
   .toura{display:flex;justify-content:space-between;margin-top:12px}
+  .demotour .toura{gap:6px;align-items:center}
+  .demotour .toura .spacer{flex:1}
+  .tourpre{margin-top:10px;padding:7px 10px;border-radius:9px;background:var(--muted);font-size:12.5px;color:var(--foreground)}
   /* view transitions */
   ::view-transition-old(root),::view-transition-new(root){animation-duration:.14s}
   /* outline */
@@ -1553,3 +1556,8 @@
   font:inherit;font-size:12.5px;padding:0 9px}
 .acctadd #acctlabel{width:150px}
 .acctadd #acctdir{flex:1;min-width:180px}
+
+  /* "Try a demo project" (#402) */
+  .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
+  .trycallout .btn{flex:none}
+  .dempty .trydemo{margin-top:4px}

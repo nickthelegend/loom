@@ -10,6 +10,7 @@ import { JOB_KIND,loadTeam,loadTeamPolicy,loadTeamRunners,loadTeamShare,runnerNa
 import { ACCENTS,appearancePref,applyAppearance,isElectron,setThemePref,themePref } from './theme.js';
 import { durfmt } from './transcript.js';
 import { devMode, setDevMode } from './mode.js';
+import { TRY_BTN, bindTryDemo } from './try-demo.js';
 
 
   /**
@@ -126,8 +127,9 @@ import { devMode, setDevMode } from './mode.js';
           s.node.ok ? "" : (s.platform === "darwin" ? "brew install node"
             : s.platform === "win32" ? "winget install OpenJS.NodeJS" : "install node 22.5 or newer"));
         h += '<div class="sgrouph">Agents that can take a turn</div>';
-        if (!s.ready) h += '<div class="snote">Nothing here can hold the baton yet \u2014 install one and Loom has something to drive.</div>';
-        s.agents.forEach(function(a){
+        if (!s.ready) h += '<div class="snote">Nothing here can hold the baton yet \u2014 install one and Loom has something to drive.</div>' +
+          '<div class="trycallout"><div><b>Try Loom first.</b> A small demo project with three scripted agents that need no keys and no CLIs, and a walkthrough of the whole loop.</div>' + TRY_BTN + "</div>";
+        s.agents.filter(function(a){ return a.kind !== "demo"; }).forEach(function(a){
           // Three states, not two. "Installed" was the lie that cost an
           // afternoon: claude answered --version happily while refusing every
           // turn with "Not logged in".
@@ -157,6 +159,10 @@ import { devMode, setDevMode } from './mode.js';
           '<span class="hintx">' + (s.ready ? "This machine can run agents." : "No agents installed yet.") + "</span></div>";
         pane.innerHTML = h;
         document.getElementById("setuprecheck").onclick = renderSetup;
+        bindTryDemo(pane);
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-trydemo]"), function(b){
+          var go = b.onclick; b.onclick = function(){ close(); go(); };
+        });
       }).catch(fail);
     }
 
@@ -1386,7 +1392,8 @@ import { devMode, setDevMode } from './mode.js';
         row.querySelector("[data-np-count]").oninput = function(e){ p.count = Math.max(1, Math.min(8, parseInt(e.target.value, 10) || 1)); };
       });
     }
-    api("/api/setup").then(function(r){ found = (r && r.agents) || []; drawAgents(); })
+    // the demo agent belongs to "Try a demo project" (#402), not to a real one
+    api("/api/setup").then(function(r){ found = ((r && r.agents) || []).filter(function(a){ return a.kind !== "demo"; }); drawAgents(); })
       .catch(function(){ found = []; drawAgents(); });
 
     function fieldErr(id, input, msg){

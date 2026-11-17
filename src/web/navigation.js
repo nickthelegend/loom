@@ -1,6 +1,6 @@
 /** Browser navigation module. See README.md for ownership and startup. */
 import { signInGate } from './signin.js';
-import { applyMode } from './mode.js';
+import { applyMode,setDevMode } from './mode.js';
 import { renderPair } from './connection.js';
 import { joinFromHash,renderJoin } from './join.js';
 import { renderBoard } from './home.js';
@@ -11,6 +11,7 @@ import { applyTheme } from './theme.js';
 import { ICONS } from './icons.js';
 import { KMOD } from './permissions.js';
 import { esc } from './format.js';
+import { toast } from './notifications.js';
 import { isGuest,renderGuest } from './share-live.js';
 
 
@@ -167,6 +168,123 @@ import { isGuest,renderGuest } from './share-live.js';
     window.addEventListener("resize", place);
     show();
   }
+  /**
+   * The demo walkthrough (#402): `loom try` and the "Try a demo project" buttons land here with
+   * ?tour=1 (or a one-shot flag). Unlike the spotlight tour it does things: it types into the box and
+   * sends, then steers the running turn, so someone with no agents and no keys sees the whole loop
+   * work. Each step's target must be on screen; a step whose target isn't is skipped.
+   */
+  var DEMO_TOUR = [
+    { sel: "#box", title: "Ask for something", body: "This project has three demo agents \u2014 scripted, offline and free. Ask one to add dark mode: it reads the code, edits a real file and runs the tests.", prefill: "Add dark mode", primary: "Send it", act: "send" },
+    { sel: "#pane-thread", title: "Watch it work", body: "Every step streams in as it happens. The edit is real \u2014 the file in the demo folder changed \u2014 and the cost is $0.00. Wait for the reply, then carry on." },
+    { sel: "#box", title: "Steer while it works", body: "Send another request. While a turn is running, Steer (\u2325\u23ce) slips a note into it instead of waiting in the queue \u2014 we\u2019ll do both for you.", prefill: "Write tests for the filter", primary: "Send, then steer", act: "steer" },
+    { sel: '.tab[data-tab="fleet"]', title: "Your agents", body: "The Agents tab shows what each agent is doing right now. Add more on any model, as many as you want \u2014 two on one model, two on another.", primary: "Show me", act: "tab" },
+    { sel: "#setupbtn", title: "Bring your own agents", body: "When you\u2019re ready: Settings \u25b8 Setup finds the agent CLIs you have and installs the ones you don\u2019t. Developer mode turns on Orchestra, races, the terminal and the rest.", primary: "Turn on Developer mode", act: "devmode", last: true },
+  ];
+  function demoTourWanted(){
+    try {
+      if (/(?:^|[?&])tour=1(?:&|$)/.test(location.search)) return true;
+      return sessionStorage.getItem("loomDemoTour") === "1";
+    } catch (e) { return false; }
+  }
+  function startDemoTour(waited){
+    // Something modal is up (a first-run dialog, a confirm): wait for it rather than lose the tour.
+    if ((document.querySelector(".scrim") || document.getElementById("tourcard")) && (waited || 0) < 20) {
+      return void setTimeout(function(){ startDemoTour((waited || 0) + 1); }, 500);
+    }
+    try {
+      sessionStorage.removeItem("loomDemoTour");
+      // drop ?tour=1 so a reload doesn't start it again
+      if (/[?&]tour=1/.test(location.search)) history.replaceState(null, "", location.pathname + location.hash);
+      localStorage.setItem("loomTourDone", "1");
+    } catch (e) {}
+    if (document.querySelector(".scrim") || document.getElementById("tourcard")) return;
+    var i = 0;
+    var shade = document.createElement("div"); shade.className = "tourshade"; shade.id = "tourshade";
+    var card = document.createElement("div"); card.className = "tourcard demotour"; card.id = "tourcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-live", "polite");
+    document.body.appendChild(shade); document.body.appendChild(card);
+    // On screen = has a size; with no layout engine at all (a DOM test), = not hidden by style.
+    var noLayout = document.documentElement.getBoundingClientRect().width === 0;
+    function shown(el){
+      if (!el) return false;
+      if (!noLayout) return el.getBoundingClientRect().width > 0;
+      for (var n = el; n && n.nodeType === 1; n = n.parentNode) if (getComputedStyle(n).display === "none") return false;
+      return true;
+    }
+    function target(){ var el = document.querySelector(DEMO_TOUR[i].sel); return shown(el) ? el : null; }
+    function done(){ shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place); }
+    function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
+    function next(){
+      do { i++; } while (i < DEMO_TOUR.length && !target());
+      if (i >= DEMO_TOUR.length) done(); else show();
+    }
+    function place(){
+      var el = target(); if (!el) return;
+      var r = el.getBoundingClientRect(), pad = 6;
+      shade.style.left = (r.left - pad) + "px"; shade.style.top = (r.top - pad) + "px";
+      shade.style.width = (r.width + pad * 2) + "px"; shade.style.height = (r.height + pad * 2) + "px";
+      var cw = card.offsetWidth, ch = card.offsetHeight;
+      var top = r.top - ch - 16 > 8 ? r.top - ch - 16 : Math.min(window.innerHeight - ch - 8, r.bottom + 16);
+      card.style.left = Math.max(8, Math.min(window.innerWidth - cw - 8, r.left + r.width / 2 - cw / 2)) + "px";
+      card.style.top = Math.max(8, top) + "px";
+    }
+    function type(text){
+      var box = document.getElementById("box"); if (!box) return null;
+      box.value = text;
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      return box;
+    }
+    function sendBox(){ var b = document.getElementById("send"); if (b) b.click(); }
+    function act(s){
+      if (s.act === "send") { type(s.prefill); sendBox(); return next(); }
+      if (s.act === "steer") {
+        type(s.prefill); sendBox();
+        // the demo turn takes a few seconds; once the Steer button shows, steer it
+        var tries = 0;
+        var t = setInterval(function(){
+          var st = document.getElementById("steer");
+          if (st && st.style.display !== "none" && shown(st)) {
+            clearInterval(t);
+            type("Also cover an empty list");
+            st.click();
+          } else if (++tries > 40) clearInterval(t);
+        }, 150);
+        return next();
+      }
+      if (s.act === "tab") { var tb = document.querySelector(s.sel); if (tb) tb.click(); return setTimeout(next, 300); }
+      if (s.act === "devmode") {
+        setDevMode(true);
+        done();
+        toast("Developer mode on \u2014 Orchestra, races and the terminal are back");
+        if (state.rerender) state.rerender();
+        return;
+      }
+      next();
+    }
+    function show(){
+      var s = DEMO_TOUR[i];
+      if (s.prefill && !s.act) type(s.prefill);
+      card.innerHTML = '<div class="tourstep">Try Loom \u00b7 ' + (i + 1) + " of " + DEMO_TOUR.length + "</div>" +
+        '<div class="tourt">' + esc(s.title) + '</div><div class="tourb">' + esc(s.body) + "</div>" +
+        (s.prefill ? '<div class="tourpre"><span>\u201c' + esc(s.prefill) + '\u201d</span></div>' : "") +
+        '<div class="toura"><button type="button" class="btn xs ghost" id="tourskip">' + (s.last ? "Finish" : "End tour") + "</button>" +
+        '<span class="spacer"></span>' +
+        (s.primary ? '<button type="button" class="btn xs primary" id="touract">' + esc(s.primary) + "</button>" : "") +
+        (s.last ? "" : '<button type="button" class="btn xs ' + (s.primary ? "ghost" : "primary") + '" id="tournext">' + (s.primary ? "Skip" : "Next") + "</button>") +
+        "</div>";
+      document.getElementById("tourskip").onclick = done;
+      var a = document.getElementById("touract"); if (a) a.onclick = function(){ act(s); };
+      var n = document.getElementById("tournext"); if (n) n.onclick = next;
+      place();
+      (a || n || document.getElementById("tourskip")).focus();
+    }
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("resize", place);
+    if (!target()) { i = -1; return next(); }
+    show();
+  }
+  state.startDemoTour = startDemoTour;
+  state.demoTourWanted = demoTourWanted;
   state.startTour = startTour;
   state.openShortcuts = openShortcuts;
   function setFocusMode(on){
