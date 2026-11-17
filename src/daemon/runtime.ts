@@ -1,3 +1,4 @@
+import { writeLoomMcpSession } from "../core/loom-tools.js";
 import { createHash } from "node:crypto";
 import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
 import { buildBriefing } from "../core/projection.js";
@@ -25,7 +26,7 @@ import { renderProjection } from "../core/distill.js";
 import { EventLog } from "../core/eventlog.js";
 import { ensureBranch, addWorktree as gitAddWorktree, readOut, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
-import { probeMcpServer, probeMcpServers, writeMcpSession } from "../core/mcp.js";
+import { probeMcpServer, probeMcpServers } from "../core/mcp.js";
 import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
@@ -328,6 +329,7 @@ export class ProjectRuntime {
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       agentInstructions: (id) => this.agentInstructions(id),
       chatInstructions: (chat) => this.chatInstructions(chat),
+      apiUrl: () => this.apiUrl,
       healthyMcps: (...args) => this.healthyMcps(...args),
       appendIfOpen: (...args) => this.appendIfOpen(...args),
       get agents() { return runtime.agents; },
@@ -381,6 +383,8 @@ export class ProjectRuntime {
     });
 
     this.orchestra = new OrchestraEngine({
+      mcps: () => this.healthyMcps(),
+      loomTools: () => Boolean(this.config.loomTools),
       apiUrl: () => this.apiUrl,
       projectId: info.id,
       projectName: info.name,
@@ -926,6 +930,7 @@ export class ProjectRuntime {
    * with no restart. Only the known keys are honoured; unknown ones are ignored.
    */
   patchConfig(patch: {
+    loomTools?: boolean;
     brain?: { extractor?: "auto" | "off"; model?: string; semantic?: boolean; continuity?: boolean };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
@@ -941,6 +946,7 @@ export class ProjectRuntime {
     // Validate everything that can be rejected BEFORE touching this.config, so a
     // bad field can't leave a half-applied change in memory that the next save
     // would then persist.
+    if (patch.loomTools !== undefined && typeof patch.loomTools !== "boolean") throw new Error("loomTools must be boolean");
     const wantsDefault = typeof patch.defaultAgent === "string";
     const defaultId = wantsDefault ? patch.defaultAgent!.trim() : "";
     if (wantsDefault && defaultId && !this.config.agents.some((a) => a.id === defaultId)) {
@@ -951,6 +957,7 @@ export class ProjectRuntime {
     const previousConfig = { ...this.config }, previousContinuity = this.continuity;
     const changingContinuity = typeof patch.brain?.continuity === "boolean" && patch.brain.continuity !== Boolean(this.config.brain?.continuity);
     try {
+      if (patch.loomTools !== undefined) this.config.loomTools = patch.loomTools;
       if (patch.brain) {
         if (changingContinuity) {
           if (this.anyBusy() || this.continuity?.store.activeReceipts().length || this.queue.length)
@@ -1037,6 +1044,7 @@ export class ProjectRuntime {
    * a blank that hides what's actually running.
    */
   settings(): {
+    loomTools: boolean;
     brain: { extractor: "auto" | "off"; model: string; semantic: boolean; continuity: boolean };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
@@ -1051,6 +1059,7 @@ export class ProjectRuntime {
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
     return {
+      loomTools: Boolean(this.config.loomTools),
       brain: {
         continuity: Boolean(this.config.brain?.continuity),
         extractor: this.config.brain?.extractor === "off" ? "off" : "auto",
@@ -1240,20 +1249,22 @@ export class ProjectRuntime {
       const liveRun = runId ? this.continuity?.isLiveRun(runId) : true;
       const chat = (runId ? this.continuity?.eventChat(runId) : undefined) ?? e.chat ?? this.turns.turnChat.get(agent.id);
       let payload = e.payload;
-      // Enrich the completed turn so its gen_ai span carries system + model +
+      // Enrich terminal outcomes so accounting and gen_ai spans carry system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
       // here; the model prefers what the adapter actually used, else the
-      // configured override; the cost is the turn_cost stashed a moment ago.
+      // requested override, then the configured default; cost comes from turn_cost.
       const p = e.payload as Record<string, unknown>;
       if (liveRun && e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
         if (usd > 0) this.turns.pendingCost.set(agent.id, usd);
-      } else if (liveRun && e.kind === "run_complete") {
+      } else if (liveRun && (e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted"))) {
         const model =
           (typeof p.model === "string" && p.model) ||
+          this.turns.turnModel.get(agent.id) ||
           (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
         const cost = this.turns.pendingCost.get(agent.id);
         this.turns.pendingCost.delete(agent.id);
+        this.turns.turnModel.delete(agent.id);
         payload = {
           ...p,
           adapter: cfg.kind,
@@ -3484,7 +3495,7 @@ export class ProjectRuntime {
     });
 
     await this.ensureStarted(opts.agentId);
-    const mcp = child.capabilities.mcp ? writeMcpSession(this.healthyMcps()) : null;
+    const mcp = child.capabilities.mcp ? writeLoomMcpSession(this.healthyMcps(), this.config.loomTools ? { project: this.info.id, api: this.apiUrl } : undefined) : null;
     const brief = this.subtaskBriefing(parentAgentId, opts.agentId, task);
     const input: SendInput = {
       text: task,

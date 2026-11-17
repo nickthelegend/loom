@@ -291,7 +291,6 @@ const mousedown = (m: Mounted, el: Element | null) => {
 };
 
 
-
 describe("web app · composer modes", () => {
   it("chooses a model and count before adding Orchestra workers", async () => {
     const m = mount({ hash: `#p/${projectId}` });
@@ -687,6 +686,49 @@ describe("web app · My issues (#382)", () => {
   });
 });
 
+describe("web app · Loom for agents (#405)", () => {
+  it("groups agents that share a skills folder, flags outdated and your own skills, and installs", async () => {
+    const m = mount();
+    const posted: unknown[] = [];
+    const skills = (state: "on" | "old" | "none" | "mine") => ["loom", "loom-ops"].map((id) => ({
+      id, installed: state !== "none", managed: state === "on" || state === "old", current: state === "on", version: null,
+    }));
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
+      if (u.endsWith("/api/agent-skills")) return json({ version: { revision: "abc", committedAt: "2026-11-17T00:00:00Z" }, autoUpdate: true, agents: [
+        { agent: "claude-code", dir: "/h/.claude/skills", skills: skills("on") },
+        { agent: "codex", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "opencode", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "grok", dir: "/h/.grok/skills", skills: [{ id: "loom", installed: true, managed: false, current: false, version: null }, { id: "loom-ops", installed: false, managed: false, current: false, version: null }] },
+      ] });
+      if (u.endsWith("/api/agent-skills/install")) { posted.push(JSON.parse(String(init?.body))); return json({ dryRun: false, results: [{ dir: "/h/.agents/skills", id: "loom", action: "updated" }] }); }
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="agentskills"]'));
+    click($(m, '.setnav [data-sec="agentskills"]'));
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .skillrow").length === 3);
+    const rows = [...m.window.document.querySelectorAll("#setpane .skillrow")].map((r) => r.textContent ?? "");
+    expect(rows[0]).toContain("all 2 installed and current");
+    expect(rows[1]).toContain("Codex");
+    expect(rows[1]).toContain("OpenCode");
+    expect(rows[1]).toContain("2 can be updated");
+    expect(rows[2]).toContain("1 folder is your own and left alone");
+    // the current row has nothing to install; the shared Codex/OpenCode row offers Update for both
+    expect(m.window.document.querySelectorAll('#setpane .skillrow')[0].querySelector('[data-skillsdo="install"]')).toBeNull();
+    const update = m.window.document.querySelectorAll("#setpane .skillrow")[1].querySelector('[data-skillsdo="install"]') as HTMLElement;
+    expect(update.textContent).toBe("Update");
+    click(update);
+    await waitUntil(() => posted.length === 1);
+    expect(posted[0]).toEqual({ agents: ["codex", "opencode"] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · the demo walkthrough (#402)", () => {
   it("opens a demo project with ?tour=1 and walks it: sends, steers the running turn, shows Agents, turns on Developer mode", async () => {
     process.env.LOOM_DEMO_DURATION_MS = "1500";
@@ -729,46 +771,76 @@ describe("web app · the demo walkthrough (#402)", () => {
   }, 60_000);
 });
 
-describe("web app · Loom for agents (#405)", () => {
-  it("groups agents that share a skills folder, flags outdated and your own skills, and installs", async () => {
-    const m = mount();
-    const posted: unknown[] = [];
-    const skills = (state: "on" | "old" | "none" | "mine") => ["loom", "loom-ops"].map((id) => ({
-      id, installed: state !== "none", managed: state === "on" || state === "old", current: state === "on", version: null,
-    }));
-    const realFetch = m.window.fetch;
-    m.window.fetch = ((input: string, init?: RequestInit) => {
-      const u = String(input);
-      const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
-      if (u.endsWith("/api/agent-skills")) return json({ version: { revision: "abc", committedAt: "2026-11-17T00:00:00Z" }, autoUpdate: true, agents: [
-        { agent: "claude-code", dir: "/h/.claude/skills", skills: skills("on") },
-        { agent: "codex", dir: "/h/.agents/skills", skills: skills("old") },
-        { agent: "opencode", dir: "/h/.agents/skills", skills: skills("old") },
-        { agent: "grok", dir: "/h/.grok/skills", skills: [{ id: "loom", installed: true, managed: false, current: false, version: null }, { id: "loom-ops", installed: false, managed: false, current: false, version: null }] },
-      ] });
-      if (u.endsWith("/api/agent-skills/install")) { posted.push(JSON.parse(String(init?.body))); return json({ dryRun: false, results: [{ dir: "/h/.agents/skills", id: "loom", action: "updated" }] }); }
-      return realFetch(input, init);
-    }) as typeof m.window.fetch;
-    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
-    click($(m, "#setupbtn"));
-    await waitUntil(() => !!$(m, '.setnav [data-sec="agentskills"]'));
-    click($(m, '.setnav [data-sec="agentskills"]'));
-    await waitUntil(() => m.window.document.querySelectorAll("#setpane .skillrow").length === 3);
-    const rows = [...m.window.document.querySelectorAll("#setpane .skillrow")].map((r) => r.textContent ?? "");
-    expect(rows[0]).toContain("all 2 installed and current");
-    expect(rows[1]).toContain("Codex");
-    expect(rows[1]).toContain("OpenCode");
-    expect(rows[1]).toContain("2 can be updated");
-    expect(rows[2]).toContain("1 folder is your own and left alone");
-    // the current row has nothing to install; the shared Codex/OpenCode row offers Update for both
-    expect(m.window.document.querySelectorAll('#setpane .skillrow')[0].querySelector('[data-skillsdo="install"]')).toBeNull();
-    const update = m.window.document.querySelectorAll("#setpane .skillrow")[1].querySelector('[data-skillsdo="install"]') as HTMLElement;
-    expect(update.textContent).toBe("Update");
-    click(update);
-    await waitUntil(() => posted.length === 1);
-    expect(posted[0]).toEqual({ agents: ["codex", "opencode"] });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(m.errors.join("\n")).toBe("");
+describe("web app · saved fleets and the model scoreboard (#406)", () => {
+  it("saves the fleet rows under a name, adds the saved fleet as one chip, and opens the scoreboard", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    const admin = readDaemonConfig()!.adminToken;
+    try {
+      m.window.prompt = () => "squad";
+      await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+      await ready(m, '#cmode [data-cmode="orch"]');
+      click($(m, '#cmode [data-cmode="orch"]'));
+      await waitUntil(() => shown($(m, "#corch")) && !!$(m, "#cowfleetadd"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+      expect($(m, "#cfsave")).toBeNull(); // nothing to save yet
+      ($(m, "#cfagent") as HTMLSelectElement).value = "execbot";
+      ($(m, "#cfmodel") as HTMLInputElement).value = "gpt-5.6";
+      ($(m, "#cfcount") as HTMLSelectElement).value = "2";
+      click($(m, "#cfadd"));
+      await waitUntil(() => !!$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, "#cmenu.cfleet #cfsave"));
+      click($(m, "#cfsave"));
+      const fleets = async () => ((await (await fetch(`${baseUrl}/api/fleets`, { headers: { Authorization: `Bearer ${admin}` } })).json()) as { fleets: Array<{ name: string; spec: string }> }).fleets;
+      await waitUntil(async () => (await fleets()).some((f) => f.name === "squad"));
+      expect((await fleets()).find((f) => f.name === "squad")!.spec).toBe("execbot@gpt-5.6x2");
+      // take the row out, then add the saved fleet back as one chip that goes out as @squad
+      await waitUntil(() => !$(m, "#cmenu.cfleet"));
+      click($(m, "#cowk .cowfleet"));
+      await waitUntil(() => !$(m, "#cowk .cowfleet"));
+      click($(m, "#cowfleetadd"));
+      await waitUntil(() => !!$(m, '#cfsaved [data-saved="squad"]'));
+      click($(m, '#cfsaved [data-saved="squad"]'));
+      await waitUntil(() => text(m, "#cowk .cowfleet").includes("squad"));
+      expect(text(m, "#cowk .cowfleet")).toContain("saved fleet");
+      expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ saved: "squad", spec: "execbot@gpt-5.6x2" }]);
+      // the scoreboard opens from the same row, for this project, and can widen to all. A fresh
+      // window shows the first-run Setup dialog on its own; the scoreboard rightly won't open over it.
+      if ($(m, "#sclose")) { click($(m, "#sclose")); await waitUntil(() => !$(m, ".scrim")); }
+      click($(m, "#corch [data-scoreboard]"));
+      await waitUntil(() => !!$(m, ".scoremodal"));
+      // the board reads every project's log; a loaded CI runner can take a while
+      await waitUntil(() => !$(m, "#sbtable .loader"), { timeoutMs: 35_000 });
+      expect($(m, '#sbscope button.on')!.getAttribute("data-v")).toBe(projectId);
+      click($(m, '#sbscope [data-v="all"]'));
+      await waitUntil(() => $(m, '#sbscope button.on')!.getAttribute("data-v") === "all");
+      click($(m, "#sbx"));
+      await waitUntil(() => !$(m, ".scoremodal"));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem(`loomOrch:${projectId}`);
+      await fetch(`${baseUrl}/api/fleets?name=squad`, { method: "DELETE", headers: { Authorization: `Bearer ${admin}` } }).catch(() => {});
+    }
+  });
+});
+
+describe("web app · Loom tools for a project (#404)", () => {
+  it("turns the project's loomTools on and off from Preferences", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    try {
+      await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+      click($(m, "#setupbtn"));
+      await waitUntil(() => !!$(m, '.setnav [data-sec="preferences"]'));
+      click($(m, '.setnav [data-sec="preferences"]'));
+      await waitUntil(() => !!$(m, '#projprefs [data-seg="loomtools"]'));
+      expect($(m, '#projprefs [data-seg="loomtools"] button.on')!.getAttribute("data-val")).toBe("off");
+      click($(m, '#projprefs [data-seg="loomtools"] [data-val="on"]'));
+      await waitUntil(async () => (await rest<{ loomTools?: boolean }>("GET", "/config")).loomTools === true);
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await rest("PATCH", "/config", { loomTools: false });
+    }
   });
 });
 

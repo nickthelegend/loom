@@ -31,6 +31,8 @@
  * task's agent output streams into that task's own chat.
  */
 
+import { writeLoomMcpSession } from "./loom-tools.js";
+import type { McpServerConfig } from "../types.js";
 import { intakePrBody, recordIntakeRun } from "./intake.js";
 import { listAccounts, resolveAgentAccount, type Account } from "./accounts.js";
 import { recordOpenedPr } from "./pr-feedback.js";
@@ -41,7 +43,9 @@ import path from "node:path";
 import { createWorktree } from "./worktrees.js";
 import type { TeamPolicy } from "./team-policy.js";
 
-import { loomHome } from "./registry.js";
+import { loomHome, findProject } from "./registry.js";
+import { expandSavedFleets, parseAgentSpec } from "./fleets.js";
+import { bestFleet, readScoreboard } from "./scoreboard.js";
 import { blockedBy, type GoalScope } from "./goal-lanes.js";
 import { cutStack, type MergedTask } from "./team-landing.js";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, GitDelivery, LoomEvent, SendInput } from "../types.js";
@@ -78,20 +82,7 @@ export interface OrchestraWorker extends OrchestraModel {
   configDir?: string;
 }
 
-/** Parse agent[@model][:effort][xN]. The team: and acp: prefixes belong to the agent name. */
-export function parseAgentSpec(value: string, rosterIds: string[] = []): OrchestraModel & { agent: string; count: number } {
-  let spec = value.trim();
-  if (rosterIds.some((id) => id.toLowerCase() === spec.toLowerCase())) return { agent: spec, count: 1 };
-  const copies = /[x×](\d+)$/.exec(spec);
-  const count = copies ? Number(copies[1]) : 1;
-  if (!Number.isSafeInteger(count) || count < 1 || count > 100) throw new Error("worker count must be an integer from 1 to 100");
-  if (copies) spec = spec.slice(0, copies.index).trimEnd();
-  const match = /^(team:|acp:)?([^@:#]+)(?:@([^@:#\s]+))?(?::([^@:#\s]+))?$/.exec(spec);
-  if (!match) throw new Error(`invalid agent spec "${value}" — use agent[@model][:effort][xN]`);
-  const agent = `${match[1] ?? ""}${match[2]!.trim()}`;
-  if (!agent || agent === "team:") throw new Error(`invalid agent spec "${value}"`);
-  return { agent, count, ...(match[3] ? { model: match[3] } : {}), ...(match[4] ? { effort: match[4] } : {}) };
-}
+export { parseAgentSpec } from "./fleets.js";
 
 function modelOf(cfg: AgentConfig): OrchestraModel {
   return {
@@ -120,7 +111,7 @@ function pinWorker(cfg: AgentConfig, selection: OrchestraWorker): AgentConfig {
 export function expandWorkerSpecs(names: string[], resolve: (name: string) => AgentConfig | null, rosterIds: string[] = [], accounts: Account[] = listAccounts()): AgentConfig[] {
   const nextAccount = new Map<string, number>();
   const workers: AgentConfig[] = [];
-  for (const name of names) {
+  for (const name of expandSavedFleets(names)) {
     const spec = parseAgentSpec(name, rosterIds);
     const single = `${spec.agent}${spec.model ? `@${spec.model}` : ""}${spec.effort ? `:${spec.effort}` : ""}`;
     const cfg = resolve(single);
@@ -412,7 +403,9 @@ export interface OrchestraStartOptions {
 /** POST /api/projects/:id/compare. Entrants expand using agent[@model][:effort][xN]. */
 export interface CompareOptions {
   prompt: string;
-  entrants: string[];
+  entrants?: string[];
+  /** Opt in to the project's 30-day top N (at least five entries each); otherwise use entrants or the roster. */
+  best?: number;
   /** Existing composer thread; omitted or unknown creates a run thread. */
   chat?: string;
 }
@@ -444,6 +437,8 @@ export interface OrchestraHost {
   projectName: string;
   /** Reachable daemon origin for worker report commands. */
   apiUrl?(): string;
+  mcps?(): McpServerConfig[];
+  loomTools?(): boolean;
   projectDir: string;
   /** `orchestra.worktreeDir` from the project's config, if set. */
   worktreeDir?(): string | undefined;
@@ -1207,6 +1202,9 @@ export class OrchestraEngine {
 
   /** Resolve a name the orchestrator (or user) gave into a runnable config. */
   resolveAgent(name: string, projectOnly = false): AgentConfig | null {
+    const expanded = expandSavedFleets([name]);
+    if (expanded.length !== 1) throw new Error("a single agent requires a fleet with exactly one spec");
+    name = expanded[0]!;
     const roster = this.host.roster();
     // Exact roster ids win, including older ids containing spec punctuation.
     const exact = roster.find((a) => a.id.toLowerCase() === name.trim().toLowerCase());
@@ -1236,6 +1234,8 @@ export class OrchestraEngine {
   /** Start a race without a planner; list/get and orchestra events expose the same run. */
   async compare(opts: CompareOptions): Promise<OrchestraRun> {
     if (typeof opts.prompt !== "string" || !opts.prompt.trim()) throw new Error("missing prompt");
+    if (opts.best !== undefined && (!Number.isInteger(opts.best) || opts.best < 2 || opts.best > 8)) throw new Error("compare best must be an integer from 2 to 8");
+    if (opts.best !== undefined) opts = { ...opts, entrants: await this.selectBest(opts.best, opts.entrants ?? this.host.roster().map(a => a.id)) };
     if (!Array.isArray(opts.entrants) || !opts.entrants.length || opts.entrants.some((e) => typeof e !== "string" || !e.trim())) {
       throw new Error("entrants must be an array of fleet specs (2–8 after expansion)");
     }
@@ -1243,7 +1243,17 @@ export class OrchestraEngine {
     return this.start({ goal: opts.prompt, workers: opts.entrants, chat: opts.chat, compare: true, race: true, team: false, maxParallel: 8 });
   }
 
+  private async selectBest(count: number, fallback: string[]): Promise<string[]> {
+    const project = findProject(this.host.projectDir);
+    const rows = project ? (await readScoreboard([project], "30d", project.id)).byKindModel : [];
+    return bestFleet(rows, count, fallback, kind => this.host.roster().some(a => a.kind === kind));
+  }
+
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
+    if (opts.workers?.some(w => w.startsWith("best:"))) {
+      if (opts.workers.length !== 1 || !/^best:\d+$/.test(opts.workers[0]!)) throw new Error("use best:N as the entire worker fleet");
+      opts = { ...opts, workers: await this.selectBest(Number(opts.workers[0]!.slice(5)), this.host.roster().map(a => a.id)) };
+    }
     if (opts.compare) opts = { ...opts, race: true, team: false };
     const goal = opts.goal?.trim();
     if (!goal) throw new Error("an orchestra run needs a goal");
@@ -1951,7 +1961,13 @@ export class OrchestraEngine {
         chat: run.chat,
         payload: { text, author: "loom", orchestra: { runId: run.id, to: "orchestrator" } },
       });
-      await agent.send({ text, ...(briefing ? { briefing } : {}) } satisfies SendInput);
+      const mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.mcps?.(), this.host.loomTools?.() ? {
+        project: this.host.projectId, api: this.host.apiUrl?.() ?? "",
+      } : undefined) : null;
+      try {
+        await agent.send({ text, ...(briefing ? { briefing } : {}),
+          ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) } satisfies SendInput);
+      } finally { mcp?.cleanup(); }
       reply = this.turnText.get(key) ?? "";
       this.turnText.delete(key); // read once per turn; reset before the next
     } catch (err) {
@@ -2509,7 +2525,13 @@ export class OrchestraEngine {
           ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
         })
       : undefined;
-    await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}) });
+    const mcp = agent.capabilities.mcp && this.host.apiUrl?.() ? writeLoomMcpSession(this.host.mcps?.(), {
+      project: this.host.projectId, api: this.host.apiUrl(), run: run.id, task: task.id,
+    }) : null;
+    try {
+      await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
+        ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) });
+    } finally { mcp?.cleanup(); }
     if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
     // paused mid-turn (pauseTask): not finished, nothing to integrate yet
     if ((task.status as TaskStatus) === "pending") {
@@ -2651,6 +2673,7 @@ export class OrchestraEngine {
 
   private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
     const task = run.tasks.find(t => `${run.id}/${t.id}` === key);
+    let turnCost: number | undefined;
     let stream = "";
     let streamed: Omit<OrchestraReport, "at">[] = [];
     let reportAttempt = task?.attempts;
@@ -2706,11 +2729,15 @@ export class OrchestraEngine {
         const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
         if (task) this.host.coordinator?.()?.onEdit?.(run, task, p.path);
       }
+      if (e.kind === "status" && p.state === "turn_cost" && typeof p.costUsd === "number") turnCost = p.costUsd;
+      const terminal = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
+      const selection = task ?? run.orchestrator;
       const event = this.host.append({
         kind: e.kind,
         agentId,
         chat,
-        payload: { ...p, orchestra: { runId: run.id, ...(key.endsWith("/orch") ? { role: "orchestrator" } : { taskId: key.split("/")[1] }) } },
+        payload: { ...p, ...(terminal ? { adapter: selection.kind, model: p.model ?? selection.model,
+          ...(turnCost !== undefined && p.costUsd === undefined ? { costUsd: turnCost } : {}) } : {}), orchestra: { runId: run.id, ...(key.endsWith("/orch") ? { role: "orchestrator" } : { taskId: key.split("/")[1] }) } },
       });
       if (e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
@@ -2720,6 +2747,7 @@ export class OrchestraEngine {
           if (task) task.costUsd = (task.costUsd ?? 0) + usd;
         }
       }
+      if (terminal) turnCost = undefined;
       this.host.observe(event);
     });
   }

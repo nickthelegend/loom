@@ -463,3 +463,22 @@
 .otask .orepk{display:inline-flex;align-items:center;gap:4px;flex:none;font-weight:600;color:var(--foreground)}
 .otask .orept{flex:1;min-width:0;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .otask .orepw{flex:none;color:var(--muted-foreground);font-size:10.5px}
+
+/* ---- Model scoreboard (#406) and saved fleets ---- */
+.scoremodal{width:min(760px,calc(100vw - 32px))}
+.scoremodal .sbbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.scoremodal .sbtable{max-height:min(420px,60vh);overflow:auto;border:1px solid var(--border);border-radius:var(--radius-md)}
+.sbt{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.sbt th{position:sticky;top:0;background:var(--card);text-align:left;font-weight:500;color:var(--muted-foreground);padding:7px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+.sbt td{padding:7px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+.sbt tr:last-child td{border-bottom:0}
+.sbt .rk{color:var(--muted-foreground);width:24px}
+.sbt .nm{display:flex;align-items:center;gap:6px;white-space:normal}
+.sbt .dim{color:var(--muted-foreground)}
+.sbt tr.lead td{background:color-mix(in oklab,var(--primary) 8%,transparent)}
+.sbt tr.lead .rk{color:var(--primary);font-weight:600}
+.cfleet .cfsaved{margin-top:6px;border-top:1px solid var(--border)}
+.cfleet .cfsv{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;padding:6px 8px;border:0;background:transparent;border-radius:var(--radius-sm);cursor:pointer;color:var(--foreground);text-align:left}
+.cfleet .cfsv:hover{background:var(--muted)}
+.cfleet .cfsv span{font-size:11px;color:var(--muted-foreground);font-family:var(--font-mono)}
+.cfleet .cfact{display:flex;gap:6px;justify-content:flex-end}
