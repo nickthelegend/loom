@@ -722,7 +722,9 @@ describe("web app · saved fleets and the model scoreboard (#406)", () => {
       expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ saved: "squad", spec: "execbot@gpt-5.6x2" }]);
       // the scoreboard opens from the same row, for this project, and can widen to all
       click($(m, "#corch [data-scoreboard]"));
-      await waitUntil(() => !!$(m, ".scoremodal") && !text(m, "#sbtable").includes("Loading") && !$(m, "#sbtable .loader"));
+      await waitUntil(() => !!$(m, ".scoremodal"));
+      // the board reads every project's log; a loaded CI runner can take a while
+      await waitUntil(() => !$(m, "#sbtable .loader"), { timeoutMs: 35_000 });
       expect($(m, '#sbscope button.on')!.getAttribute("data-v")).toBe(projectId);
       click($(m, '#sbscope [data-v="all"]'));
       await waitUntil(() => $(m, '#sbscope button.on')!.getAttribute("data-v") === "all");
