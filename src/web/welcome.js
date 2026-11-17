@@ -46,7 +46,7 @@ import { tryDemo } from './try-demo.js';
             '<button class="btn sm" data-home="try">Try a demo project</button></div></section>' +
           '<section class="hcard hart" id="hskills"><span class="lart lart-skills-book" aria-hidden="true"></span><div>' +
             '<div class="hct">Teach your agents Loom</div>' +
-            '<div class="hcd" id="hskillsd">Seven skills so Claude Code, Codex, OpenCode and Grok can drive Loom for you.</div>' +
+            '<div class="hcd" id="hskillsd">Skills that teach Claude Code, Codex, OpenCode and Grok to drive Loom for you.</div>' +
             '<button class="btn sm ghost" data-home="skills">Loom for agents</button></div></section>' +
         "</div>" +
       "</div>" +

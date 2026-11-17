@@ -8,6 +8,9 @@ import { AGENT_SKILLS_MARKER, AGENT_SKILLS_SIGNATURE, AGENT_SKILLS_VERSION, agen
 import { makeProjectDir, tmpDir } from "./helpers.js";
 import { logbook } from "../src/core/logbook.js";
 
+// How many skills the bundle ships (eight at 2.0: loom-skills added loom-mcp); counted, not hard-coded.
+const SKILLS = fs.readdirSync(new URL("../skills/agent/", import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory()).length;
+
 let daemon: LoomDaemon | undefined, base: string, token: string, home: string;
 const headers = (auth = token) => ({ authorization: `Bearer ${auth}`, "content-type": "application/json" });
 const call = (route = "", method = "GET", body?: unknown, auth = token) => fetch(`${base}/api/agent-skills${route}`, {
@@ -49,7 +52,7 @@ describe("agent skills API", () => {
     expect(initial.autoUpdate).toBe(true);
     expect(initial.agents).toHaveLength(4);
     const installed = await (await call("/install", "POST", { agents: ["codex", "opencode"] })).json();
-    expect(installed.results).toHaveLength(7);
+    expect(installed.results).toHaveLength(SKILLS);
     expect(installed.results.every((r: { action: string }) => r.action === "installed")).toBe(true);
     const skillsDir = path.join(home, ".agents", "skills");
     fs.writeFileSync(path.join(skillsDir, "loom", AGENT_SKILLS_VERSION), JSON.stringify({ revision: "old", committedAt: "2020-01-01T00:00:00Z" }));

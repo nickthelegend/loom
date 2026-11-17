@@ -1,6 +1,6 @@
 ---
 name: loom
-description: Drive Loom's local coding agents, shared memory, chats, and baton handoffs. Use when asked to "use Loom", "send this to Codex", "hand off to another agent", or check a project's agents.
+description: Drive Loom's local agents, demo, bundled skills, MCP connections, shared memory, and chats. Use for "use Loom", "try Loom", "connect Loom tools", "send this to Codex", or a baton handoff.
 ---
 
 # Drive Loom
@@ -8,7 +8,7 @@ description: Drive Loom's local coding agents, shared memory, chats, and baton h
 Loom is a local-first control plane: one daemon drives installed agent CLIs,
 ACP agents, and model endpoints. Projects share memory across agent sessions.
 The app, CLI, phone, bridges, and teams talk to that daemon.
-Require Loom 1.3.0 or newer. Run project commands from the intended project folder.
+Require Loom ≥ 2.0.0. Run project commands from the intended project folder.
 Use discovered agent IDs; the examples assume those agents exist.
 
 ## Establish context
@@ -37,6 +37,59 @@ If the task calls for setting up this folder, use `loom init --gitignore`.
 It registers the folder, detects agents, and keeps `.loom/` out of git.
 If the daemon is stopped and starting it is within scope, use `loom up`.
 If Loom is missing, install npm package `@loompad/cli` using the user's normal setup.
+
+## Try, set up, and install skills
+
+```sh
+loom try --no-open --agents 3
+loom setup --json
+loom skills agents --json
+loom skills install loom --agent codex --dry-run
+loom skills install loom --agent codex
+```
+
+Try creates or reuses a demo under the daemon's projectsRoot; `--dir PATH` chooses
+the destination. Its agents are scripted, offline, and free. Edits are real;
+streamed command output and usage are simulated. Use real agents for custom work.
+Setup shows the Get started checklist; use [loom-ops](../loom-ops/SKILL.md) for CLI installs.
+
+The bundled-skills commands work without a project or daemon. `--agent` accepts
+claude-code, codex, grok, opencode, or all (default). Codex and OpenCode share
+`~/.agents/skills`. Install creates missing directories and protects unmanaged
+same-name folders. Inspect conflicts rather than trying to overwrite them.
+Use `loom skills uninstall loom --agent codex --dry-run` before a requested removal;
+omit `--dry-run` to remove managed copies, including OpenCode's shared copies.
+`--target /path/to/skills` selects a custom destination instead of standard ones
+unless `--agent` is also given. The bundle is the installed Loom release's copy;
+install this repository separately for its latest skills.
+
+For a new real project, `loom new example --agent codex` creates and registers it
+under projectsRoot, including Git initialization and a first commit.
+`loom clone REPOSITORY_URL --name example` clones and registers an existing repo.
+Read the returned project ID and directory before sending work.
+
+## Connect Loom tools
+
+```sh
+loom connect codex --dry-run
+loom connect codex
+loom connect --list
+```
+
+Run registration in the intended project. Supported CLIs are claude, codex,
+opencode, and grok (claude-code and grok-code are aliases). Their own MCP command
+controls registration scope. For another MCP client, register command `loom`
+with arguments `["mcp-server"]`.
+OpenCode's registration is interactive: choose a local server and enter
+`loom mcp-server` when prompted.
+
+`loom mcp-server` serves stdio JSON-RPC and uses existing daemon credentials;
+it does not start or restart the daemon. Start it with `loom up` when authorized.
+This differs from `loom mcp`, which configures servers consumed by Loom.
+For agents running inside Loom, project config `loomTools: true` in
+`.loom/config.json` enables project-scoped tools on the next turn; default is false.
+Orchestra workers receive tools automatically when their adapter supports MCP.
+Use [loom-mcp](../loom-mcp/SKILL.md) when those native tools are available.
 
 ## Give an agent work
 
@@ -76,6 +129,26 @@ use one-shot `loom send` for automation. There is no send `--chat` flag here.
 Other chats may pin an agent in the app; pinning a conversation does not take the baton.
 
 ```sh
+loom steer "Preserve the existing API; add a regression test." --chat main
+loom btw "Why does this parser buffer input?" --chat main
+loom chat:title main
+loom chat:title main "Parser regression"
+loom open --in code
+loom open src/parser.ts:42 --in last
+```
+
+Steer adds input to a running turn where supported; otherwise it queues the input
+and prints the reason. Do not send the same correction again after a queue receipt.
+Btw asks a private read-only side question using the parent's agent/model without
+changing the main history or memory; it prints the reply and closes the side chat.
+Its `--chat` takes a chat ID. Chat title accepts an ID or title; `--auto` derives a
+title only for a default-named chat. An explicit title and `--auto` are alternatives.
+Open without a file or `--in` opens the app. Editor mode requires an installed
+editor ID; `last` reuses the saved choice. Paths are relative to the shell and must
+stay inside the project. Use [loom-agents](../loom-agents/SKILL.md) for model selection
+and [loom-collaborate](../loom-collaborate/SKILL.md) for conversation branches/moves.
+
+```sh
 loom digest --since 12
 loom memory
 loom decision "Keep the public API backward compatible."
@@ -97,3 +170,4 @@ Never run `loom up --restart --force` while someone's turns run.
 - [loom-automation](../loom-automation/SKILL.md): schedules, webhooks, Slack and Discord.
 - [loom-collaborate](../loom-collaborate/SKILL.md): share chats, teams, search and audit.
 - [loom-ops](../loom-ops/SKILL.md): resource limits, diagnosis, restarts and cleanup.
+- [loom-mcp](../loom-mcp/SKILL.md): native Loom tools, bounded waits, and worker reports.

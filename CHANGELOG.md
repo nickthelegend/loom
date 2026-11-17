@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-11-17
+
+**Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,
+steering, Ask several and a model scoreboard; `loom try` and a guided walkthrough for someone
+with no agents or keys; Home with Get started and one-click agent installs; Loom skills and an MCP
+server so agents can drive Loom; and a phone app that starts anything from anywhere. Release
+notes: docs/release-notes/v2.0.0.md. How the feature set was chosen: docs/v2/LOOM-2.md.
+
 ### Added
 
 - **Chat titles, editor launchers, and diagnostic bundles (#407).** Default-named chats receive local titles after their first finished turn; `chatTitles: "model"` opts into bounded provider generation with local fallback. `loom chat:title` shows/sets titles without automatic overwrites of user names. Owner/unscoped editor discovery and project launch APIs back `loom open --in`, remember the last editor, and reject path/symlink escapes. `loom triage` saves redacted doctor results, versions and recent logs, optionally starts a diagnosis chat, and prints (never posts) issue bodies. Web/phone screens are separate work. Approach credit: T3 Code (MIT) for titles, editor labels and triage; Agent Orchestrator (Apache-2.0) for Open in Editor.
@@ -19,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Try Loom without an agent account (#402).** `loom try` and `POST /api/try` create a bundled todo project with free, offline Demo agents, real edits, simulated streaming and usage, steering, interruption, and Orchestra/race/compare support. Demo models are offered by the shared agent catalog. Web and phone tour screens are separate work.
 
-- **Skills for agents (#405).** Bundle the seven MIT Loom skills with a version stamp and sync script. `loom skills agents`, `install loom`, and `uninstall loom` inspect and manage agent CLI installs without a daemon, protect unmanaged folders, and support dry runs. Owner/admin install APIs and a shared onboarding helper accompany automatic startup updates of older managed copies (`agentSkills.autoUpdate`, default true). Startup installation approach credit: Agent Orchestrator (Apache-2.0). Web and phone screens are separate work.
+- **Skills for agents (#405).** Bundle the MIT Loom skills (eight at 2.0, including loom-mcp) with a version stamp and sync script. `loom skills agents`, `install loom`, and `uninstall loom` inspect and manage agent CLI installs without a daemon, protect unmanaged folders, and support dry runs. Owner/admin install APIs and a shared onboarding helper accompany automatic startup updates of older managed copies (`agentSkills.autoUpdate`, default true). Startup installation approach credit: Agent Orchestrator (Apache-2.0). Web and phone screens are separate work.
 
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 

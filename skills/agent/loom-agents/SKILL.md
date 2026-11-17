@@ -1,9 +1,11 @@
 ---
 name: loom-agents
-description: Add Loom agent sessions, select models/providers, and configure access, defaults, and chat instructions. Use for "add another Codex", "connect an ACP agent", "use a model endpoint", or "change this agent's permissions".
+description: Add Loom agent sessions and accounts, select chat/message models and providers, and configure access/defaults. Use for "add another Codex", "use my work account", "change this chat's model", "connect an ACP agent", or "change permissions".
 ---
 
 # Configure agents
+
+Require Loom ≥ 2.0.0.
 
 Run project commands inside the target Loom project. Inspect before changing:
 
@@ -35,6 +37,33 @@ Sessions have separate context windows but share the project brain and write bat
 Use `loom models builder` to discover models the agent actually reports.
 `--model` on agents:add selects a model where the adapter supports it; use a returned
 model ID, not a guessed model name. The kind is positional, not a `--kind` option.
+`--count 2` adds two sessions with the selected model; CLI counts are 1–8.
+
+## Select accounts and chat models
+
+```sh
+loom accounts --json
+loom accounts add codex --label work
+loom accounts login ACCOUNT_ID
+loom agents:add codex --account work --as builder --model MODEL_ID --count 2
+loom chat:create "Parser review" --agent builder --model MODEL_ID --effort high --json
+loom chat:agent CHAT_ID builder --model MODEL_ID --effort high --json
+loom chat:agent CHAT_ID --clear
+loom send "Review the parser edge cases." --model MODEL_ID --effort high --wait --json
+```
+
+Use returned account/chat/session IDs and a model reported by `loom models AGENT_ID`.
+Accounts support codex and claude-code. Add registers a separate config directory;
+`--dir /absolute/path` selects a location. Login runs that CLI's sign-in
+in the terminal. Keep credentials out of prompts; Loom stores account labels/paths,
+and reports sign-in status in `{accounts:[...]}`. Unknown status is not signed in.
+
+Chat selection replaces the agent/model/effort binding; omitted model/effort revert
+to agent defaults. `--clear` removes all three and follows the baton. Selection
+changes apply to subsequent turns without changing agent defaults or the running
+turn. Send's `--model` and `--effort` override only that message, including when queued.
+Effort is adapter-dependent; use supported values. Pinning a chat does not take
+the write baton. Inspect the returned roster after bulk additions.
 
 ## Connect ACP
 

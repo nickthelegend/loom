@@ -1,14 +1,51 @@
 ---
 name: loom-collaborate
-description: Share Loom chats, manage basic team collaboration, and inspect cross-project search and audit records. Use for "share this chat live", "invite a teammate", "show who approved this", or "search all Loom sessions".
+description: Share Loom chats, inspect presence, move conversations, manage chat branches and teams, and search audit records. Use for "share this chat live", "move this chat", "retry that reply", "invite a teammate", or "show who approved this".
 ---
 
 # Collaborate through Loom
+
+Require Loom ≥ 2.0.0.
 
 Choose the smallest access the user requested: a read-only chat link, a live guest
 in one chat, or team membership/project sharing. Run from the intended project.
 Links and invites convey access; deliver them only to the intended recipient.
 Creating a link does not authorize sending an email or chat message to someone.
+
+## Presence, moves, and conversation branches
+
+```sh
+loom presence main --json
+loom presence main --watch --json
+loom runner status
+loom chat:move CHAT_ID --to RUNNER_ID --no-wait --json
+loom chat:branches --chat main --json
+loom chat:edit USER_EVENT_ID "Preserve the API and test empty input." --chat main
+loom chat:retry REPLY_EVENT_ID --chat main
+loom chat:branch BRANCH_ID --chat main --preview
+loom chat:branch BRANCH_ID --chat main
+```
+
+Presence shows current viewers and typing, not a durable attendance record.
+`--watch` joins the chat and prints changing snapshots until interrupted.
+Move targets a real runner device ID or exact label. It normally waits for the
+current turn; `--no-wait` fails if busy. It sends history and eligible resume state
+to that machine, leaves a source redirect, and returns source chat/job information.
+Move only when transferring this conversation is authorized; inspect the destination
+and its access first. Runner status shows local runner state, not a target catalog;
+take the destination ID/label from the configured devices/runners.
+
+Use event IDs from the chat history, not message text or guessed numbers. Edit
+branches from a user prompt and sends the replacement; retry branches from an
+agent reply and starts another turn. Both print JSON without a `--json` option.
+Branches lists active ancestry and sibling choices. Switching history alone does
+not restore files or undo edits made by earlier turns.
+
+For an explicitly requested file restore, inspect the `--preview` diff first,
+then use `loom chat:branch BRANCH_ID --chat main --rewind-files`.
+It shows the diff and asks before restoring. `--yes` skips that prompt and is
+required in a non-interactive shell; use it only for an already authorized rewind.
+Protect uncommitted work and active turns before changing history or files.
 
 ## Read-only chat links
 

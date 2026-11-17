@@ -10,6 +10,9 @@ import {
 } from "../src/core/agent-skills.js";
 import { tmpDir } from "./helpers.js";
 
+// How many skills the bundle ships (eight at 2.0: loom-skills added loom-mcp); counted, not hard-coded.
+const SKILLS = fs.readdirSync(new URL("../skills/agent/", import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory()).length;
+
 let home: string;
 const run = promisify(execFile);
 const target = () => path.join(home, ".agents", "skills");
@@ -29,14 +32,14 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("bundled agent skills", () => {
-  it("ships seven versioned skills and reports missing installs without writing", () => {
+  it("ships the versioned skills and reports missing installs without writing", () => {
     expect(os.homedir()).toBe(home);
     const status = agentSkillsStatus();
     expect(status.version.revision).toMatch(/^[a-f0-9]{40}$/);
     expect(status.agents.map(a => a.agent)).toEqual(["claude-code", "codex", "grok", "opencode"]);
     expect(status.agents[1]!.dir).toBe(status.agents[3]!.dir);
     for (const agent of status.agents) {
-      expect(agent.skills).toHaveLength(7);
+      expect(agent.skills).toHaveLength(SKILLS);
       expect(agent.skills.every(s => !s.installed && !s.current && !s.managed)).toBe(true);
     }
     expect(fs.readdirSync(home)).toEqual([]);
@@ -44,7 +47,7 @@ describe("bundled agent skills", () => {
 
   it("installs the full set in empty homes, deduplicates shared paths, and is idempotent", () => {
     const result = installAgentSkills();
-    expect(result.results).toHaveLength(21);
+    expect(result.results).toHaveLength(SKILLS * 3);
     expect(result.results.every(r => r.action === "installed")).toBe(true);
     expect(agentSkillsStatus().agents.every(a => a.skills.every(s => s.installed && s.managed && s.current))).toBe(true);
     expect(fs.readFileSync(path.join(skill(), "SKILL.md"), "utf8")).toBe(fs.readFileSync(path.join(bundledAgentSkillsDir, "loom", "SKILL.md"), "utf8"));
@@ -68,7 +71,7 @@ describe("bundled agent skills", () => {
     fs.writeFileSync(path.join(skill(), AGENT_SKILLS_MARKER), "not the installer signature");
     expect(installAgentSkills({ agents: ["codex"] }).results.find(r => r.id === "loom")).toMatchObject({ action: "conflict" });
     const removed = uninstallAgentSkills({ agents: ["opencode"] });
-    expect(removed.results.filter(r => r.action === "removed")).toHaveLength(6);
+    expect(removed.results.filter(r => r.action === "removed")).toHaveLength(SKILLS - 1);
     expect(removed.results.find(r => r.id === "loom")).toMatchObject({ action: "conflict" });
     expect(fs.readFileSync(path.join(skill(), "SKILL.md"), "utf8")).toBe("mine");
     expect(fs.readdirSync(target())).toEqual(["loom"]);
@@ -133,7 +136,7 @@ describe("bundled agent skills", () => {
 
   it("supports custom destinations without installing to default roots", () => {
     const custom = path.join(home, "custom skills");
-    expect(installAgentSkills({ targets: [custom, custom] }).results).toHaveLength(7);
+    expect(installAgentSkills({ targets: [custom, custom] }).results).toHaveLength(SKILLS);
     const status = agentSkillsStatus({ targets: [custom] });
     expect(status.agents).toHaveLength(5);
     expect(status.agents[4]!.skills.every(s => s.current)).toBe(true);
@@ -145,8 +148,8 @@ describe("bundled agent skills", () => {
     const blocked = path.join(home, "blocked");
     fs.writeFileSync(blocked, "file");
     const result = installAgentSkills({ agents: ["codex"], targets: [blocked] });
-    expect(result.results.filter(r => r.action === "installed")).toHaveLength(7);
-    expect(result.results.filter(r => r.action === "error")).toHaveLength(7);
+    expect(result.results.filter(r => r.action === "installed")).toHaveLength(SKILLS);
+    expect(result.results.filter(r => r.action === "error")).toHaveLength(SKILLS);
     expect(fs.readFileSync(blocked, "utf8")).toBe("file");
   });
 });
@@ -161,7 +164,7 @@ describe("agent skills CLI without a daemon or project", () => {
     expect((await cli("install", "loom", "--agent", "codex", "--dry-run")).stdout).toContain("Dry run: no files changed");
     expect(fs.readdirSync(home)).toEqual([]);
     const installed = JSON.parse((await cli("install", "loom", "--agent", "opencode", "--json")).stdout);
-    expect(installed.results).toHaveLength(7);
+    expect(installed.results).toHaveLength(SKILLS);
     fs.rmSync(path.join(skill(), AGENT_SKILLS_VERSION));
     expect((await cli("install", "loom", "--agent", "codex")).stdout).toContain("updated");
     expect((await cli("uninstall", "loom", "--agent", "codex")).stdout).toContain("removed");
