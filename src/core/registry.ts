@@ -356,6 +356,8 @@ export interface DaemonConfig {
   port: number;
   /** New projects and clones go here; defaults to ~/Loom Projects. */
   projectsRoot?: string;
+  /** Refresh existing managed agent skills on daemon start; defaults to true. */
+  agentSkills?: { autoUpdate?: boolean };
   adminToken: string;
   clients: PairedClient[];
   pid?: number;

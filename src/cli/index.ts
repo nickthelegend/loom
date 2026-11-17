@@ -7,6 +7,7 @@
  */
 
 import { configDirPath, isAccountKind } from "../core/accounts.js";
+import { agentSkillAgents, agentSkillsStatus, installAgentSkills, parseSkillAgents, uninstallAgentSkills } from "../core/agent-skills.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import { freeUsage } from "../core/free-pool.js";
@@ -1197,14 +1198,40 @@ program
 
 program
   .command("skills [action] [args...]")
-  .description("skills for this project: list [query] | on <id> | off <id> | install <git-url|dir>[#name|#all] | rm <id>")
+  .description("skills: agents | install loom | uninstall loom | list [query] | on <id> | off <id> | install <git-url|dir>[#name|#all] | rm <id>")
   .option("--all", "list: every skill found on this machine, not just the ones on")
   .option("--force", "install: replace a skill with the same name")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { all?: boolean; force?: boolean }) => {
-    const client = await ensureDaemon();
-    const project = await currentProject(client);
+  .option("--agent <agent>", "Loom skills: claude-code | codex | grok | opencode | all (default: all)")
+  .option("--target <dir>", "Loom skills: custom directory; repeatable (install only here unless --agent is given)", collect)
+  .option("--dry-run", "Loom skills: print planned changes without writing")
+  .option("--json", "Loom skills: print status or results as JSON")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { all?: boolean; force?: boolean; agent?: string; target?: string[]; dryRun?: boolean; json?: boolean }) => {
     const a = (action ?? "list").toLowerCase();
     const rest = (args ?? []).join(" ").trim();
+    if (a === "agents" || (rest === "loom" && ["install", "add", "uninstall"].includes(a))) {
+      const agents = opts.agent === undefined ? undefined : opts.agent === "all" ? [...agentSkillAgents] : parseSkillAgents([opts.agent]);
+      const options = { agents, targets: opts.target, dryRun: opts.dryRun };
+      if (a === "agents") {
+        const status = agentSkillsStatus(options);
+        if (opts.json) return void console.log(JSON.stringify(status, null, 2));
+        console.log(pc.dim(`bundled Loom skills ${status.version.revision}`));
+        for (const agent of status.agents) {
+          console.log(`${pc.bold(agent.agent)} ${pc.dim(agent.dir)}`);
+          for (const skill of agent.skills) console.log(`  ${skill.id}: ${skill.current ? "current" : skill.managed ? "outdated" : skill.installed ? "unmanaged" : "not installed"}`);
+        }
+        return;
+      }
+      const result = (a === "uninstall" ? uninstallAgentSkills : installAgentSkills)(options);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else {
+        for (const r of result.results) console.log(`${opts.dryRun ? "would: " : ""}${r.action} ${path.join(r.dir, r.id)}${r.error ? ` — ${r.error}` : ""}`);
+        if (opts.dryRun) console.log("Dry run: no files changed.");
+      }
+      if (result.results.some(r => r.action === "conflict" || r.action === "error")) process.exitCode = 1;
+      return;
+    }
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
     if (a === "list" || a === "ls") {
       const { skills } = await client.skillsCatalog(project.id);
       const q = rest.toLowerCase();
