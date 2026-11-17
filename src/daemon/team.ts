@@ -77,6 +77,8 @@ import { prRowFeed, WEBHOOK_EVENTS } from "../core/github-events.js";
 // ---------------------------------------------------------------------------
 
 interface TeamState {
+  /** Expiries of successfully minted invites; no invite secrets are stored. */
+  invites?: number[];
   /**
    * The hub session. Self-hosted: `url` is the `loom hub` URL, `token` its
    * session token. Hosted: `url` is `supabase:<project url>`, `token` the
@@ -551,6 +553,12 @@ export class TeamLink {
     return { id: team.id, name: team.name };
   }
 
+  /** Whether an unexpired, successfully minted invite exists on this machine. */
+  hasInvites(): boolean {
+    return (this.state.invites ?? []).some(at => at > Date.now())
+      || (this.state.grants ?? []).some(g => g.expiresAt > Date.now());
+  }
+
   /**
    * An invite link: the token and the current team key ride the #fragment
    * (D5) — never sent to any server, the join page included. `extra` makes it
@@ -579,8 +587,9 @@ export class TeamLink {
     if (extra.grant && extra.repo) {
       const now = Date.now();
       this.state.grants = [...(this.state.grants ?? []).filter((g) => g.expiresAt > now), { teamId, repo: extra.repo, expiresAt, createdAt: now, tag: inviteTag(invite) }];
-      writeState(this.file, this.state);
     }
+    this.state.invites = [...(this.state.invites ?? []).filter(at => at > Date.now()), expiresAt];
+    writeState(this.file, this.state);
     return { link: inviteLink(frag), expiresAt };
   }
 

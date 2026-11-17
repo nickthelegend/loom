@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Get started progress and agent installs (#403).** `loom setup` / `--json` and `/api/onboarding` derive demo, agent, project, chat, fleet, phone, skills and optional sharing progress from real state, with persistent dismiss/restore. Owner/admin-only `loom setup install <kind>` and `/api/setup/install` run fixed npm commands, stream WebSocket progress and verify the installed version. `/api/setup/requirements` reports runtime tools, global npm permissions and disk space. Web and phone screens remain separate work. Approach credit: Agent Orchestrator and T3 Code.
+
 - **Try Loom without an agent account (#402).** `loom try` and `POST /api/try` create a bundled todo project with free, offline Demo agents, real edits, simulated streaming and usage, steering, interruption, and Orchestra/race/compare support. Demo models are offered by the shared agent catalog. Web and phone tour screens are separate work.
 
 - **Skills for agents (#405).** Bundle the seven MIT Loom skills with a version stamp and sync script. `loom skills agents`, `install loom`, and `uninstall loom` inspect and manage agent CLI installs without a daemon, protect unmanaged folders, and support dry runs. Owner/admin install APIs and a shared onboarding helper accompany automatic startup updates of older managed copies (`agentSkills.autoUpdate`, default true). Startup installation approach credit: Agent Orchestrator (Apache-2.0). Web and phone screens are separate work.

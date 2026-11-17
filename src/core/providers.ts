@@ -209,6 +209,12 @@ export function forgetProvider(id: string): boolean {
   return true;
 }
 
+/** A built-in keyless endpoint is an option, not evidence the user configured it. */
+export function hasConfiguredProvider(): boolean {
+  return listProviders().some(p => p.configured && p.source !== "none")
+    || Object.hasOwn(readStore(), "ollama");
+}
+
 /** The last four characters, which tells two keys apart and uses neither. */
 export function maskKey(key: string | null): string {
   if (!key) return "";
