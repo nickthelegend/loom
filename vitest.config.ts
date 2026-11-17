@@ -54,6 +54,10 @@ export default defineConfig({
       // delete this var in their own setup and point the endpoint at a fake
       // collector they control.
       LOOM_TELEMETRY_DISABLED: "1",
+      // A starting daemon refreshes the Loom skills it installed under ~/.claude/skills,
+      // ~/.agents/skills and ~/.grok/skills (#405). Test daemons share the real HOME, so never;
+      // the startup test clears this with a fake HOME of its own.
+      LOOM_NO_AGENT_SKILLS_UPDATE: "1",
     },
   },
 });
