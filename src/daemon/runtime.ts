@@ -1240,20 +1240,22 @@ export class ProjectRuntime {
       const liveRun = runId ? this.continuity?.isLiveRun(runId) : true;
       const chat = (runId ? this.continuity?.eventChat(runId) : undefined) ?? e.chat ?? this.turns.turnChat.get(agent.id);
       let payload = e.payload;
-      // Enrich the completed turn so its gen_ai span carries system + model +
+      // Enrich terminal outcomes so accounting and gen_ai spans carry system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
       // here; the model prefers what the adapter actually used, else the
-      // configured override; the cost is the turn_cost stashed a moment ago.
+      // requested override, then the configured default; cost comes from turn_cost.
       const p = e.payload as Record<string, unknown>;
       if (liveRun && e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
         if (usd > 0) this.turns.pendingCost.set(agent.id, usd);
-      } else if (liveRun && e.kind === "run_complete") {
+      } else if (liveRun && (e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted"))) {
         const model =
           (typeof p.model === "string" && p.model) ||
+          this.turns.turnModel.get(agent.id) ||
           (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
         const cost = this.turns.pendingCost.get(agent.id);
         this.turns.pendingCost.delete(agent.id);
+        this.turns.turnModel.delete(agent.id);
         payload = {
           ...p,
           adapter: cfg.kind,

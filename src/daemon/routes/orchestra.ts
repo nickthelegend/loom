@@ -12,7 +12,9 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   // See core/orchestra.ts. Every step is also an `orchestra` event on the
   // WebSocket, so clients render live from events and use these for actions.
   // POST workers is string[]: each fleet row is agent[@model][:effort][xN]
-  // (×N also works, count 1..100). orchestrator accepts the same with count 1.
+  // (×N also works, count 1..100), or @saved-name. workers: ["best:N"] opts
+  // into the project's 30-day scoreboard (five entries per model, roster fallback).
+  // orchestrator accepts a spec or saved fleet resolving to exactly one agent.
   // Responses keep workers as instance ids and add workerDetails: [{ id, kind,
   // model?, effort?, account?, configDir? }]. account is the machine-local registry
   // id and configDir the pinned path. Fleet copies rotate through same-kind accounts.
@@ -22,7 +24,9 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   const orchestraError = (res: express.Response, err: unknown) =>
     void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
 
-  // Ask several: { prompt, entrants: string[], chat? } -> { run }.
+  // Ask several: { prompt, entrants?: string[], best?: number, chat? } -> { run }.
+  // best (2..8) opts into scoreboard selection; insufficient eligible models use
+  // entrants (including @saved-name) or the roster. Without best, entrants is required.
   // 2–8 entrants after fleet expansion; ids, kinds/aliases and acp:<preset>
   // resolve only to enabled project agents. run.compare and run.race are true.
   // Read/poll via orchestra/:runId, or consume orchestra task events: tasks carry

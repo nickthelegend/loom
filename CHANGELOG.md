@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Model scoreboard and saved fleets (#406).** `loom scoreboard` and `GET /api/scoreboard` aggregate model turns, costs, tokens, race/compare picks and recorded orchestra reviews across projects and 7-day, 30-day or all-time windows. Save reusable fleets with `loom fleets:save`, manage them through `/api/fleets`, and use `@name` in orchestra, compare and chain. Opt in to evidence-based selection with `loom compare --best N` or orchestra `-w best:N`; insufficient history retains the configured fleet. API contracts are documented for web and phone clients; screens are separate work.
+
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 
 ### Fixed
