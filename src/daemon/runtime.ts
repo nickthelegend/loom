@@ -2507,7 +2507,7 @@ export class ProjectRuntime {
   private async commitTurn(agentId: string, files: string[]): Promise<void> { return this.turns.commitTurn(agentId, files); }
 
   private extractMemory(agentId: string, files: string[]): void {
-    if (!this.continuity) this.briefings.extractMemory(agentId, files);
+    if (!this.continuity && this.agent(agentId)?.kind !== "demo") this.briefings.extractMemory(agentId, files);
   }
 
   workingTree(): Promise<WorkingTree> {
@@ -2577,7 +2577,7 @@ export class ProjectRuntime {
       this.captureTurnDiff(event.agentId);
       // A reply that claims the tests (or build, or lint) pass gets checked —
       // against what the turn ran, and a clean re-run — without being asked.
-      if (!event.payload.error && this.proofs.wantsAuto(event))
+      if (!event.payload.simulated && !event.payload.error && this.proofs.wantsAuto(event))
         void this.proofs.prove(event.chat ?? MAIN_CHAT, { at: event.id, auto: true }).catch((err) =>
           logbook.warn("proof", "couldn't check the turn", String(err), this.info.id));
       if (!this.continuity) void this.captureAgentDecisions(event.agentId).catch(() => { });
@@ -2683,7 +2683,8 @@ export class ProjectRuntime {
     const branch = this.log.activeBranch(chat);
     const turnText = this.turns.turnText.get(agentId) ?? "";
     this.turns.turnText.delete(agentId);
-    if (turnText.trim().length < 100) return;
+    // A free offline demo must not trigger a paid background extractor.
+    if (this.agent(agentId)?.kind === "demo" || turnText.trim().length < 100) return;
     const lastTurn = this.log.list({ kinds: ["run_complete"], agentId, limit: 1 })[0];
     const p = (lastTurn?.payload ?? {}) as Record<string, unknown>;
     let filesChanged: string[] = [];

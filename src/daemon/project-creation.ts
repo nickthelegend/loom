@@ -1,3 +1,4 @@
+import { demoDestination, prepareDemoProject, type TryProjectInput, type TryProjectResult } from "../core/demo-project.js";
 import fs from "node:fs";
 import path from "node:path";
 import { newId, readProjectConfig, writeProjectConfig } from "../core/registry.js";
@@ -14,8 +15,25 @@ export class ProjectCreation {
   private jobs = new Map<string, ProjectCloneJob>();
   private pending = new Map<AbortController, Promise<void>>();
   private closing = false;
+  private demos = new Map<string, Promise<TryProjectResult>>();
 
   constructor(private register: RegisterProject, private broadcast: (frame: Record<string, unknown>) => void) {}
+
+  async tryDemo(input: TryProjectInput): Promise<TryProjectResult> {
+    if (this.closing) throw new ProjectCreationError("daemon is shutting down", 503);
+    const dir = demoDestination(input);
+    const existing = this.demos.get(dir);
+    if (existing) return existing;
+    const task = (async () => {
+      await prepareDemoProject(dir, input.agents);
+      const { info, config } = await this.register(dir);
+      this.broadcast({ type: "projects", project: info });
+      return { project: { ...info, agents: config.agents } };
+    })();
+    this.demos.set(dir, task);
+    try { return await task; }
+    finally { this.demos.delete(dir); }
+  }
 
   async create(input: NewProjectInput): Promise<CreatedProject> {
     if (this.closing) throw new ProjectCreationError("daemon is shutting down", 503);
@@ -108,6 +126,6 @@ export class ProjectCreation {
   async close(): Promise<void> {
     this.closing = true;
     for (const controller of this.pending.keys()) controller.abort();
-    await Promise.all(this.pending.values());
+    await Promise.allSettled([...this.pending.values(), ...this.demos.values()]);
   }
 }

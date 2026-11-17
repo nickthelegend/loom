@@ -21,6 +21,13 @@ function agent(overrides: Partial<AgentStatus> = {}): AgentStatus {
 }
 
 describe("CLI agent roster", () => {
+  it("labels demo agents as scripted, offline and free", () => {
+    const demo = agent({ id: "demo-1", kind: "demo", model: "demo-smart" });
+    expect(plain(formatAgentRow(demo))).toContain("Demo — scripted, offline, free");
+    expect(plain(formatAgentRosterRow(demo))).toContain("Demo — scripted, offline, free");
+    expect(plain(formatAgentRosterRow(demo))).toContain("demo-smart");
+  });
+
   it("shows each agent's id, kind, role, configured model, and baton eligibility", () => {
     const row = plain(formatAgentRosterRow(agent()));
 

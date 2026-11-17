@@ -2725,7 +2725,7 @@ export class OrchestraEngine {
       });
       if (e.kind === "status" && p.state === "turn_cost") {
         const usd = Number(p.costUsd ?? 0);
-        if (usd > 0) {
+        if (Number.isFinite(usd) && usd >= 0) {
           run.costUsd += usd;
           const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
           if (task) task.costUsd = (task.costUsd ?? 0) + usd;

@@ -51,6 +51,39 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Try it
+
+With Node 22.5+ and Git installed, no agent CLI, API key, or repository is needed:
+
+```sh
+npx @loompad/cli try
+# Or, after installing Loom:
+loom try --no-open
+```
+
+This starts the daemon, copies a tiny todo app to `<projectsRoot>/loom-demo`,
+creates its first Git commit, seeds a shared decision, and opens the project URL
+with `?tour=1`. Three **Demo — scripted, offline, free** agents use `demo-smart`
+and `demo-fast` models. Ask “add dark mode”, “add a todo filter”, “write tests”,
+or “explain this repo”. File edits and diffs are real; command output and token
+counts are simulated, and cost is always $0.00. Each turn streams for about three
+seconds so you can steer or interrupt it. Connect a real agent for custom work.
+
+Use `--dir <path>` to choose a destination and `--agents 1..8` to size a new demo.
+Running it again reuses the demo's files, history and roster. Existing unrelated
+folders are refused. Run `npm test` inside the demo for actual verification.
+Demo also works in Orchestra, races and comparisons, including fleets such as
+`demo@demo-smart x2, demo@demo-fast x2`. Tests can shorten streaming by setting
+`LOOM_DEMO_DURATION_MS=0` (milliseconds; default 3000, maximum 6000).
+
+For web and phone clients, authenticated `POST /api/try` accepts
+`{ "dir": "/optional/absolute/path", "agents": 3 }` or `{}` and returns
+`{ "project": { "id", "name", "dir", "agents": [{ "id": "demo-1", "kind": "demo", "role": "demo", "options": { "model": "demo-smart" } }] } }`
+(with the full roster). It permits owner/admin and unscoped own devices, and
+refuses guests and project-scoped devices. Open `/app?tour=1#p/<project.id>` and
+use an `agents[].id` as `agentId` on the existing send/steer endpoints. The web
+and phone walkthrough screens are separate from this API.
+
 ## One link — a teammate, their agents, your repo
 
 Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a
@@ -1047,7 +1080,8 @@ detects at least two roles.
 | Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
 | Cursor | — | `cursor-agent --print` | 🔜 coming soon |
 | **Model (API)** | adapter (full-duplex) | `POST /v1/chat/completions`, streamed — any OpenAI-compatible provider | ✅ no CLI to install; tools are read-only unless you allow more (see [below](#agents-that-are-models)) |
-| Echo | adapter (demo/tests) | in-process | ✅ |
+| Demo | adapter (scripted, offline, free) | in-process; real edits, simulated commands and tokens | ✅ `loom try`; `demo-smart` and `demo-fast` |
+| Echo | adapter (tests only) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
 **Context and limits.** For Claude Code and Codex, the composer shows the chosen
@@ -2764,6 +2798,57 @@ required, and the defaults are the behaviour Loom had before the key existed:
 
 Keys are **never** in here: a provider's API key lives in `~/.loom/providers.json`
 (mode 0600) or the environment, because this file is committed.
+
+## Skills for your agents
+
+Loom ships seven skills from [loom-skills](https://github.com/nickthelegend/loom-skills)
+(MIT): `loom`, `loom-agents`, `loom-orchestrate`, `loom-chain`, `loom-automation`,
+`loom-collaborate`, and `loom-ops`. They teach agent CLIs how to drive Loom.
+These commands work outside a project and do not start a daemon:
+
+```sh
+loom skills agents                         # installed/current status for every agent
+loom skills install loom --agent codex     # install or update all seven skills
+loom skills install loom --agent all --dry-run
+loom skills uninstall loom --agent codex
+```
+
+`--agent` accepts `claude-code`, `codex`, `grok`, `opencode`, or `all` (the default).
+Claude Code uses `~/.claude/skills`, Codex and OpenCode share `~/.agents/skills`, and
+Grok uses `~/.grok/skills`. Install creates absent directories. Uninstalling for
+Codex also removes those shared skills from OpenCode. Only folders with the exact
+`.loom-skills-managed` signature from upstream's installer are replaced or removed;
+unmanaged name conflicts are reported and left alone, even with `--force`.
+
+Use `loom skills agents --target /path/to/skills` to inspect an additional directory.
+For install/uninstall, `--target` selects only that directory unless `--agent` is also
+given. Install and uninstall support `--dry-run`; status and changes support `--json`. Custom
+targets are local CLI operations. Existing `loom skills install <git-url|dir>` still
+installs a project skill as before.
+
+At daemon startup, managed copies in the standard directories are updated if older
+than the bundle; missing installs and newer versions are left alone. To disable this,
+set `"agentSkills": { "autoUpdate": false }` in `~/.loom/daemon.json` (or
+`$LOOM_HOME/daemon.json`). Manual installation remains available. Version stamps
+record the upstream commit and its date; upstream managed copies without stamps
+are upgraded on the next start.
+
+For clients, `GET /api/agent-skills` returns `{ version, autoUpdate, agents }`;
+each agent has `{ agent, dir, skills }`, and each skill has
+`{ id, installed, managed, current, version }`. Owner/admin sessions can
+`POST /api/agent-skills/install` or `/uninstall` with `{ "agents": ["codex"] }`.
+The response is `{ dryRun, results }`, with `{ dir, id, action, error? }` per skill.
+Actions are `installed`, `updated`, `removed`, `unchanged`, `conflict`, or `error`;
+HTTP 200 may include partial failures. Refresh status after an operation. Unscoped
+paired devices may read status; scoped tokens and guests cannot access these APIs.
+The exported `installAgentSkills` helper is ready for an onboarding skills step.
+
+Maintainers can refresh the vendored bundle with
+`node scripts/sync-agent-skills.mjs /path/to/loom-skills` or pass a git URL to clone
+its current `main`. With no argument it uses the upstream URL. The script copies
+whole skill folders, the MIT license, and `skills/agent/version.json`; local source
+skills must be committed so that the stamp identifies the copied version.
+Startup installation approach credit: Agent Orchestrator (Apache-2.0).
 
 ## Odds and ends that pull their weight
 

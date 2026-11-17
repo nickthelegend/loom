@@ -1000,6 +1000,9 @@ export const createProject = (c: Creds, name: string, agents?: Array<{ kind: str
   api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify(agents?.length ? { name, agents } : { name }) });
 /** Your saved fleets (#406): named fleet specs that work as "@name" in any project. */
 export const getFleets = (c: Creds) => api<{ fleets: Array<{ name: string; spec: string }> }>(c, "/api/fleets");
+/** The demo project (#402): a small todo app with three scripted demo agents — no keys, no CLIs. Reused if it exists. */
+export const tryDemo = (c: Creds) =>
+  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/try", { method: "POST", body: "{}" });
 /** Clone a repo on the computer, in the background; poll the job until it's done. */
 export const cloneProject = (c: Creds, url: string, name?: string) =>
   api<{ jobId: string; dir: string }>(c, "/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url, name } : { url }) });

@@ -11,6 +11,7 @@
  * yet, it doesn't get a row — a logo is not an integration.
  */
 
+import { DEMO_LABEL } from "../adapters/demo.js";
 import { listProviders } from "./providers.js";
 import type { AgentConfig } from "../types.js";
 import { agyBin } from "../adapters/antigravity-cli.js";
@@ -66,6 +67,7 @@ export type AdeSpec = AdeAdapterSpec | AdeBridgeSpec;
  * than absent when the right answer is one HTTP call away.
  */
 export const ADES: AdeSpec[] = [
+  { kind: "demo", label: DEMO_LABEL, tier: "adapter", probe: async () => true },
   {
     kind: "claude-code",
     label: "Claude Code",
@@ -202,7 +204,8 @@ export function defaultAgentConfigs(availability: Record<string, boolean>): Agen
       // An agent that can't work is worse in a new roster than an agent that
       // isn't there: `loom agents:add model --model …` is one line, and
       // `loom models` is how you pick.
-      .filter((kind) => kind !== "model")
+      // Demo is offered explicitly, never silently selected for a real project.
+      .filter((kind) => kind !== "model" && kind !== "demo")
       .map((kind) => ({ id: defaultIdFor(kind), kind, role: defaultIdFor(kind) }))
   );
 }

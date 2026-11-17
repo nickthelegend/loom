@@ -55,6 +55,8 @@ import {
 import { registerAgentDiscoveryRoutes } from './routes/agent-discovery.js';
 import { registerAgentSettingsRoutes } from './routes/agent-settings.js';
 import { registerAccountsRoutes } from "./routes/accounts.js";
+import { registerAgentSkillsRoutes } from "./routes/agent-skills.js";
+import { updateManagedAgentSkills } from "../core/agent-skills.js";
 import { registerAgentsRoutes } from './routes/agents.js';
 import { registerAlertsRoutes } from './routes/alerts.js';
 import { registerApprovalsRoutes } from './routes/approvals.js';
@@ -522,6 +524,7 @@ export class LoomDaemon {
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
     registerScoreboardRoutes(app);
+    registerAgentSkillsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
     registerPairingRoutes(app, ctx);
@@ -822,6 +825,16 @@ export class LoomDaemon {
     if (this.swap && Date.now() - this.swap.at < 120_000) logbook.info("daemon", `updated ${describeSwap(this.swap)} — no turns were interrupted`);
     else this.swap = null;
     this.writeConfig();
+    // LOOM_NO_AGENT_SKILLS_UPDATE=1 skips it: the test suite sets it (its daemons share the
+    // developer's real HOME, and this writes to ~/.claude/skills and friends).
+    if (!process.env.LOOM_NO_AGENT_SKILLS_UPDATE && readDaemonConfig()?.agentSkills?.autoUpdate !== false) {
+      try {
+        const { results } = updateManagedAgentSkills();
+        const updated = results.filter(r => r.action === "updated").length;
+        const errors = results.filter(r => r.action === "error");
+        if (updated || errors.length) logbook.info("daemon", `agent skills: updated ${updated} managed skills${errors.length ? `; ${errors.length} failed: ${errors.map(r => r.error).join("; ")}` : ""}`);
+      } catch (err) { logbook.warn("daemon", "could not update agent skills", String(err)); }
+    }
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
     this.watchReleases();

@@ -686,6 +686,91 @@ describe("web app · My issues (#382)", () => {
   });
 });
 
+describe("web app · Loom for agents (#405)", () => {
+  it("groups agents that share a skills folder, flags outdated and your own skills, and installs", async () => {
+    const m = mount();
+    const posted: unknown[] = [];
+    const skills = (state: "on" | "old" | "none" | "mine") => ["loom", "loom-ops"].map((id) => ({
+      id, installed: state !== "none", managed: state === "on" || state === "old", current: state === "on", version: null,
+    }));
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
+      if (u.endsWith("/api/agent-skills")) return json({ version: { revision: "abc", committedAt: "2026-11-17T00:00:00Z" }, autoUpdate: true, agents: [
+        { agent: "claude-code", dir: "/h/.claude/skills", skills: skills("on") },
+        { agent: "codex", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "opencode", dir: "/h/.agents/skills", skills: skills("old") },
+        { agent: "grok", dir: "/h/.grok/skills", skills: [{ id: "loom", installed: true, managed: false, current: false, version: null }, { id: "loom-ops", installed: false, managed: false, current: false, version: null }] },
+      ] });
+      if (u.endsWith("/api/agent-skills/install")) { posted.push(JSON.parse(String(init?.body))); return json({ dryRun: false, results: [{ dir: "/h/.agents/skills", id: "loom", action: "updated" }] }); }
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="agentskills"]'));
+    click($(m, '.setnav [data-sec="agentskills"]'));
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .skillrow").length === 3);
+    const rows = [...m.window.document.querySelectorAll("#setpane .skillrow")].map((r) => r.textContent ?? "");
+    expect(rows[0]).toContain("all 2 installed and current");
+    expect(rows[1]).toContain("Codex");
+    expect(rows[1]).toContain("OpenCode");
+    expect(rows[1]).toContain("2 can be updated");
+    expect(rows[2]).toContain("1 folder is your own and left alone");
+    // the current row has nothing to install; the shared Codex/OpenCode row offers Update for both
+    expect(m.window.document.querySelectorAll('#setpane .skillrow')[0].querySelector('[data-skillsdo="install"]')).toBeNull();
+    const update = m.window.document.querySelectorAll("#setpane .skillrow")[1].querySelector('[data-skillsdo="install"]') as HTMLElement;
+    expect(update.textContent).toBe("Update");
+    click(update);
+    await waitUntil(() => posted.length === 1);
+    expect(posted[0]).toEqual({ agents: ["codex", "opencode"] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · the demo walkthrough (#402)", () => {
+  it("opens a demo project with ?tour=1 and walks it: sends, steers the running turn, shows Agents, turns on Developer mode", async () => {
+    process.env.LOOM_DEMO_DURATION_MS = "1500";
+    const r = await fetch(`${baseUrl}/api/try`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ dir: path.join(tmpDir("try-dom"), "loom-demo") }),
+    });
+    const { project } = (await r.json()) as { project: { id: string; dir: string; agents: Array<{ kind: string }> } };
+    expect(project.agents.every((a) => a.kind === "demo")).toBe(true);
+    const m = mount({ hash: `?tour=1#p/${project.id}` });
+    const feed = () => text(m, "#feed");
+    try {
+      await waitUntil(() => text(m, "#tourcard").includes("Ask for something"), { timeoutMs: 15_000 });
+      expect(m.window.location.search).toBe(""); // a reload won't start it again
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Watch it work"));
+      await waitUntil(() => feed().includes("I'm Loom's demo agent"), { timeoutMs: 20_000 });
+      // the edit is real
+      await waitUntil(() => fs.readFileSync(path.join(project.dir, "styles.css"), "utf8").includes("prefers-color-scheme: dark"));
+      await waitUntil(() => !!$(m, "#tournext") && ($(m, "#steer") as HTMLElement).style.display === "none");
+      click($(m, "#tournext"));
+      await waitUntil(() => text(m, "#tourcard").includes("Steer while it works"));
+      click($(m, "#touract"));
+      await waitUntil(() => feed().includes("Steering received: Also cover an empty list"), { timeoutMs: 20_000 });
+      await waitUntil(() => text(m, "#tourcard").includes("Your agents"));
+      click($(m, "#touract"));
+      await waitUntil(() => text(m, "#tourcard").includes("Bring your own agents"));
+      expect($(m, '.tab[data-tab="fleet"]')!.classList.contains("active")).toBe(true);
+      click($(m, "#touract"));
+      await waitUntil(() => !$(m, "#tourcard"));
+      expect(m.window.localStorage.getItem("loomDevMode")).toBe("1");
+      await waitUntil(() => !!$(m, '.tab[data-tab="orchestra"]'));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem("loomDevMode");
+      delete process.env.LOOM_DEMO_DURATION_MS;
+      await fetch(`${baseUrl}/api/projects/${project.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } }).catch(() => {});
+    }
+  }, 60_000);
+});
+
 describe("web app · saved fleets and the model scoreboard (#406)", () => {
   it("saves the fleet rows under a name, adds the saved fleet as one chip, and opens the scoreboard", async () => {
     const m = mount({ hash: `#p/${projectId}` });
