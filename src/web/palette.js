@@ -10,6 +10,7 @@ import { toast } from './notifications.js';
 import { openSettingsModal } from './settings.js';
 import { state } from './state.js';
 import { editorItems } from './editors.js';
+import { openScoreboard } from './project/scoreboard.js';
 
 
   /**
@@ -77,6 +78,7 @@ import { editorItems } from './editors.js';
       }
       if (pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } });
       if (pid) editorItems(pid, null, ICONS.code, 4).forEach(function(it){ C.push({ icon: it.icon, label: it.label, sub: "this project", run: it.run }); });
+      C.push({ icon: ICONS.star, label: "Model scoreboard", sub: "which model wins, at what cost", run: function(){ openScoreboard(pid || null); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
       (state.projects || []).forEach(function(p){
         if (p.id === pid || !state.selectProject) return;

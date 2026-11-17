@@ -1,11 +1,36 @@
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import type { RouteContext } from './context.js';
 import { readProjectConfig } from "../../core/registry.js";
 import { findProject } from "../../core/registry.js";
 import { setupReport, signInCommand } from "../../core/setup.js";
+import { setupRequirements, SetupInstallError, type SetupInstaller, type SetupCommandRunner } from "../../core/setup-install.js";
 import { forgetProbes } from "../../adapters/base.js";
 /** Register setup routes in the order established by LoomDaemon.routes(). */
-export function registerSetupRoutes(app: Express, ctx: Pick<RouteContext, "runtimes">): void {
+export function registerSetupRoutes(app: Express, ctx: Pick<RouteContext, "runtimes" | "broadcastProjects">, installer: SetupInstaller, run?: SetupCommandRunner): void {
+
+  /** GET -> SetupRequirements (core/setup-install.ts). Only unscoped callers
+   * can inspect this machine. POST /install accepts exactly { kind } from
+   * AGENT_INSTALLS; owner/admin only, including when a device uses loopback.
+   * Streams InstallEvent frames to unscoped sockets. HTTP 200 -> { ok:true,
+   * version }; 500 -> { ok:false, version:null, error }. Invalid body/kind ->
+   * 400; same kind already running -> 409; refused identity -> 403.
+   * No command, package, environment or path override is accepted over HTTP.
+   */
+  app.get("/api/setup/requirements", async (req, res) => {
+    if ((req as Request & { projectScope?: string[] | null }).projectScope) return void res.status(403).json({ error: "requirements require an unscoped token" });
+    try { res.json(await setupRequirements(run)); }
+    catch (err) { res.status(500).json({ error: (err as Error).message }); }
+  });
+  app.post("/api/setup/install", async (req, res) => {
+    if (!(req as Request & { isAdmin?: boolean }).isAdmin || (req as Request & { projectScope?: string[] | null }).projectScope) {
+      return void res.status(403).json({ error: "admin only" });
+    }
+    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.kind !== "string") return void res.status(400).json({ error: "expected { kind }" });
+    try {
+      const result = await installer.install(req.body.kind, event => ctx.broadcastProjects({ ...event }));
+      res.status(result.ok ? 200 : 500).json(result);
+    } catch (err) { res.status(err instanceof SetupInstallError ? err.status : 500).json({ error: (err as Error).message }); }
+  });
 
   /**
    * What this machine still needs — the same answer `loom doctor` gives.

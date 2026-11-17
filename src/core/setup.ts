@@ -79,12 +79,22 @@ export interface SetupReport {
   ready: boolean;
 }
 
+/** Fixed argv only; shared by the hints and the owner-only installer.
+ * Package sources: developers.openai.com/codex/cli, code.claude.com/docs/en/setup,
+ * opencode.ai/docs, docs.x.ai/build/enterprise. No request can supply argv.
+ */
+export const AGENT_INSTALLS = {
+  "claude-code": { command: "npm", args: ["i", "-g", "@anthropic-ai/claude-code"], bin: "claude" },
+  codex: { command: "npm", args: ["i", "-g", "@openai/codex"], bin: "codex" },
+  opencode: { command: "npm", args: ["i", "-g", "opencode-ai"], bin: "opencode" },
+  // Grok ships as a native binary with its own installer (docs.x.ai), not an npm package: no one-click install.
+} as const;
+export type InstallKind = keyof typeof AGENT_INSTALLS;
+
 const INSTALL: Record<string, string> = {
-  "claude-code": "npm i -g @anthropic-ai/claude-code",
-  codex: "install Codex.app, or npm i -g @openai/codex",
-  opencode: "curl -fsSL https://opencode.ai/install | bash",
-  "grok-code": "install the grok CLI from docs.x.ai",
+  ...Object.fromEntries(Object.entries(AGENT_INSTALLS).map(([kind, spec]) => [kind, [spec.command, ...spec.args].join(" ")])),
   "antigravity-cli": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  "grok-code": "install the grok CLI from docs.x.ai",
   // Nothing to install for this one — what it needs is a provider with a key.
   model: "loom providers:set openrouter --key <your key>",
 };
@@ -179,6 +189,7 @@ export async function probeAuth(kind: string, env: NodeJS.ProcessEnv = {}): Prom
       if (!fs.existsSync(file)) return { authed: false, detail: "no grok session on this machine" };
       return grokAuth(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, GrokEntry>);
     }
+    if (kind === "demo") return { authed: true, detail: "scripted, offline, free" };
     if (kind === "model") {
       // There is nothing to log in to: a model agent is usable when some
       // provider on this machine has a key. Saying "couldn't confirm it's
@@ -343,7 +354,7 @@ export function grokAuth(entries: Record<string, GrokEntry>, now = Date.now()): 
   return { authed: false, detail: `grok's session expired ${new Date(latest).toISOString().slice(0, 10)} and hasn't renewed` };
 }
 
-export async function setupReport(): Promise<SetupReport> {
+export async function setupAgents(): Promise<AgentStatus[]> {
   const p = platform();
   const available = await detectAdes();
 
@@ -355,9 +366,7 @@ export async function setupReport(): Promise<SetupReport> {
         kind: a.kind,
         label: a.label,
         found,
-        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai"
-          : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex"
-          : p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
+        install: p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
           : INSTALL[a.kind] ?? "",
         authed: auth.authed,
         ...(auth.detail ? { authDetail: auth.detail } : {}),
@@ -365,6 +374,13 @@ export async function setupReport(): Promise<SetupReport> {
       };
     }),
   );
+
+  return agents;
+}
+
+export async function setupReport(): Promise<SetupReport> {
+  const p = platform();
+  const agents = await setupAgents();
 
   // Bridges are probed live: "installed" says nothing useful about an app whose
   // debugger has to be asked for at launch.
@@ -396,7 +412,9 @@ export async function setupReport(): Promise<SetupReport> {
     // roster is not ready, and saying it is was the exact shape of today's
     // wasted afternoon. Unknown counts as ready — don't cry wolf over a probe
     // that timed out.
-    ready: agents.some((a) => a.found && a.authed !== false),
+    // The demo agent is always there and always "signed in"; it lets you try Loom, it doesn't make
+    // this machine ready to do real work.
+    ready: agents.some((a) => a.kind !== "demo" && a.found && a.authed !== false),
   };
 }
 

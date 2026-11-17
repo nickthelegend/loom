@@ -96,6 +96,12 @@
     color:var(--muted-foreground);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
   .sgrouph:first-child{margin-top:8px}
   .srow2{display:flex;gap:10px;align-items:flex-start;padding:7px 0}
+  .skillrow .sbody{min-width:0}
+  .skillchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .skchip{font-size:10.5px;padding:1px 6px;border-radius:5px;border:1px solid var(--border);color:var(--muted-foreground);font-family:var(--font-mono)}
+  .skchip.on{border-color:color-mix(in oklab,var(--ok) 45%,transparent);color:var(--foreground)}
+  .skchip.old{border-color:color-mix(in oklab,var(--warn) 45%,transparent)}
+  .skchip.mine{border-style:dashed}
   .sdot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:6px;background:var(--muted-foreground)}
   .sdot.ok{background:var(--ok)}
   .sdot.warn{background:var(--warn)}
@@ -993,6 +999,9 @@
   .tourt{font-size:15px;font-weight:600;margin:4px 0 6px}
   .tourb{font-size:13px;line-height:1.55;color:var(--muted-foreground)}
   .toura{display:flex;justify-content:space-between;margin-top:12px}
+  .demotour .toura{gap:6px;align-items:center}
+  .demotour .toura .spacer{flex:1}
+  .tourpre{margin-top:10px;padding:7px 10px;border-radius:9px;background:var(--muted);font-size:12.5px;color:var(--foreground)}
   /* view transitions */
   ::view-transition-old(root),::view-transition-new(root){animation-duration:.14s}
   /* outline */
@@ -1553,3 +1562,8 @@
   font:inherit;font-size:12.5px;padding:0 9px}
 .acctadd #acctlabel{width:150px}
 .acctadd #acctdir{flex:1;min-width:180px}
+
+  /* "Try a demo project" (#402) */
+  .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
+  .trycallout .btn{flex:none}
+  .dempty .trydemo{margin-top:4px}

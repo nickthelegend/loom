@@ -59,6 +59,24 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
     next();
   };
 
+  // POST /api/try { dir?: absolute path, agents?: 1..8 } -> { project }.
+  // project includes id, name, dir and agents [{ id, kind, role, options: { model } }].
+  // Both web and phone can send to agents[0].id and open /app?tour=1#p/<id>.
+  app.post("/api/try", ownerDevice, async (req, res) => {
+    try {
+      const result = await creation.tryDemo(req.body ?? {});
+      const rt = await ctx.runtime(result.project.id);
+      if (!rt.log.list({ kinds: ["decision"] }).some(e => e.payload.source === "demo")) {
+        const text = "Keep this demo dependency-free: plain HTML, JavaScript and Node's built-in assertions.";
+        const event = rt.log.append({ kind: "decision", payload: { text, source: "demo" } });
+        rt.brain.add({ kind: "decision", text, provenance: { agentId: "user", eventId: event.id, ts: event.ts } });
+      }
+      res.json(result);
+    } catch (error) {
+      res.status(error instanceof ProjectCreationError ? error.status : 500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.post("/api/projects/new", ownerDevice, async (req, res) => {
     try { res.json(await creation.create(req.body ?? {})); }
     catch (error) {

@@ -1,3 +1,6 @@
+import { rpcError } from "../core/mcp-server.js";
+import { loomToolScope } from "../core/loom-tools.js";
+import { registerMcpRoutes } from "./routes/mcp.js";
 import { readPrRecords } from "../core/pr-feedback.js";
 import { ClientDelivery } from "./delivery.js";
 import { ChatPresenceTracker } from "./presence.js";
@@ -55,6 +58,8 @@ import {
 import { registerAgentDiscoveryRoutes } from './routes/agent-discovery.js';
 import { registerAgentSettingsRoutes } from './routes/agent-settings.js';
 import { registerAccountsRoutes } from "./routes/accounts.js";
+import { registerAgentSkillsRoutes } from "./routes/agent-skills.js";
+import { updateManagedAgentSkills } from "../core/agent-skills.js";
 import { registerAgentsRoutes } from './routes/agents.js';
 import { registerAlertsRoutes } from './routes/alerts.js';
 import { registerApprovalsRoutes } from './routes/approvals.js';
@@ -77,6 +82,7 @@ import { registerIntegrationsRoutes } from './routes/integrations.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerMessagesRoutes } from './routes/messages.js';
 import { registerObservabilityRoutes } from './routes/observability.js';
+import { registerScoreboardRoutes } from "./routes/scoreboard.js";
 import { registerOrchestraRoutes } from './routes/orchestra.js';
 import { registerPairingRoutes } from './routes/pairing.js';
 import { registerProjectActionsRoutes } from './routes/project-actions.js';
@@ -90,6 +96,9 @@ import { registerRoutingRoutes } from './routes/routing.js';
 import { createRuntimeHandler } from './routes/runtime-handler.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerServersRoutes } from './routes/servers.js';
+import { SetupInstaller, type SetupCommandRunner } from "../core/setup-install.js";
+import type { OnboardingOptions } from "../core/onboarding.js";
+import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerSetupRoutes } from './routes/setup.js';
 import { registerSpecsRoutes } from './routes/specs.js';
 import { registerTaskDeliveryRoutes } from './routes/task-delivery.js';
@@ -124,6 +133,8 @@ const BOOT_ID = `${process.pid}-${Date.now().toString(36)}`;
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
 
 export interface DaemonOptions {
+  /** Injectable machine probes/process boundary; HTTP never accepts these overrides. */
+  setup?: { run?: SetupCommandRunner; agents?: OnboardingOptions["agents"] };
   host?: string;
   port?: number;
   /** Bind to the Tailscale interface instead of localhost. */
@@ -144,7 +155,15 @@ export interface DaemonOptions {
   onboard?: { clone?: (repo: string, dir: string) => Promise<void>; projectsHome?: string; accessPollMs?: number; accessWaitMs?: number };
 }
 
+/** POST routes (under /api/projects/:id) a Loom tools credential may call — exactly what src/core/mcp-server.ts uses. */
+const TOOL_WRITES = [
+  /^\/agents$/, /^\/messages$/, /^\/steer$/, /^\/queue\/[^/]+\/steer$/, /^\/orchestra$/, /^\/compare$/,
+  /^\/brain$/, /^\/orchestra\/[^/]+\/tasks\/[^/]+\/report$/, /^\/board\/tasks$/,
+];
+
 export class LoomDaemon {
+  private setupInstaller: SetupInstaller;
+  private setupOptions: DaemonOptions["setup"];
   private app = express();
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -289,6 +308,8 @@ export class LoomDaemon {
   private gh: DaemonOptions["gh"];
 
   constructor(opts: DaemonOptions = {}) {
+    this.setupOptions = opts.setup;
+    this.setupInstaller = new SetupInstaller(opts.setup?.run);
     this.team = new TeamLink({
       projects: listProjects,
       ...opts.teamOptions,
@@ -424,6 +445,25 @@ export class LoomDaemon {
         return;
       }
       const token = bearerToken(req.headers.authorization);
+      const toolScope = loomToolScope(token);
+      if (toolScope) {
+        const projectRoute = /^\/api\/projects\/([^/]+)(?:\/|$)/.exec(req.path);
+        const resolved = projectRoute && findProject(decodeURIComponent(projectRoute[1]!));
+        const own = !!resolved && resolved.id === toolScope.project;
+        const rest = projectRoute ? req.path.slice(projectRoute[0].replace(/\/$/, "").length) : "";
+        // An agent holds this credential, so it gets what the Loom tools need and nothing else:
+        // reads, and the few writes the tools make. Never config, permissions, agents' options,
+        // deletes, terminals or triggers — a prompt-injected worker must not be able to widen
+        // its own access or remove your work.
+        const allowed = req.path === "/mcp" || (req.method === "GET" && req.path === "/api/projects") ||
+          (own && req.method === "GET") ||
+          (own && req.method === "POST" && TOOL_WRITES.some((r) => r.test(rest)) &&
+            (rest !== "/agents" || Object.keys(req.body ?? {}).every((k) => ["kind", "model", "count", "id", "role"].includes(k))));
+        if (!allowed) return void res.status(403).json({ error: "a Loom tools credential can only read this project and use the Loom tools" });
+        (req as Request & { projectScope?: string[] }).projectScope = [toolScope.project];
+        next();
+        return;
+      }
       // A worker credential admits only this method and exact report route.
       const report = req.method === "POST" && /^\/api\/projects\/([^/]+)\/orchestra\/([^/]+)\/tasks\/([^/]+)\/report\/?$/.exec(req.path);
       if (report) {
@@ -518,9 +558,13 @@ export class LoomDaemon {
       if (scope.includes(resolved)) return void next();
       res.status(403).json({ error: "this token is not scoped to that project" });
     });
-    registerSetupRoutes(app, ctx);
+    registerMcpRoutes(app, () => ({ host: this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host.includes(":") ? `[${this.host}]` : this.host, port: this.port }));
+    registerSetupRoutes(app, ctx, this.setupInstaller, this.setupOptions?.run);
+    registerOnboardingRoutes(app, { agents: this.setupOptions?.agents, hasTeamInvite: () => this.team.hasInvites() });
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
+    registerScoreboardRoutes(app);
+    registerAgentSkillsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
     registerPairingRoutes(app, ctx);
@@ -603,6 +647,7 @@ export class LoomDaemon {
       if (res.headersSent) return void next(err);
       const e = (err ?? {}) as { type?: string; status?: number; message?: string };
       if (e.type === "entity.too.large") return void res.status(413).json({ error: "that request is too large (the limit is 2 MB)" });
+      if (_req.path === "/mcp" && e.type === "entity.parse.failed") return void res.status(400).json(rpcError(null, -32700, "Parse error"));
       if (e.type === "entity.parse.failed") return void res.status(400).json({ error: "that request body isn't valid JSON" });
       logbook.error("daemon", `request failed: ${e.message ?? String(err)}`, err);
       const status = typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status : 500;
@@ -822,6 +867,16 @@ export class LoomDaemon {
     if (this.swap && Date.now() - this.swap.at < 120_000) logbook.info("daemon", `updated ${describeSwap(this.swap)} — no turns were interrupted`);
     else this.swap = null;
     this.writeConfig();
+    // LOOM_NO_AGENT_SKILLS_UPDATE=1 skips it: the test suite sets it (its daemons share the
+    // developer's real HOME, and this writes to ~/.claude/skills and friends).
+    if (!process.env.LOOM_NO_AGENT_SKILLS_UPDATE && readDaemonConfig()?.agentSkills?.autoUpdate !== false) {
+      try {
+        const { results } = updateManagedAgentSkills();
+        const updated = results.filter(r => r.action === "updated").length;
+        const errors = results.filter(r => r.action === "error");
+        if (updated || errors.length) logbook.info("daemon", `agent skills: updated ${updated} managed skills${errors.length ? `; ${errors.length} failed: ${errors.map(r => r.error).join("; ")}` : ""}`);
+      } catch (err) { logbook.warn("daemon", "could not update agent skills", String(err)); }
+    }
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
     this.watchReleases();
@@ -1160,6 +1215,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    this.setupInstaller.close();
     this.presence.close();
     await this.closeProjects();
     this.triggers.stop();

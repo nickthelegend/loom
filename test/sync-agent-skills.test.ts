@@ -1,0 +1,36 @@
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { expect, it } from "vitest";
+import { tmpDir } from "./helpers.js";
+
+it("syncs a clean checkout with attachments, license and a reproducible version, and refuses dirty sources", () => {
+  const root = tmpDir("sync-agent-skills");
+  const checkout = path.join(root, "upstream");
+  const project = path.join(root, "package");
+  const script = path.join(project, "scripts", "sync-agent-skills.mjs");
+  const output = path.join(project, "skills", "agent");
+  fs.mkdirSync(path.dirname(script), { recursive: true });
+  fs.copyFileSync(fileURLToPath(new URL("../scripts/sync-agent-skills.mjs", import.meta.url)), script);
+  fs.mkdirSync(path.join(checkout, "skills", "loom", "references"), { recursive: true });
+  fs.writeFileSync(path.join(checkout, "skills", "loom", "SKILL.md"), "skill content");
+  fs.writeFileSync(path.join(checkout, "skills", "loom", "references", "guide.md"), "attachment");
+  fs.writeFileSync(path.join(checkout, "LICENSE"), "license content");
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: checkout, encoding: "utf8" }).trim();
+  git("init", "--quiet");
+  git("add", ".");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture");
+  const sync = () => execFileSync(process.execPath, [script, checkout], { encoding: "utf8", stdio: "pipe" });
+  expect(sync()).toContain("Synced 1 agent skills");
+  expect(fs.readFileSync(path.join(output, "loom", "references", "guide.md"), "utf8")).toBe("attachment");
+  expect(fs.readFileSync(path.join(output, "LICENSE"), "utf8")).toBe("license content");
+  const version = fs.readFileSync(path.join(output, "version.json"), "utf8");
+  expect(JSON.parse(version)).toEqual({ revision: git("rev-parse", "HEAD"), committedAt: git("show", "-s", "--format=%cI", "HEAD") });
+  sync();
+  expect(fs.readFileSync(path.join(output, "version.json"), "utf8")).toBe(version);
+  fs.writeFileSync(path.join(checkout, "skills", "loom", "SKILL.md"), "dirty changes");
+  expect(sync).toThrow(/commit upstream skill changes/);
+  expect(fs.readFileSync(path.join(output, "loom", "SKILL.md"), "utf8")).toBe("skill content");
+  expect(fs.readFileSync(path.join(checkout, "skills", "loom", "SKILL.md"), "utf8")).toBe("dirty changes");
+});

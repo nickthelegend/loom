@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { cloneProject, createProject, getProjectJob, getSetupAgents, type Creds, type SetupAgent } from "./api";
+import { cloneProject, createProject, getProjectJob, getSetupAgents, tryDemo, type Creds, type SetupAgent } from "./api";
 import { TAP } from "./components";
 import { Sheet } from "./observatory";
 import { T, radii, spacing } from "./theme";
@@ -37,7 +37,8 @@ export function NewProjectSheet(props: {
     setName(""); setUrl(""); setErr(null); setBusy(false); setProgress(""); setPicks({});
     setAgents(null);
     void getSetupAgents(props.creds)
-      .then((r) => { if (open.current) setAgents(r.agents.filter((a) => a.found)); })
+      // the demo agent is for `Try a demo project`, not for a real one
+      .then((r) => { if (open.current) setAgents(r.agents.filter((a) => a.found && a.kind !== "demo")); })
       .catch(() => { if (open.current) setAgents([]); });
   }, [props.visible]);
 
@@ -75,6 +76,12 @@ export function NewProjectSheet(props: {
         await new Promise((r) => setTimeout(r, 900));
       }
     } catch (e) { fail(e); }
+  };
+
+  const demo = async () => {
+    setErr(null); setBusy(true); setProgress("Setting up the demo…");
+    try { const { project } = await tryDemo(props.creds); props.onCreated(project.id); }
+    catch (e) { fail(e); }
   };
 
   const seg = (m: "new" | "clone", label: string) => (
@@ -168,6 +175,12 @@ export function NewProjectSheet(props: {
           {busy ? <ActivityIndicator color={T.onBright} /> : (
             <Text style={{ color: T.onBright, fontSize: 15, fontWeight: "700" }}>{mode === "new" ? "Create project" : "Clone project"}</Text>
           )}
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => void demo()} disabled={busy} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Try a demo project"
+          style={{ minHeight: TAP, borderRadius: radii.key, borderWidth: 1, borderColor: T.line, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
+          <Text style={{ color: T.text, fontSize: 14.5, fontWeight: "600" }}>Try a demo project</Text>
+          <Text style={{ color: T.faint, fontSize: 12, marginTop: 2 }}>Three demo agents, no keys — see Loom work first</Text>
         </TouchableOpacity>
       </ScrollView>
     </Sheet>

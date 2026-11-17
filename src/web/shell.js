@@ -17,6 +17,8 @@ import { drawStatusbar,loadGithub,loadLoomPad,loadUpdate } from './statusbar.js'
 import { openTaskModal } from './tasks.js';
 import { THEME_BTN,bindTheme } from './theme.js';
 import { emptyArt } from './transcript.js';
+import { TRY_BTN, bindTryDemo } from './try-demo.js';
+import { renderHome } from './welcome.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
 import { openShareLive } from './share-live.js';
@@ -40,7 +42,9 @@ import { openTriggers } from './triggers-ui.js';
     clearShell();
     var m = location.hash.match(/^#p\/(.+)$/);
     // No project in the URL: reopen the one you were last in, not the first.
-    var cur = m ? m[1] : (function(){ try { return localStorage.getItem("loomProject"); } catch (e) { return null; } })();
+    // #home is Home (#403): no project open, and nothing auto-opens one while it's up.
+    var home = location.hash === "#home";
+    var cur = m ? m[1] : home ? null : (function(){ try { return localStorage.getItem("loomProject"); } catch (e) { return null; } })();
     // The project the URL asked for, kept separately from the one on screen so
     // a deep link that loses the race with the first /api/projects can still be
     // honoured when it arrives. select() clears it — see refresh().
@@ -49,7 +53,8 @@ import { openTriggers } from './triggers-ui.js';
       '<div class="dshell">' +
       '<aside class="sidebar">' +
         '<div class="shead"><span class="wordmark">lo<b>om</b></span></div>' +
-        '<div class="topnav"><button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\"kbd\">N</span></button>" +
+        '<div class="topnav"><button class="navitem" id="navhome">' + ICONS.spark + "Home</button>" +
+        '<button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\"kbd\">N</span></button>" +
         '<button class="navitem" id="newproj">' + ICONS.folderPlus + "New project<span class=\"kbd\">P</span></button></div>" +
         '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false">' +
           '<button class="snkbd" id="palettebtn" type="button" title="Search everything (\u2318K)" aria-label="open command palette">\u2318K</button></div>' +
@@ -90,7 +95,8 @@ import { openTriggers } from './triggers-ui.js';
     // the sidebar foot is where that happens — and Loom with nothing to drive
     // is a window with nothing in it. Once only; the button is always there.
     try {
-      if (!localStorage.getItem(SETUP_SEEN_KEY)) {
+      // ...unless this window was opened to walk through the demo, which ends at Setup anyway.
+      if (!localStorage.getItem(SETUP_SEEN_KEY) && !(state.demoTourWanted && state.demoTourWanted())) {
         localStorage.setItem(SETUP_SEEN_KEY, "1");
         setTimeout(openSetupModal, 400);
       }
@@ -101,6 +107,13 @@ import { openTriggers } from './triggers-ui.js';
     // also calls bindTheme, but it never runs when no project is selected.
     bindTheme();
     document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
+    function goHome(){
+      home = true; cur = null; homeView = null;
+      if (location.hash !== "#home") history.replaceState(null, "", "#home");
+      drawList(); drawEmpty();
+    }
+    state.goHome = goHome;
+    document.getElementById("navhome").onclick = goHome;
     if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
     applyWidths();
     makeResizer("rz-sidebar", {
@@ -161,9 +174,11 @@ import { openTriggers } from './triggers-ui.js';
       refresh();
     };
     var dmain = document.getElementById("dmain");
+    var homeView = null;
     function drawEmpty(){
-      dmain.innerHTML = '<div class="dempty"><div class="biglogo">loom</div><div class="hair"></div>' +
-        "<div>select a project to open its workspace</div></div>";
+      // Home (#403): Get started, the demo, Loom for agents, your projects, who's winning
+      if (homeView && dmain.querySelector(".home")) { homeView.refreshProjects(); return; }
+      homeView = renderHome(dmain, { openProject: function(id){ select(id); } });
     }
     /**
      * Search the open project's conversations.
@@ -235,7 +250,8 @@ import { openTriggers } from './triggers-ui.js';
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
         el._drawn = null;
-        el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
+        el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span><div style="margin-top:10px">' + TRY_BTN + "</div></div>";
+        bindTryDemo(el);
         return;
       }
       var shown = !filter ? state.projects : state.projects.filter(function(p){
@@ -1010,6 +1026,7 @@ import { openTriggers } from './triggers-ui.js';
 
     function select(pid){
       cur = pid;
+      home = false; homeView = null;
       try { localStorage.setItem("loomProject", pid); } catch (e) {}
       wanted = null; // whatever the URL wanted, this is a real choice now
       history.replaceState(null, "", "#p/" + pid);
@@ -1065,7 +1082,8 @@ import { openTriggers } from './triggers-ui.js';
         state.projects = j.projects || [];
         if (!state.projects.length) { drawList(); drawEmpty(); drawStatusbar(); return; }
         var exists = state.projects.some(function(p){ return p.id === cur; });
-        if (!document.getElementById("feed")) select(cur && exists ? cur : state.projects[0].id);
+        if (home) { drawList(); drawEmpty(); }
+        else if (!document.getElementById("feed")) select(cur && exists ? cur : state.projects[0].id);
         // A link to a project this client has never listed — one just created,
         // or a URL from another device — loses a race: the first /api/projects
         // reply doesn't contain it, the exists check is false, and it quietly

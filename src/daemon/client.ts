@@ -3,6 +3,11 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { OnboardingReport } from "../core/onboarding.js";
+import { INSTALL_TIMEOUT_MS, type InstallResult, type SetupRequirements } from "../core/setup-install.js";
+import type { Scoreboard, ScoreboardWindow } from "../core/scoreboard.js";
+import type { SavedFleet } from "../core/fleets.js";
+import type { TryProjectInput, TryProjectResult } from "../core/demo-project.js";
 import type { IntakeIssue, IntakeMode, IntakeSource } from "../core/intake.js";
 import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
@@ -145,6 +150,19 @@ export class DaemonClient {
     return json as T;
   }
 
+  /** MCP reuses the REST shapes: messages are chronological and filtered before limiting. */
+  chatMessages(id: string, chat: string, limit: number): Promise<{ messages: LoomEvent[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
+  }
+
+  remember(id: string, kind: "decision" | "constraint" | "convention", text: string): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text });
+  }
+
+  report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/tasks/${encodeURIComponent(task)}/report`, body);
+  }
+
   /** The leaderboard (optionally since a time) and per-day turn counts. */
   turnStats(id: string, opts: { days?: number; since?: number } = {}): Promise<{
     leaderboard: Array<{ agentId: string; turns: number; ok: number; errors: number; totalCostUsd: number; medianMs: number | null }>;
@@ -253,6 +271,22 @@ export class DaemonClient {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
   }
 
+  onboarding(): Promise<OnboardingReport> { return this.request("GET", "/api/onboarding"); }
+
+  dismissOnboarding(dismissed: boolean): Promise<{ dismissed: boolean }> {
+    return this.request("POST", `/api/onboarding/${dismissed ? "dismiss" : "restore"}`, {});
+  }
+
+  setupRequirements(): Promise<SetupRequirements> { return this.request("GET", "/api/setup/requirements"); }
+
+  installAgent(kind: string): Promise<InstallResult> {
+    return this.request("POST", "/api/setup/install", { kind }, INSTALL_TIMEOUT_MS + 30_000);
+  }
+
+  tryProject(input: TryProjectInput = {}): Promise<TryProjectResult> {
+    return this.request("POST", "/api/try", { ...input });
+  }
+
   newProject(input: NewProjectInput): Promise<CreatedProject> {
     return this.request("POST", "/api/projects/new", { ...input });
   }
@@ -331,6 +365,14 @@ export class DaemonClient {
    * The parent keeps the baton — this is one turn borrowing another pair of
    * hands, not a handoff.
    */
+  scoreboard(project = "all", window: ScoreboardWindow = "30d"): Promise<Scoreboard> {
+    return this.request("GET", `/api/scoreboard?project=${encodeURIComponent(project)}&window=${encodeURIComponent(window)}`);
+  }
+
+  fleets(): Promise<{ fleets: SavedFleet[] }> { return this.request("GET", "/api/fleets"); }
+  saveFleet(name: string, spec: string): Promise<{ fleet: SavedFleet }> { return this.request("PUT", "/api/fleets", { name, spec }); }
+  removeFleet(name: string): Promise<{ removed: true }> { return this.request("DELETE", "/api/fleets", { name }); }
+
   // ── orchestra (core/orchestra.ts) ──
 
   orchestraRuns(id: string): Promise<{ runs: OrchestraRun[]; active: string | null }> {
@@ -791,11 +833,13 @@ export class DaemonClient {
 
   /** Model and effort override the chat selection for this message only, including when queued. */
   send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string } = {}): Promise<{ agentId: string }> {
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string; requestId?: string } = {}): Promise<{ agentId: string; queued?: number; queueId?: string; requestId?: string; answered?: boolean }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
       ...(opts.chat ? { chat: opts.chat } : {}),
+      ...(opts.requestId ? { requestId: opts.requestId } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
     });
@@ -1278,8 +1322,9 @@ async function startDaemon(): Promise<DaemonClient> {
   // Built install → node dist/cli/index.js; dev checkout → tsx src/cli/index.ts.
   const [entry, extraArgs] = existsSync(compiled)
     ? [compiled, [] as string[]]
-    : [devSource, ["--import", "tsx"]];
-  const child = spawn(process.execPath, [...extraArgs, entry, "daemon"], {
+    : [devSource, ["--import", import.meta.resolve("tsx")]];
+  const saved = readDaemonConfig();
+  const child = spawn(process.execPath, [...extraArgs, entry, "daemon", "--host", saved?.host ?? "127.0.0.1", "--port", String(saved?.port ?? DEFAULT_PORT)], {
     detached: true,
     stdio: "ignore",
     env: process.env,

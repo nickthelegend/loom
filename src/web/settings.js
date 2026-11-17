@@ -10,6 +10,7 @@ import { JOB_KIND,loadTeam,loadTeamPolicy,loadTeamRunners,loadTeamShare,runnerNa
 import { ACCENTS,appearancePref,applyAppearance,isElectron,setThemePref,themePref } from './theme.js';
 import { durfmt } from './transcript.js';
 import { devMode, setDevMode } from './mode.js';
+import { TRY_BTN, bindTryDemo } from './try-demo.js';
 
 
   /**
@@ -41,6 +42,7 @@ import { devMode, setDevMode } from './mode.js';
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "accounts", label: "Accounts", icon: ICONS.team },
+      { id: "agentskills", label: "Loom for agents", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
       { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
@@ -108,6 +110,7 @@ import { devMode, setDevMode } from './mode.js';
     }
 
     // ---- Setup: what this machine still needs (from the daemon) --------------
+    var ONE_CLICK = { "claude-code": 1, codex: 1, opencode: 1 };
     function srow(st, title, detail, cmd){
       return '<div class="srow2"><span class="sdot ' + st + '"></span>' +
         '<div class="sbody"><div class="st">' + title + "</div>" +
@@ -126,8 +129,9 @@ import { devMode, setDevMode } from './mode.js';
           s.node.ok ? "" : (s.platform === "darwin" ? "brew install node"
             : s.platform === "win32" ? "winget install OpenJS.NodeJS" : "install node 22.5 or newer"));
         h += '<div class="sgrouph">Agents that can take a turn</div>';
-        if (!s.ready) h += '<div class="snote">Nothing here can hold the baton yet \u2014 install one and Loom has something to drive.</div>';
-        s.agents.forEach(function(a){
+        if (!s.ready) h += '<div class="snote">Nothing here can hold the baton yet \u2014 install one and Loom has something to drive.</div>' +
+          '<div class="trycallout"><div><b>Try Loom first.</b> A small demo project with three scripted agents that need no keys and no CLIs, and a walkthrough of the whole loop.</div>' + TRY_BTN + "</div>";
+        s.agents.filter(function(a){ return a.kind !== "demo"; }).forEach(function(a){
           // Three states, not two. "Installed" was the lie that cost an
           // afternoon: claude answered --version happily while refusing every
           // turn with "Not logged in".
@@ -136,7 +140,11 @@ import { devMode, setDevMode } from './mode.js';
             : a.authed === true ? "signed in \u00b7 ready to take a turn"
             : a.authed === false ? (a.authDetail || "signed out") + " \u2014 it will refuse every turn until you:"
             : "installed \u2014 couldn\u2019t confirm it\u2019s signed in:";
-          h += srow(st, brandMark(a.kind) + " " + esc(a.label), esc(detail), !a.found ? a.install : a.authed === true ? "" : a.auth);
+          var row = srow(st, brandMark(a.kind) + " " + esc(a.label), esc(detail), !a.found ? a.install : a.authed === true ? "" : a.auth);
+          // One click instead of a command to copy (#403): only the npm-installable CLIs, only for
+          // the admin console on this machine; the daemon runs a fixed command and never sudo.
+          if (!a.found && state.admin && ONE_CLICK[a.kind]) row = row.replace(/<\/div><\/div>$/, '</div><div class="acctacts"><button class="btn sm" data-install="' + esc(a.kind) + '">Install</button></div></div>');
+          h += row;
         });
         h += '<div class="sgrouph">Agents you drive in their own window</div>';
         s.bridges.forEach(function(b){
@@ -157,6 +165,22 @@ import { devMode, setDevMode } from './mode.js';
           '<span class="hintx">' + (s.ready ? "This machine can run agents." : "No agents installed yet.") + "</span></div>";
         pane.innerHTML = h;
         document.getElementById("setuprecheck").onclick = renderSetup;
+        bindTryDemo(pane);
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-install]"), function(b){
+          b.onclick = function(){
+            var kind = b.getAttribute("data-install");
+            b.disabled = true; b.textContent = "Installing\u2026";
+            var note = document.createElement("div"); note.className = "sd"; note.textContent = "npm is installing it \u2014 a minute or two.";
+            b.closest(".srow2").querySelector(".sbody").appendChild(note);
+            sapi("/api/setup/install", { method: "POST", body: JSON.stringify({ kind: kind }) }).then(function(r){
+              toast(r.ok ? "installed " + (r.version || kind) + " \u2014 now sign it in" : (r.error || "the install failed"));
+              renderSetup();
+            }).catch(function(e){ toast(e.message); renderSetup(); });
+          };
+        });
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-trydemo]"), function(b){
+          var go = b.onclick; b.onclick = function(){ close(); go(); };
+        });
       }).catch(fail);
     }
 
@@ -218,6 +242,83 @@ import { devMode, setDevMode } from './mode.js';
             });
           };
         });
+      }).catch(fail);
+    }
+
+    // ---- Loom for agents: the bundled Loom skills in each agent CLI (#405) ----
+    // GET /api/agent-skills lists every destination; Codex and OpenCode share ~/.agents/skills, so
+    // rows are grouped by directory. A folder of the same name that Loom didn't install is the
+    // user's own and is never touched — it shows as "yours" rather than as something to fix.
+    var SKILL_AGENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", grok: "Grok" };
+    function renderAgentSkills(){
+      busy();
+      sapi("/api/agent-skills").then(function(r){
+        var groups = [];
+        (r.agents || []).forEach(function(a){
+          var g = groups.filter(function(x){ return x.dir === a.dir; })[0];
+          if (!g) { g = { dir: a.dir, agents: [], skills: a.skills || [] }; groups.push(g); }
+          g.agents.push(a.agent);
+        });
+        var total = groups.length ? groups[0].skills.length : 0;
+        var h = '<div class="setphead">Loom for agents</div>' +
+          '<div class="setpsub">Teach Claude Code, Codex, OpenCode and Grok to drive Loom. These ' + total + ' skills cover projects, chats, fleets, Orchestra, triggers, teams and safe operations, so you can ask an agent to do it for you.</div>';
+        groups.forEach(function(g){
+          var cur = g.skills.filter(function(k){ return k.current; }).length;
+          var old = g.skills.filter(function(k){ return k.managed && !k.current; }).length;
+          var mine = g.skills.filter(function(k){ return k.installed && !k.managed; }).length;
+          var st = cur === g.skills.length ? "ok" : cur || old ? "warn" : "off";
+          var detail = cur === g.skills.length ? "all " + cur + " installed and current"
+            : old ? old + " can be updated" + (cur ? " \u00b7 " + cur + " current" : "")
+            : cur ? cur + " of " + g.skills.length + " installed"
+            : "not installed";
+          if (mine) detail += " \u00b7 " + mine + " folder" + (mine === 1 ? " is" : "s are") + " your own and left alone";
+          var names = g.agents.map(function(a){ return brandMark(a) + " " + esc(SKILL_AGENT_LABEL[a] || a); }).join(" &amp; ");
+          var act = cur === g.skills.length ? "" : '<button class="btn sm" data-skillsdo="install" data-skillsfor="' + esc(g.agents.join(",")) + '">' + (old || cur ? "Update" : "Install") + "</button>";
+          var rm = cur || old ? '<button class="btn ghost sm" data-skillsdo="uninstall" data-skillsfor="' + esc(g.agents.join(",")) + '" title="removes only the skills Loom installed">Remove</button>' : "";
+          h += '<div class="srow2 skillrow"><span class="sdot ' + st + '"></span><div class="sbody">' +
+            '<div class="st">' + names + "</div>" +
+            '<div class="sd">' + esc(detail) + " \u00b7 <code>" + esc(g.dir) + "</code></div>" +
+            '<div class="sd skillchips">' + g.skills.map(function(k){
+              return '<span class="skchip' + (k.current ? " on" : k.installed && !k.managed ? " mine" : k.managed ? " old" : "") + '" title="' + esc(k.current ? "installed, current" : k.installed && !k.managed ? "your own folder \u2014 Loom leaves it alone" : k.managed ? "installed, an older version" : "not installed") + '">' + esc(k.id) + "</span>";
+            }).join("") + "</div></div>" +
+            '<div class="acctacts">' + act + rm + "</div></div>";
+        });
+        var anyMissing = groups.some(function(g){ return g.skills.some(function(k){ return !k.current && !(k.installed && !k.managed); }); });
+        // Loom's own MCP server (#404): registered with each CLI by the CLI's own `mcp add`
+        h += '<div class="sgrouph">Loom\u2019s tools (MCP)</div>' +
+          '<div class="snote">Let one agent drive the others: start a fleet on other models, follow it, read and add to the brain. Run one of these in a terminal on this computer.</div>' +
+          [["claude-code", "Claude Code"], ["codex", "Codex"], ["opencode", "OpenCode"], ["grok", "Grok"]].map(function(a){
+            var cmd = "loom connect " + a[0];
+            return '<div class="srow2 mcprow"><span class="sdot info"></span><div class="sbody"><div class="st">' + brandMark(a[0]) + " " + esc(a[1]) + "</div>" +
+              '<code class="scmd">' + esc(cmd) + "</code></div>" +
+              '<div class="acctacts"><button class="btn ghost sm" data-copycmd="' + esc(cmd) + '">Copy</button></div></div>';
+          }).join("") +
+          '<div class="hintx">Or point any MCP client at <code>' + esc(location.origin) + '/mcp</code> with a Loom token. <code>loom connect --list</code> shows which agents have it.</div>';
+        h += '<div class="pillrow">' + (anyMissing ? '<button class="btn sm" id="skillsall">Install for every agent</button>' : "") +
+          '<span class="hintx">' + (r.autoUpdate ? "Loom keeps the skills it installed up to date when it starts." : "Automatic updates are off.") +
+          " From a terminal: <code>loom skills install loom</code>.</span></div>";
+        pane.innerHTML = h;
+        function run(action, agents){
+          sapi("/api/agent-skills/" + action, { method: "POST", body: JSON.stringify({ agents: agents }) }).then(function(res){
+            var bad = (res.results || []).filter(function(x){ return x.action === "conflict" || x.action === "error"; });
+            var did = (res.results || []).filter(function(x){ return x.action !== "unchanged" && x.action !== "conflict" && x.action !== "error"; }).length;
+            toast(bad.length ? bad.length + " skipped: " + (bad[0].error || bad[0].action) : action === "install" ? (did ? "skills installed" : "already current") : "skills removed");
+            renderAgentSkills();
+          }).catch(function(e){ toast(e.message); });
+        }
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-skillsdo]"), function(b){
+          b.onclick = function(){
+            var action = b.getAttribute("data-skillsdo"), agents = b.getAttribute("data-skillsfor").split(",");
+            if (action === "install") return run(action, agents);
+            askConfirm("Remove the Loom skills from " + agents.map(function(a){ return SKILL_AGENT_LABEL[a] || a; }).join(" and ") + "?\n\nOnly the folders Loom installed are removed; your own skills stay.", { ok: "Remove" })
+              .then(function(ok){ if (ok) run(action, agents); });
+          };
+        });
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-copycmd]"), function(b){
+          b.onclick = function(){ copyText(b.getAttribute("data-copycmd")); toast("copied"); };
+        });
+        var all = document.getElementById("skillsall");
+        if (all) all.onclick = function(){ run("install", Object.keys(SKILL_AGENT_LABEL)); };
       }).catch(fail);
     }
 
@@ -352,6 +453,9 @@ import { devMode, setDevMode } from './mode.js';
         hh += '<div class="prow"><div class="pl"><div class="pt">MCP servers</div>' +
           '<div class="pd">Tools your agents can call — GitHub, Linear, Slack, databases. Claude Code and Codex use them.</div></div>' +
           '<div class="pc"><button class="btn outline sm" type="button" data-tools="mcp">' + ICONS.plug + "Manage servers</button></div></div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Loom tools for agents</div>' +
+          '<div class="pd">Give the agents Loom runs here the Loom MCP tools: start agents on other models, message them, run an Orchestra, search and add to the brain. Each turn gets its own credential that can only read this project and use those tools. Orchestra workers always get them.</div></div>' +
+          '<div class="pc">' + seg("loomtools", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.loomTools ? "on" : "off") + "</div></div>";
         var agents = cfg.agents || [];
         hh += '<div class="prow"><div class="pl"><div class="pt">Default agent</div>' +
           '<div class="pd">Who receives a message when nobody holds the baton.</div></div>' +
@@ -361,6 +465,7 @@ import { devMode, setDevMode } from './mode.js';
         pp.innerHTML = hh;
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        bindSeg("loomtools", function(v){ patchCfg({ loomTools: v === "on" }, v === "on" ? "Agents here can use Loom's tools" : "Loom tools off for this project"); });
         var ext = document.getElementById("extmodel");
         if (ext) {
           var cur = cfg.brain.model || "haiku";
@@ -990,6 +1095,7 @@ import { devMode, setDevMode } from './mode.js';
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
       else if (cur === "accounts") renderAccounts();
+      else if (cur === "agentskills") renderAgentSkills();
       else if (cur === "cloud") renderCloud();
       else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();
@@ -1386,7 +1492,8 @@ import { devMode, setDevMode } from './mode.js';
         row.querySelector("[data-np-count]").oninput = function(e){ p.count = Math.max(1, Math.min(8, parseInt(e.target.value, 10) || 1)); };
       });
     }
-    api("/api/setup").then(function(r){ found = (r && r.agents) || []; drawAgents(); })
+    // the demo agent belongs to "Try a demo project" (#402), not to a real one
+    api("/api/setup").then(function(r){ found = ((r && r.agents) || []).filter(function(a){ return a.kind !== "demo"; }); drawAgents(); })
       .catch(function(){ found = []; drawAgents(); });
 
     function fieldErr(id, input, msg){

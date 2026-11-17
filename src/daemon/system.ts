@@ -1,3 +1,4 @@
+import { DEMO_MODELS } from "../adapters/demo.js";
 import { execFile, spawn } from "../core/process.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -453,7 +454,9 @@ export async function listModelsForKind(kind: string): Promise<ModelList> {
   const hit = MODEL_LIST_CACHE.get(kind);
   if (hit && Date.now() - hit.ts < 60_000) return hit.list;
   let list: ModelList = { models: [], source: "none" };
-  if (kind === "opencode") {
+  if (kind === "demo") {
+    list = { models: [...DEMO_MODELS], source: "builtin" };
+  } else if (kind === "opencode") {
     list = { models: await runModelList("opencode", ["models"]), source: "cli" };
   } else if (kind === "grok-code") {
     list = { models: await runModelList(grokBin() ?? "grok", ["models"]), source: "cli" };

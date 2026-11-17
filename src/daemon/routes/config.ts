@@ -3,6 +3,7 @@ import type { WithRuntime } from './context.js';
 /** Register config routes in the order established by LoomDaemon.routes(). */
 export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): void {
 
+  // loomTools is a boolean, default false; PATCH applies it to subsequent agent turns.
   // The Settings screen reads its editable knobs here — brain extractor,
   // projection mode, default agent — with the roster the picker chooses from.
   app.get(
@@ -22,6 +23,7 @@ export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): vo
       const body = (req.body ?? {}) as Parameters<typeof rt.patchConfig>[0];
       try {
         const cfg = rt.patchConfig({
+          loomTools: body.loomTools,
           brain: body.brain,
           projection: body.projection,
           defaultAgent: body.defaultAgent,
@@ -29,6 +31,7 @@ export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): vo
           safety: body.safety,
         });
         res.json({
+          loomTools: Boolean(cfg.loomTools),
           brain: cfg.brain ?? {},
           projection: cfg.projection ?? {},
           defaultAgent: cfg.defaultAgent ?? "",

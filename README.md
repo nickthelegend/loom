@@ -51,6 +51,103 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Try it
+
+With Node 22.5+ and Git installed, no agent CLI, API key, or repository is needed:
+
+```sh
+npx @loompad/cli try
+# Or, after installing Loom:
+loom try --no-open
+```
+
+This starts the daemon, copies a tiny todo app to `<projectsRoot>/loom-demo`,
+creates its first Git commit, seeds a shared decision, and opens the project URL
+with `?tour=1`. Three **Demo — scripted, offline, free** agents use `demo-smart`
+and `demo-fast` models. Ask “add dark mode”, “add a todo filter”, “write tests”,
+or “explain this repo”. File edits and diffs are real; command output and token
+counts are simulated, and cost is always $0.00. Each turn streams for about three
+seconds so you can steer or interrupt it. Connect a real agent for custom work.
+
+Use `--dir <path>` to choose a destination and `--agents 1..8` to size a new demo.
+Running it again reuses the demo's files, history and roster. Existing unrelated
+folders are refused. Run `npm test` inside the demo for actual verification.
+Demo also works in Orchestra, races and comparisons, including fleets such as
+`demo@demo-smart x2, demo@demo-fast x2`. Tests can shorten streaming by setting
+`LOOM_DEMO_DURATION_MS=0` (milliseconds; default 3000, maximum 6000).
+
+For web and phone clients, authenticated `POST /api/try` accepts
+`{ "dir": "/optional/absolute/path", "agents": 3 }` or `{}` and returns
+`{ "project": { "id", "name", "dir", "agents": [{ "id": "demo-1", "kind": "demo", "role": "demo", "options": { "model": "demo-smart" } }] } }`
+(with the full roster). It permits owner/admin and unscoped own devices, and
+refuses guests and project-scoped devices. Open `/app?tour=1#p/<project.id>` and
+use an `agents[].id` as `agentId` on the existing send/steer endpoints. The web
+and phone walkthrough screens are separate from this API.
+
+### Get started and agent installs
+
+`loom setup` prints a checklist with ✓/○ progress and the next command for each
+open step. `loom setup --json` returns the same report used by web and phone.
+Progress comes from actual state: a demo project's `.loom/demo.json`, a real CLI
+found and signed in (or an explicitly configured provider), a registered project,
+a finished chat turn, a run that started two or more workers, a paired device,
+and all bundled Loom skills current in at least one agent directory. A demo agent
+alone means “tried”; it does not complete the real-agent step. Sharing is optional.
+
+```sh
+loom setup
+loom setup install codex
+codex login
+loom setup --json
+```
+
+The installer runs a fixed command on the **daemon's machine**, then runs the
+CLI's `--version` to verify it is reachable on that machine's PATH. Sign-in is
+separate. Supported kinds and exact commands:
+
+| Kind | Command |
+| --- | --- |
+| `codex` | `npm i -g @openai/codex` |
+| `claude-code` | `npm i -g @anthropic-ai/claude-code` |
+| `opencode` | `npm i -g opencode-ai` |
+
+These are the publishers' documented packages ([Codex](https://developers.openai.com/codex/cli),
+[Claude Code](https://code.claude.com/docs/en/setup), [OpenCode](https://opencode.ai/docs/)).
+Loom never invokes sudo or accepts a package name, command, path or argument override. If
+npm reports EACCES, configure a user-owned npm prefix or Node version manager and restart
+Loom with its bin directory on PATH. Grok and Antigravity ship native installers, so they
+keep their manual install hints.
+
+API contract for web/phone clients (screens are separate work):
+
+- `GET /api/onboarding` → `{ steps: [{ id, title, done, detail, action, optional? }], dismissed }`.
+  Ordered IDs/actions are `demo`/`try`, `agent`/`install-agent`,
+  `project`/`open-project`, `message`/`send-message`, `fleet`/`run-fleet`,
+  `phone`/`pair-phone`, `skills`/`skills`, `share`/`share`. Only share has
+  `optional: true`. Actions are stable button keys, not executable commands.
+- `POST /api/onboarding/dismiss` and `/restore` → `{ dismissed }`. Owner/admin
+  only; stored in `daemon.json`, independently of progress.
+- `POST /api/setup/install { "kind": "codex" }` → `{ ok: true, version }`.
+  Owner/admin only; paired devices, scoped tokens and guests receive 403.
+  Unknown kinds or extra fields receive 400; a simultaneous install of the same
+  kind receives 409. Failure returns HTTP 500 with `{ ok: false, version: null, error }`.
+  Installs time out after ten minutes; version detection has a ten-second deadline.
+- Subscribe to `/ws` before installing. Unscoped clients receive
+  `{ type: "setup:install", kind, phase }`: `started` adds `command`, `output`
+  adds `stream: "stdout" | "stderr"` and `line`, and `finished` adds the install
+  result. Frames are transient; the HTTP response is authoritative.
+- `GET /api/setup/requirements` → `{ node, git, npm, disk }`. Every item has
+  `ok`, `detail`, `fix` (empty when okay); detected tools also have `version`.
+  npm adds `prefix` and `needsSudo` (null if unknown). Disk adds `freeBytes`
+  (null if unknown) and `minimumBytes` (512 MiB), checked on the global npm
+  install filesystem, or LOOM_HOME when npm is unavailable.
+
+Checklist and requirement reads permit owner/admin and unscoped paired devices;
+guests and scoped tokens cannot inspect machine-wide progress. The exported types
+and route comments in `src/core/onboarding.ts`, `src/core/setup-install.ts`, and
+`src/daemon/routes/{onboarding,setup}.ts` define the response/event shapes.
+
+
 ## One link — a teammate, their agents, your repo
 
 Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a
@@ -287,6 +384,29 @@ run-detail responses retain `workers: string[]` of instance ids and add
 `workerDetails`, and task events and `/subagents` include task selections.
 Absent selections mean provider defaults; older runs may lack `workerDetails`.
 Web and phone fleet controls can use these fields without parsing instance ids.
+
+**Saved fleets.** Store a comma-separated spec once in `LOOM_HOME/fleets.json`
+(default `~/.loom`), then use `@name` in orchestra, compare or chain worker specs:
+
+```sh
+loom fleets:save mixed "claude-code@claude-opus-5-5x2,codex@gpt-5.6-solx2"
+loom fleets
+loom orchestrate "implement the feature" -w @mixed
+loom compare "solve this bug" -w @mixed --wait
+loom chain goals.txt -w @mixed
+loom fleets:rm mixed
+```
+
+Saving validates `agent[@model][:effort][xN]` syntax; availability is checked in
+the target project when running. An orchestrator may use `-o @name` when the fleet
+resolves to exactly one agent. Saving an existing name replaces it. Names are
+case-sensitive (letters, digits, `_`, `-`, up to 64 characters, starting with a
+letter or digit); saved specs contain concrete rows, not other fleet references.
+`GET /api/fleets` returns `{ fleets: [{ name, spec }] }` sorted by name;
+`PUT /api/fleets` with `{ name, spec }` returns `{ fleet: { name, spec } }`;
+`DELETE /api/fleets` with `{ name }` (or `?name=...`) returns `{ removed: true }`.
+These user-wide endpoints require an owner or unscoped paired device. Invalid
+input returns 400, and deleting a missing fleet returns 404.
 
 **Ask several coding agents.** `loom compare` gives the same prompt to 2–8 entrants,
 each in its own worktree, using Orchestra's race mode. Names, kinds and aliases
@@ -1027,7 +1147,8 @@ detects at least two roles.
 | Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
 | Cursor | — | `cursor-agent --print` | 🔜 coming soon |
 | **Model (API)** | adapter (full-duplex) | `POST /v1/chat/completions`, streamed — any OpenAI-compatible provider | ✅ no CLI to install; tools are read-only unless you allow more (see [below](#agents-that-are-models)) |
-| Echo | adapter (demo/tests) | in-process | ✅ |
+| Demo | adapter (scripted, offline, free) | in-process; real edits, simulated commands and tokens | ✅ `loom try`; `demo-smart` and `demo-fast` |
+| Echo | adapter (tests only) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
 **Context and limits.** For Claude Code and Codex, the composer shows the chosen
@@ -2007,6 +2128,56 @@ loom scorecard --days 7
 The same numbers are on every agent in `/api/projects/:id/insights/turns` as
 `trust`.
 
+## Model scoreboard
+
+Compare models across turns and race/compare picks in this project or every
+registered project:
+
+```sh
+loom scoreboard                         # this project, last 30 days
+loom scoreboard --all --window 7d
+loom scoreboard --all --window all --json
+loom compare "solve this bug" --best 2   # opt in to the project's best models
+loom orchestrate "implement the feature" -w best:3
+```
+
+The table groups by `kind@model`, sorted by win rate descending, then observed
+cost per turn ascending. It includes finished/interrupted/errored percentages,
+median and p90 duration, total and average reported cost, tokens, race entries,
+wins, win rate, tasks done and review pass rate. JSON also groups by model alone.
+`--best N` and `-w best:N` use the project's last 30 days and require at least five
+entries for every selected model. Only kinds on the project's enabled roster are
+eligible. If fewer than N qualify, compare retains `-w` (including saved fleets),
+or uses the project roster; orchestra uses the roster. Compare still requires
+2–8 expanded entrants. API compare accepts an optional numeric `best` alongside
+optional `entrants`; orchestra accepts `workers: ["best:3"]`.
+
+`GET /api/scoreboard?project=<id|all>&window=<7d|30d|all>` defaults to `all` and
+`30d`. Its response is `{ project, projects, window, since, generatedAt,
+byKindModel, byModel }`. `projects` lists included project ids, timestamps use
+milliseconds, and `since` is null for `all`. Rows contain `key`, `model`, `kind`
+(only in `byKindModel`), `turns`, `finished`, `interrupted`, `errored`,
+`finishedRate`, `interruptedRate`, `erroredRate`, `medianMs`, `p90Ms`,
+`totalCostUsd`, `costedTurns`, `avgCostUsd`, `inputTokens`, `outputTokens`, `tokens`,
+`entries`, `wins`, `winRate`, `tasksDone`, `reviews`, `reviewsPassed`, and
+`reviewPassRate`. Rates are fractions from 0 to 1; a rate, duration or average
+without observations is null. Missing historical models use `unknown`.
+
+Turn timestamps select the window; duration percentiles use reported durations
+from all outcomes (p90 uses nearest rank). Costs sum reported values, including
+failed turns; the per-turn average divides by `costedTurns`, so missing costs are
+not treated as free. Race entries use task start time (run creation for older
+records); their wins count the kept/applied task in that same entry cohort.
+Unpicked races still count entries. Ordinary orchestra tasks count as done at
+completion; reviews use the latest recorded landing review of the integrated
+run for each completed task, at review time. Skipped or missing reviews do not
+count as passes. No pass is inferred from an agent saying “done”.
+
+Guests cannot access the scoreboard. Project-scoped devices can read their own
+projects; `project=all` includes only projects permitted by their token. Fleet
+and scoreboard response contracts are also documented in
+`src/daemon/routes/scoreboard.ts` and `src/core/scoreboard.ts` for UI clients.
+
 ## Replay: a run you can send anyone
 
 Export any chat as one self-contained HTML page:
@@ -2728,6 +2899,7 @@ required, and the defaults are the behaviour Loom had before the key existed:
 | [`maxConcurrentGoals`](#more-than-one-goal-when-they-cant-collide) | goals side by side, when their paths can't collide |
 | [`safety.snapshotBeforeRoutes`](#routing--multi-hop-pipelines) | checkpoint brain+board+config before a fleet runs unattended |
 | [`servers`](#the-browser-tab) | the dev servers Loom may run and preview |
+| `loomTools` | Attach project-scoped Loom MCP tools to agent turns (default false; automatic for Orchestra workers) |
 | [`mcps`](#odds-and-ends-that-pull-their-weight) | MCP servers offered to the agents whose CLI takes them |
 | [`skills`](#odds-and-ends-that-pull-their-weight) | which `SKILL.md` skills ride along in every briefing |
 | [`team`](#teams--see-each-others-agents) | which team this project publishes to |
@@ -2735,8 +2907,68 @@ required, and the defaults are the behaviour Loom had before the key existed:
 Keys are **never** in here: a provider's API key lives in `~/.loom/providers.json`
 (mode 0600) or the environment, because this file is committed.
 
+## Skills for your agents
+
+Loom ships seven skills from [loom-skills](https://github.com/nickthelegend/loom-skills)
+(MIT): `loom`, `loom-agents`, `loom-orchestrate`, `loom-chain`, `loom-automation`,
+`loom-collaborate`, and `loom-ops`. They teach agent CLIs how to drive Loom.
+These commands work outside a project and do not start a daemon:
+
+```sh
+loom skills agents                         # installed/current status for every agent
+loom skills install loom --agent codex     # install or update all seven skills
+loom skills install loom --agent all --dry-run
+loom skills uninstall loom --agent codex
+```
+
+`--agent` accepts `claude-code`, `codex`, `grok`, `opencode`, or `all` (the default).
+Claude Code uses `~/.claude/skills`, Codex and OpenCode share `~/.agents/skills`, and
+Grok uses `~/.grok/skills`. Install creates absent directories. Uninstalling for
+Codex also removes those shared skills from OpenCode. Only folders with the exact
+`.loom-skills-managed` signature from upstream's installer are replaced or removed;
+unmanaged name conflicts are reported and left alone, even with `--force`.
+
+Use `loom skills agents --target /path/to/skills` to inspect an additional directory.
+For install/uninstall, `--target` selects only that directory unless `--agent` is also
+given. Install and uninstall support `--dry-run`; status and changes support `--json`. Custom
+targets are local CLI operations. Existing `loom skills install <git-url|dir>` still
+installs a project skill as before.
+
+At daemon startup, managed copies in the standard directories are updated if older
+than the bundle; missing installs and newer versions are left alone. To disable this,
+set `"agentSkills": { "autoUpdate": false }` in `~/.loom/daemon.json` (or
+`$LOOM_HOME/daemon.json`). Manual installation remains available. Version stamps
+record the upstream commit and its date; upstream managed copies without stamps
+are upgraded on the next start.
+
+For clients, `GET /api/agent-skills` returns `{ version, autoUpdate, agents }`;
+each agent has `{ agent, dir, skills }`, and each skill has
+`{ id, installed, managed, current, version }`. Owner/admin sessions can
+`POST /api/agent-skills/install` or `/uninstall` with `{ "agents": ["codex"] }`.
+The response is `{ dryRun, results }`, with `{ dir, id, action, error? }` per skill.
+Actions are `installed`, `updated`, `removed`, `unchanged`, `conflict`, or `error`;
+HTTP 200 may include partial failures. Refresh status after an operation. Unscoped
+paired devices may read status; scoped tokens and guests cannot access these APIs.
+The exported `installAgentSkills` helper is ready for an onboarding skills step.
+
+Maintainers can refresh the vendored bundle with
+`node scripts/sync-agent-skills.mjs /path/to/loom-skills` or pass a git URL to clone
+its current `main`. With no argument it uses the upstream URL. The script copies
+whole skill folders, the MIT license, and `skills/agent/version.json`; local source
+skills must be committed so that the stamp identifies the copied version.
+Startup installation approach credit: Agent Orchestrator (Apache-2.0).
+
 ## Odds and ends that pull their weight
 
+- **Agents drive Loom through MCP (#404).** `loom connect claude` (or `codex`,
+  `opencode`, `grok`) registers `loom mcp-server` using the agent's own CLI.
+  Preview with `--dry-run`; inspect with `loom connect --list`. The same tools
+  are available at authenticated `POST /mcp`: send and steer agents, start an
+  Orchestra, compare models, search the brain, remember decisions, report worker
+  progress, and list/add board tasks. Project-scoped tokens stay scoped; guests
+  are refused. Set `loomTools: true` in project config to attach Loom tools to
+  MCP-capable agents; Orchestra workers get them automatically with temporary
+  project/run credentials. See [MCP server setup and API](docs/mcp-server.md).
 - **MCP health** — the daemon polls each project's HTTP MCP servers; a server
   that stops answering is named in the Console and **withheld from turns**
   (an absent tool the agent never saw beats a present tool that throws) until
