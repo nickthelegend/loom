@@ -212,7 +212,9 @@ import { isGuest,renderGuest } from './share-live.js';
       return true;
     }
     function target(){ var el = document.querySelector(DEMO_TOUR[i].sel); return shown(el) ? el : null; }
-    function done(){ shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place); }
+    // the page keeps moving under the card (replies stream in, the composer grows): follow it
+    var follow = setInterval(function(){ if (!card.isConnected) return clearInterval(follow); place(); }, 400);
+    function done(){ clearInterval(follow); shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place); }
     function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
     function next(){
       do { i++; } while (i < DEMO_TOUR.length && !target());
