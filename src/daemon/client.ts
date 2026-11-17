@@ -145,6 +145,19 @@ export class DaemonClient {
     return json as T;
   }
 
+  /** MCP reuses the REST shapes: messages are chronological and filtered before limiting. */
+  chatMessages(id: string, chat: string, limit: number): Promise<{ messages: LoomEvent[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
+  }
+
+  remember(id: string, kind: "decision" | "constraint" | "convention", text: string): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text });
+  }
+
+  report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/tasks/${encodeURIComponent(task)}/report`, body);
+  }
+
   /** The leaderboard (optionally since a time) and per-day turn counts. */
   turnStats(id: string, opts: { days?: number; since?: number } = {}): Promise<{
     leaderboard: Array<{ agentId: string; turns: number; ok: number; errors: number; totalCostUsd: number; medianMs: number | null }>;
@@ -778,11 +791,13 @@ export class DaemonClient {
   }
 
   /** Model and effort override the chat selection for this message only, including when queued. */
-  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string } = {}): Promise<{ agentId: string }> {
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string; chat?: string; requestId?: string } = {}): Promise<{ agentId: string; queued?: number; queueId?: string; requestId?: string; answered?: boolean }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
+      ...(opts.chat ? { chat: opts.chat } : {}),
+      ...(opts.requestId ? { requestId: opts.requestId } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
     });

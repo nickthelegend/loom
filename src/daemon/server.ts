@@ -1,3 +1,6 @@
+import { rpcError } from "../core/mcp-server.js";
+import { loomToolScope } from "../core/loom-tools.js";
+import { registerMcpRoutes } from "./routes/mcp.js";
 import { readPrRecords } from "../core/pr-feedback.js";
 import { ClientDelivery } from "./delivery.js";
 import { ChatPresenceTracker } from "./presence.js";
@@ -142,6 +145,12 @@ export interface DaemonOptions {
   gh?: (args: string[]) => Promise<string>;
   onboard?: { clone?: (repo: string, dir: string) => Promise<void>; projectsHome?: string; accessPollMs?: number; accessWaitMs?: number };
 }
+
+/** POST routes (under /api/projects/:id) a Loom tools credential may call — exactly what src/core/mcp-server.ts uses. */
+const TOOL_WRITES = [
+  /^\/agents$/, /^\/messages$/, /^\/steer$/, /^\/queue\/[^/]+\/steer$/, /^\/orchestra$/, /^\/compare$/,
+  /^\/brain$/, /^\/orchestra\/[^/]+\/tasks\/[^/]+\/report$/, /^\/board\/tasks$/,
+];
 
 export class LoomDaemon {
   private app = express();
@@ -423,6 +432,25 @@ export class LoomDaemon {
         return;
       }
       const token = bearerToken(req.headers.authorization);
+      const toolScope = loomToolScope(token);
+      if (toolScope) {
+        const projectRoute = /^\/api\/projects\/([^/]+)(?:\/|$)/.exec(req.path);
+        const resolved = projectRoute && findProject(decodeURIComponent(projectRoute[1]!));
+        const own = !!resolved && resolved.id === toolScope.project;
+        const rest = projectRoute ? req.path.slice(projectRoute[0].replace(/\/$/, "").length) : "";
+        // An agent holds this credential, so it gets what the Loom tools need and nothing else:
+        // reads, and the few writes the tools make. Never config, permissions, agents' options,
+        // deletes, terminals or triggers — a prompt-injected worker must not be able to widen
+        // its own access or remove your work.
+        const allowed = req.path === "/mcp" || (req.method === "GET" && req.path === "/api/projects") ||
+          (own && req.method === "GET") ||
+          (own && req.method === "POST" && TOOL_WRITES.some((r) => r.test(rest)) &&
+            (rest !== "/agents" || Object.keys(req.body ?? {}).every((k) => ["kind", "model", "count", "id", "role"].includes(k))));
+        if (!allowed) return void res.status(403).json({ error: "a Loom tools credential can only read this project and use the Loom tools" });
+        (req as Request & { projectScope?: string[] }).projectScope = [toolScope.project];
+        next();
+        return;
+      }
       // A worker credential admits only this method and exact report route.
       const report = req.method === "POST" && /^\/api\/projects\/([^/]+)\/orchestra\/([^/]+)\/tasks\/([^/]+)\/report\/?$/.exec(req.path);
       if (report) {
@@ -517,6 +545,7 @@ export class LoomDaemon {
       if (scope.includes(resolved)) return void next();
       res.status(403).json({ error: "this token is not scoped to that project" });
     });
+    registerMcpRoutes(app, () => ({ host: this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host.includes(":") ? `[${this.host}]` : this.host, port: this.port }));
     registerSetupRoutes(app, ctx);
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
@@ -601,6 +630,7 @@ export class LoomDaemon {
       if (res.headersSent) return void next(err);
       const e = (err ?? {}) as { type?: string; status?: number; message?: string };
       if (e.type === "entity.too.large") return void res.status(413).json({ error: "that request is too large (the limit is 2 MB)" });
+      if (_req.path === "/mcp" && e.type === "entity.parse.failed") return void res.status(400).json(rpcError(null, -32700, "Parse error"));
       if (e.type === "entity.parse.failed") return void res.status(400).json({ error: "that request body isn't valid JSON" });
       logbook.error("daemon", `request failed: ${e.message ?? String(err)}`, err);
       const status = typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status : 500;

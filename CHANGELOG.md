@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Loom as an MCP server (#404).** `loom mcp-server` serves the agent tools over stdio, and `POST /mcp` serves the same tools with existing bearer authentication and project scope. `loom connect` registers Loom through Claude Code, Codex, OpenCode or Grok's CLI, with dry-run and listing support. The `loomTools` project option attaches temporary project-scoped credentials; Orchestra workers receive native report and memory tools automatically. Includes request-correlated waits, chat-message API, daemon-backed tests, and MCP setup/API documentation. Design reference: T3 Code's MCP server/toolkits (MIT).
+
 - **Phone: Terminal and Files.** A Terminal tab opens a shell in the project (its own session, beside the desktop's) with Ctrl‑C, Tab, arrows and Esc keys; a Files tab browses the project tree and shows files read-only with line numbers and light syntax colouring. The terminal is now refused to project-scoped tokens and guests, over HTTP and the socket alike (#380).
 
 ### Fixed

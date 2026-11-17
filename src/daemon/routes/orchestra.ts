@@ -1,3 +1,4 @@
+import { loomToolScope } from "../../core/loom-tools.js";
 import type { Express } from 'express';
 import express from "express";
 import { bearerToken } from "../auth.js";
@@ -60,7 +61,9 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
     "/api/projects/:id/orchestra/:runId/tasks/:taskId/report",
     withRuntime(async (rt, req, res) => {
       const runId = String(req.params.runId), taskId = String(req.params.taskId);
-      if (!(req as express.Request & { isAdmin?: boolean }).isAdmin &&
+      const scope = loomToolScope(bearerToken(req.headers.authorization));
+      const worker = scope?.project === rt.info.id && scope.run === runId && scope.task === taskId;
+      if (!worker && !(req as express.Request & { isAdmin?: boolean }).isAdmin &&
           !rt.orchestra.acceptsReportToken(runId, bearerToken(req.headers.authorization))) {
         return void res.status(403).json({ error: "report requires this run's worker token or an owner/admin token" });
       }

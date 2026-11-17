@@ -311,6 +311,8 @@ export interface ProjectConfig {
   skills?: Record<string, boolean>;
   /** MCP servers this project can offer agents (mirrors the Anthropic API shape). */
   mcps?: McpServerConfig[];
+  /** Attach project-scoped Loom MCP tools to each agent turn. Default false; Orchestra workers always receive them. */
+  loomTools?: boolean;
   /**
    * Dev servers Loom can run for this project — the thing the Browser tab
    * previews. Suggested from package.json on init, confirmed by a person;
