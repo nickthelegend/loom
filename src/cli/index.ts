@@ -1068,14 +1068,16 @@ program
 
 program
   .command("audit")
+  .option("--csv", "export the complete audit trail for this period as CSV")
   .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
   .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")
   .option("--json", "print as JSON")
-  .action(async (opts: { since: string; json?: boolean }) => {
+  .action(async (opts: { since: string; json?: boolean; csv?: boolean }) => {
     const m = /^(\d+)\s*(h|d)$/i.exec(opts.since.trim());
     if (!m) fail("--since is like 24h or 7d");
     const since = Date.now() - Number(m[1]) * (m[2]!.toLowerCase() === "h" ? 3_600_000 : 86_400_000);
     const client = await ensureDaemon();
+    if (opts.csv) return void process.stdout.write((await client.auditCsv(since)).csv);
     const { entries } = await client.audit(since);
     if (opts.json) return void console.log(JSON.stringify(entries));
     if (!entries.length) return void console.log(pc.dim(`nothing to report since ${new Date(since).toLocaleString()}`));
@@ -3619,6 +3621,8 @@ program
 
 program
   .command("share [chat]")
+  .option("--expiry <preset>", "expiry preset: 1h, 1d or 7d")
+  .option("--run <id>", "share an Orchestra run read-only")
   .description("a read-only link to a chat (default: main) for a teammate: prompts, replies, what ran and changed. It expires; --list shows yours, --revoke ends one (#199)")
   .option("--hours <n>", "how long the link works (1 to 720, default 24)")
   .option("--list", "the links that still work")
@@ -3627,7 +3631,7 @@ program
   .option("--role <role>", "with --live: view (read along), reply (talk to the agent, default) or approve (also answer its tool approvals)")
   .option("--name <name>", "with --live: what they're called in the thread")
   .option("--json", "print as JSON")
-  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean; live?: boolean; role?: string; name?: string }) => {
+  .action(async (chat: string | undefined, opts: { expiry?: string; run?: string; hours?: string; list?: boolean; revoke?: string; json?: boolean; live?: boolean; role?: string; name?: string }) => {
     const client = await ensureDaemon();
     if (opts.revoke) {
       const { revoked } = await client.revokeShare(opts.revoke);
@@ -3642,6 +3646,15 @@ program
       return;
     }
     const project = await currentProject(client);
+    if (opts.expiry) {
+      const { shareHours } = await import("../core/team-sharing.js");
+      opts.hours = String(shareHours({ preset: opts.expiry }));
+    }
+    if (opts.run) {
+      if (opts.live) fail("--run is a read-only share");
+      const out = await client.shareRun(project.id, opts.run, opts.expiry || (opts.hours ? Number(opts.hours) : "1d"));
+      return void console.log(opts.json ? JSON.stringify(out) : `${out.url}\nExpires ${new Date(out.expiresAt).toLocaleString()}`);
+    }
     let chatId = "main";
     if (chat && chat !== "main") {
       const { chats } = await client.chats(project.id);
@@ -5233,6 +5246,31 @@ program
       const { spawn: sp } = await import("node:child_process");
       sp(process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open", [out], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).on("error", () => {}).unref();
     }
+  });
+
+program.command("fleets:share <team> <name>").description("publish a saved fleet to your team").action(async (team: string, name: string) => {
+  const fleet = listFleets().find(f => f.name === name);
+  if (!fleet) return fail(`unknown fleet "${name}"`);
+  console.log(JSON.stringify(await (await ensureDaemon()).shareFleet(team, name, fleet.spec)));
+});
+program.command("fleets:team <team>").description("list team fleets; --import saves one locally for @name").option("--import <name>").action(async (team: string, opts: { import?: string }) => {
+  const { fleets } = await (await ensureDaemon()).teamFleets(team);
+  if (opts.import) {
+    const fleet = fleets.find(f => f.name === opts.import);
+    if (!fleet) return fail("unknown team fleet");
+    saveFleet(fleet.name, fleet.spec);
+  }
+  console.log(JSON.stringify({ fleets }, null, 2));
+});
+program.command("team:invites <team>").description("list active invites or revoke one").option("--revoke <id>").action(async (team: string, opts: { revoke?: string }) => {
+  const client = await ensureDaemon();
+  console.log(JSON.stringify(opts.revoke ? await client.revokeTeamInvite(team, opts.revoke) : await client.teamInvites(team), null, 2));
+});
+program.command("approval-roles").description("view or set who may approve in this project; owner devices always may")
+  .option("--mode <mode>", "everyone or selected").option("--approvers <ids>", "comma-separated paired device ids")
+  .action(async (opts: { mode?: string; approvers?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    console.log(JSON.stringify(opts.mode ? await client.setApprovalRoles(project.id, opts.mode, (opts.approvers || "").split(",").filter(Boolean)) : await client.approvalRoles(project.id), null, 2));
   });
 
 program

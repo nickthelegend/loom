@@ -104,6 +104,7 @@ export interface QuarantineEntry {
 export type QuarantineMap = Record<string, QuarantineEntry>;
 
 export interface Project {
+  presence?: Array<{ id: string; name: string; kind: string }>;
   id: string;
   name: string;
   holder: string | null;
@@ -1802,7 +1803,7 @@ export interface TeamFeedEvent {
     status?: string;
     [k: string]: unknown;
   };
-  content: { goal?: string; summary?: string; title?: string } | null;
+  content: { goal?: string; summary?: string; title?: string; text?: string } | null;
 }
 
 /** A file lease one orchestra task holds on a shared repo. Titles only, sealed to the team. */

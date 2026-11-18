@@ -552,6 +552,17 @@ export class DaemonClient {
   searchAll(q: string): Promise<{ hits: Array<{ project: string; projectName: string; chat: string; chatTitle: string; eventId: number; at: number; agent?: string; snippet: string }>; truncated: boolean }> {
     return this.request("GET", `/api/search?q=${encodeURIComponent(q)}`);
   }
+  auditCsv(since = 0): Promise<{ csv: string }> { return this.request("GET", `/api/audit.csv?format=json&since=${since}`); }
+  shareRun(id: string, runId: string, expiry: string | number = "1d"): Promise<{ id: string; url: string; expiresAt: number; title: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}/share`, typeof expiry === "number" ? { hours: expiry } : { preset: expiry });
+  }
+  teamInvites(teamId: string): Promise<{ invites: import("../core/team-hub.js").TeamInvite[] }> { return this.request("GET", `/api/team/invites?teamId=${encodeURIComponent(teamId)}`); }
+  revokeTeamInvite(teamId: string, id: string): Promise<{ revoked: boolean }> { return this.request("DELETE", `/api/team/invites/${encodeURIComponent(id)}?teamId=${encodeURIComponent(teamId)}`); }
+  teamFleets(teamId: string): Promise<{ fleets: SavedFleet[] }> { return this.request("GET", `/api/team/fleets?teamId=${encodeURIComponent(teamId)}`); }
+  shareFleet(teamId: string, name: string, spec: string): Promise<{ fleet: SavedFleet }> { return this.request("PUT", "/api/team/fleets", { teamId, name, spec }); }
+  approvalRoles(id: string): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/approval-roles`); }
+  setApprovalRoles(id: string, mode: string, approvers: string[]): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/approval-roles`, { mode, approvers }); }
+
   audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
     return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
   }

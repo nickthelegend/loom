@@ -64,7 +64,7 @@ export async function auditTrail(since: number, live: Map<string, ProjectRuntime
   for (const info of listProjects()) {
     const base = { project: info.id, projectName: info.name };
     await withLog(info, live, (log) => {
-      for (const e of log.list({ since: 0, limit: 20_000 }) as LoomEvent[]) {
+      for (const e of log.list({ since: 0, ...(Number.isFinite(limit) ? { limit: 20_000 } : {}) }) as LoomEvent[]) {
         if (e.ts < since) continue;
         const p = (e.payload ?? {}) as Record<string, unknown>;
         const chat = e.chat ? { chat: e.chat } : {};

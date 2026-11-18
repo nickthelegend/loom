@@ -131,6 +131,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Share text into Loom (#421).** Android share intents and an iOS share extension open a project/chat destination and stage shared text for review before sending.
 - **Ask about diff lines (#421).** Hold an added, removed, or context line on phone or web to stage a chat question with file, line, side, and code; web also supports split diffs and Alt+Enter.
 
+- **Share expiry presets and countdowns (#424).** Extends existing expiring chat and Share-live links with read-only web/phone sharing controls, 1h/1d/7d choices, a ticking countdown, and project-scoped link revocation; CLI adds `share --expiry`.
+- **Read-only Orchestra shares (#424).** Share one run's goal, task statuses and results with an expiring, revocable public link from the web, phone or `share --run`; local paths and worker credentials stay private.
+- **Team activity filtering (#424).** The existing starts/merges feed now filters by person, repo and activity kind on web and phone, including mentions, without introducing a second feed.
+- **Teammate mentions (#424).** Chat `@github-login` mentions notify matching teammates once per message through the encrypted team feed, web notifications and phone push, with a Team-screen destination.
+- **Project approval roles (#424).** Choose which paired devices may approve tool calls per project from web, phone or CLI. Existing access is the default, owner devices retain access, and decisions record the answering device.
+- **Team fleets (#424).** Existing personal fleets can now be shared through encrypted hub storage, managed on web/phone/CLI, and saved locally for the Orchestra picker. Only authors or team owners can replace or remove a shared fleet.
+- **Audit CSV export (#424).** Export the complete selected period from the existing audit trail through API, web, phone or `audit --csv`, with CSV quoting and spreadsheet formula protection.
+- **Revoke team invites (#424).** List and revoke active invites on web, phone or CLI; the hub invalidates copied links too. Team owners may revoke any invite and members their own.
+- **Project presence dots (#424).** Extends existing chat presence to web and phone project lists, including live teammates on shared repos, with names and counts that disappear when people leave.
+
 - Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
 - Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
 - Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.

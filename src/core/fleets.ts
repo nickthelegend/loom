@@ -40,13 +40,17 @@ function writeFleets(fleets: SavedFleet[]): void {
   fs.renameSync(file + ".tmp", file);
 }
 
-export function saveFleet(name: unknown, spec: unknown): SavedFleet {
+export function validateFleet(name: unknown, spec: unknown): SavedFleet {
   const key = fleetName(name);
   if (typeof spec !== "string" || !spec.trim()) throw new Error("fleet spec is required");
   const rows = spec.split(",").map(s => s.trim());
   // Store concrete specs: aliases cannot become recursive or change underneath another fleet.
   for (const row of rows) parseAgentSpec(row);
-  const fleet = { name: key, spec: rows.join(",") };
+  return { name: key, spec: rows.join(",") };
+}
+
+export function saveFleet(name: unknown, spec: unknown): SavedFleet {
+  const fleet = validateFleet(name, spec), key = fleet.name;
   writeFleets([...listFleets().filter(f => f.name !== key), fleet]);
   return fleet;
 }

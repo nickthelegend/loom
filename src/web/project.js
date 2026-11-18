@@ -309,7 +309,7 @@ import { openMenu } from './menus.js';
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
       '<div class="cqueue" id="cqueue" style="display:none"></div>' +
-      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for teammates or files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
       // Orchestrate mode's cast: who plans, who works, how many at once.

@@ -1,3 +1,4 @@
+import { openSharing } from '../sharing.js';
 import { agentGlyph,agentLabel,agentSub,kindOf,labelOf } from '../agents.js';
 import { api } from '../connection.js';
 import { clog } from '../console.js';
@@ -737,7 +738,7 @@ export function createOrchestra(view) {
       var el = orchEl(); if (!el) return;
       var head = '<div class="ohead"><span class="ot">Orchestra</span>' +
         '<span class="os">One agent plans the goal; the rest work it in parallel, each in its own worktree.</span>' +
-        '<span class="spacer"></span><button class="iconbtn" id="orefresh" title="refresh">' + ICONS.refresh + "</button></div>";
+        '<span class="spacer"></span><button class="btn outline sm" id="oshare">Share run</button><button class="iconbtn" id="orefresh" title="refresh">' + ICONS.refresh + "</button></div>";
       if (view.orch.runs === null) { el.innerHTML = '<div class="orchview">' + head + (view.orch.err ? '<div class="onote err">' + esc(view.orch.err) + "</div>" : LOADER) + "</div>"; wireOrchHead(); return; }
       if (!view.orch.runs.length) {
         el.innerHTML = '<div class="orchview">' + head + '<div class="oempty">' + emptyArt("orch") + '<b>No orchestra runs yet.</b><br>' +
@@ -1202,6 +1203,8 @@ export function createOrchestra(view) {
     }
 
     function wireOrchHead(){
+      var share = document.getElementById("oshare");
+      if (share) share.onclick = function(){ var run = (view.orch.runs || []).find(function(r){ return r.id === view.orch.sel; }) || (view.orch.runs || [])[0]; if (run) openSharing(view.pid, run.chat, run.id); else toast("Start a run first"); };
       var r = document.getElementById("orefresh"); if (r) r.onclick = loadOrch;
     }
 

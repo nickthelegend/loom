@@ -49,7 +49,7 @@ export async function addProjectAt(resolved: string, name?: string): Promise<{ i
 }
 
 /** Register projects routes in the order established by LoomDaemon.routes(). */
-export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner" | "team" | "broadcastProjects">): () => Promise<void> {
+export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner" | "team" | "broadcastProjects" | "projectPresence">): () => Promise<void> {
   const creation = new ProjectCreation(addProjectAt, ctx.broadcastProjects);
 
   // Like Share-live minting, creating folders is available to the owner's
@@ -109,7 +109,7 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
         if (scope && !scope.includes(info.id)) continue;
         try {
           const rt = await ctx.runtime(info.id);
-          projects.push(await rt.status());
+          projects.push({ ...await rt.status(), presence: [...ctx.projectPresence(info.id), ...await ctx.team.projectPeople(rt)] });
         } catch (err) {
           projects.push({
             id: info.id,

@@ -129,6 +129,7 @@ import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
+import { auditCsv } from "../core/team-sharing.js";
 import { auditTrail, searchSessions } from "./workspace-views.js";
 import { resources } from "../core/resources.js";
 import { registerReviewRoutes } from "./routes/review.js";
@@ -325,6 +326,10 @@ export class LoomDaemon {
       projects: listProjects,
       ...opts.teamOptions,
       runtimes: () => [...this.runtimes.values()],
+      mention: (from, repo) => {
+        const tokens = (readDaemonConfig()?.clients ?? []).filter(c => !c.guest && !c.projects?.length && wantsPush(c.pushKinds, "questions")).flatMap(c => c.pushToken ? [c.pushToken] : []);
+        void sendExpoPush(tokens, { title: `${from} mentioned you`, body: `In ${repo} · open Loom Team to read it`, data: { screen: "team", kind: "mention" } });
+      },
       broadcast: (frame) => {
         this.delivery.publish(frame, { kind: "admin" });
       },
@@ -382,6 +387,7 @@ export class LoomDaemon {
       startCloud: (...args) => this.startCloud(...args),
       stopCloud: (...args) => this.stopCloud(...args),
       pushTokens: () => this.pushTokens(),
+      projectPresence: (id) => this.presence.project(id),
       revalidateSockets: () => this.revalidateSockets(),
       runtime: (...args) => this.runtime(...args),
       get specRunner() { return daemon.specRunner; },
@@ -598,7 +604,7 @@ export class LoomDaemon {
     }));
     registerObservabilityRoutes(app, withRuntime);
     registerAlertsRoutes(app, ctx);
-    registerMessagesRoutes(app, withRuntime);
+    registerMessagesRoutes(app, withRuntime, this.team);
     registerServersRoutes(app, withRuntime);
     registerTaskDeliveryRoutes(app, withRuntime);
     registerQueueRoutes(app, withRuntime);
@@ -636,6 +642,18 @@ export class LoomDaemon {
     app.get("/api/resources", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can see its processes" });
       void resources().then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
+    });
+    app.get("/api/audit.csv", async (req, res) => {
+      if ((req as Request & { projectScope?: string[] | null }).projectScope) return void res.status(403).json({ error: "audit export requires an owner or unscoped device" });
+      const since = req.query.since === undefined ? Date.now() - 7 * 86_400_000 : Number(req.query.since);
+      if (!Number.isFinite(since) || since < 0) return void res.status(400).json({ error: "invalid since timestamp" });
+      try {
+        res.setHeader("content-disposition", 'attachment; filename="loom-audit.csv"');
+        res.setHeader("cache-control", "no-store");
+        const csv = auditCsv(await auditTrail(since, this.runtimes, Infinity));
+        if (req.query.format === "json") { res.removeHeader("content-disposition"); res.json({ csv }); }
+        else res.type("text/csv").send(csv);
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
     });
     app.get("/api/audit", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can read the audit trail" });

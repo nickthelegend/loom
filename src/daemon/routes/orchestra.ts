@@ -1,4 +1,6 @@
 import { listOrchestraRecipes, saveOrchestraRecipe, runRecipeOptions, orchestraGraph, projectWebhookSecret } from "../../core/orchestra-options.js";
+import { createShare } from "../../core/shares.js";
+import { shareHours } from "../../core/team-sharing.js";
 import { loomToolScope } from "../../core/loom-tools.js";
 import type { Express } from 'express';
 import express from "express";
@@ -9,6 +11,15 @@ import type { CompareOptions } from "../../core/orchestra.js";
 import type { WithRuntime } from './context.js';
 /** Register orchestra routes in the order established by LoomDaemon.routes(). */
 export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime): void {
+
+  app.post("/api/projects/:id/orchestra/:runId/share", withRuntime(async (rt, req, res) => {
+    const run = rt.orchestra.get(String(req.params.runId));
+    if (!run) return void res.status(404).json({ error: "no such run" });
+    try {
+      const { share, token } = createShare({ projectId: rt.info.id, chat: run.chat, runId: run.id, title: run.goal, hours: shareHours(req.body ?? {}) });
+      res.json({ id: share.id, url: `${req.protocol}://${req.headers.host}/share/${token}`, title: share.title, expiresAt: share.expiresAt });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  }));
 
   // ---- orchestra: one orchestrator, many parallel workers ---------------
   // See core/orchestra.ts. Every step is also an `orchestra` event on the

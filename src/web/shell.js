@@ -22,6 +22,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
 import { renderHome } from './welcome.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
+import { openSharing, projectPresenceHtml } from './sharing.js';
 import { openShareLive } from './share-live.js';
 import { openTriggers } from './triggers-ui.js';
 
@@ -278,7 +279,7 @@ import { openTriggers } from './triggers-ui.js';
         var rows = '<div class="srow' + (sel ? " sel" : "") + '" data-id="' + esc(p.id) + '">' +
           '<div class="n">' +
           '<button class="scaret' + (open ? " open" : "") + '" data-caret="' + esc(p.id) + '" aria-label="' + (open ? "collapse " : "expand ") + esc(p.name) + '" aria-expanded="' + (open ? "true" : "false") + '">' + ICONS.chevron + "</button>" +
-          '<span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" +
+          '<span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" + projectPresenceHtml(p.presence) +
           // The gear takes the trailing slot, so the count needs its own
           // margin-left:auto — .cnt's rule loses to the badge's inline style.
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt" style="margin-left:auto">' + adapters.length + "</span>") +
@@ -839,6 +840,7 @@ import { openTriggers } from './triggers-ui.js';
       items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
+      items.push({ label: "Sharing and approvals…", icon: ICONS.team, run: function(){ openSharing(pid, cid); } });
       items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
       // Pick the conversation up on another machine (#364): history and the agent's place go with it
       if (!isMain) items.push(c.movedTo

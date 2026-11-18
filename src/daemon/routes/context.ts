@@ -9,6 +9,7 @@ import type { TerminalManager } from '../terminals.js';
 
 /** Capabilities supplied by the daemon; route groups receive only their subset. */
 export interface RouteContext {
+  projectPresence: (id: string) => import("../../core/presence.js").PresencePerson[];
   terminals: TerminalManager;
   auth: AuthManager;
   askHuman: (req: { project: string; agent: string; tool: string; input: unknown; summary?: string; }) => Promise<ApprovalDecision>;
