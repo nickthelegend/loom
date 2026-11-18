@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
+- Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
+- Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.
+- Daemon-backed per-chat composer drafts shared by desktop and phone, with revision checks to protect concurrent edits.
+- Named prompt templates with `{{variables}}`, web and phone forms, `/template name`, and `loom templates`, reusing the saved prompt library with owner-only writes.
+- Copy source Markdown for individual messages or entire chats on web and phone, alongside the existing chat export.
+- Remember expanded and collapsed tool outputs per message across visits and devices.
+- Show the current chat's total cost, tokens, and completed turns in web and phone headers, using existing usage accounting.
+- Open chats at their first unread reply with an Unread divider on web and phone, including replies before the latest history page.
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,
