@@ -1567,3 +1567,10 @@
   .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
   .trycallout .btn{flex:none}
   .dempty .trydemo{margin-top:4px}
+
+.shortcutrow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.shortcutrow input{width:150px;background:var(--muted);color:var(--foreground);border:1px solid var(--border);border-radius:6px;padding:7px}
+.notification-entry{padding:12px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.notification-entry time{display:block;color:var(--muted-foreground);font-size:11px;margin-bottom:4px}
+.reduced-motion *, .reduced-motion *::before, .reduced-motion *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+.scrim > .modal, .scrim > .palette{zoom:var(--tz,1)}

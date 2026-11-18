@@ -215,7 +215,7 @@ export function Unreachable(props: { what: string; detail: string; onRetry: () =
  * a decorative placeholder — a fake sparkline on an empty run is a lie with a
  * gradient on it.
  */
-export function Empty(props: { text: string }) {
+export function Empty(props: { text: string; action?: string; onAction?: () => void }) {
   return (
     <View
       style={{
@@ -230,6 +230,9 @@ export function Empty(props: { text: string }) {
       <Text style={{ color: T.faint, fontSize: 12, lineHeight: 19, textAlign: "center" }}>
         {props.text}
       </Text>
+      {props.action && props.onAction && <TouchableOpacity onPress={props.onAction} accessibilityRole="button" style={{ alignSelf: "center", marginTop: 12, padding: 10, borderWidth: 1, borderColor: T.line2, borderRadius: radii.key }}>
+        <Text style={{ color: T.thread, fontWeight: "600" }}>{props.action}</Text>
+      </TouchableOpacity>}
     </View>
   );
 }

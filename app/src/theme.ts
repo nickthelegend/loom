@@ -8,6 +8,7 @@
  * live activity, shuttle magenta marks the baton. See docs/design-system.md.
  */
 
+import { ACCENTS, accentOf, type Accent } from "./shell-model";
 import { Platform } from "react-native";
 
 /** Dark: the design these tokens were drawn for. */
@@ -115,10 +116,23 @@ export function pickTheme(p: ThemePref): void {
   for (const fn of [...prefListeners]) fn(p);
 }
 
+export const ACCENT_KEY = "loom.accent";
+export let accent: Accent = "cyan";
+let appliedAccent: Accent = "cyan";
+const accentListeners = new Set<(a: Accent) => void>();
+export function onAccent(fn: (a: Accent) => void): () => void { accentListeners.add(fn); return () => { accentListeners.delete(fn); }; }
+export function pickAccent(a: Accent): void { for (const fn of accentListeners) fn(a); }
+export function setAccent(value: unknown): void { accent = accentOf(value); }
+
 export function setScheme(next: "dark" | "light"): boolean {
-  if (next === scheme) return false;
+  if (next === scheme && accent === appliedAccent) return false;
   Object.assign(T, next === "light" ? LIGHT : DARK);
   scheme = next;
+  appliedAccent = accent;
+  const color = ACCENTS[accent][next === "light" ? 1 : 0];
+  T.thread = color; T.accent = color;
+  if (accent !== "cyan") T.threadDim = color + (next === "light" ? "1a" : "26");
+  if (accent !== "cyan") T.accentBlue = color;
   for (const fn of schemeListeners) fn();
   return true;
 }

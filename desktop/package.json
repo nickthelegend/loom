@@ -29,6 +29,7 @@
     "files": [
       "main.js",
       "webview-guard.js",
+      "shortcuts.js",
       "loom-app.js",
       "pages.js",
       "updater.js",

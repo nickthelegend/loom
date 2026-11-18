@@ -12,6 +12,9 @@ import "react-native-get-random-values";
  * optional; "continue without an account" is remembered.
  */
 
+import { scopeOf } from "./src/cache-model";
+import { parseLocation, accentOf } from "./src/shell-model";
+import { ACCENT_KEY, accent, onAccent, setAccent } from "./src/theme";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
@@ -51,11 +54,15 @@ export default function App() {
   const [opening, setOpening] = useState<NotificationRoute | null>(null);
 
   useEffect(() => {
-    void Promise.all([loadCreds(), loadAuthSkipped()]).then(([saved, skip]) => {
+    void Promise.all([loadCreds(), loadAuthSkipped()]).then(async ([saved, skip]) => {
       setSkipped(skip);
       if (saved) {
         setCreds(saved);
         setRoute({ name: "board" });
+        const last = parseLocation(await kv.get("loom.location." + scopeOf(saved.url)).catch(() => null));
+        if (last) {
+          try { const { project } = await getProject(saved, last.project); setRoute({ name: "project", project }); } catch { /* A removed project or offline machine opens on the board. */ }
+        }
       }
       setBooted(true);
     });
@@ -135,6 +142,11 @@ export default function App() {
   // Dark by default, as on the desktop; Light, or follow the phone, from the
   // account sheet. The palette swaps in place and the tree below remounts
   // under a new key, so every inline style reads the new tokens.
+  const [, refreshAppearance] = useState(0);
+  useEffect(() => {
+    void kv.get(ACCENT_KEY).then(v => { setAccent(accentOf(v)); refreshAppearance(n => n + 1); });
+    return onAccent(a => { setAccent(a); void kv.set(ACCENT_KEY, a); refreshAppearance(n => n + 1); });
+  }, []);
   const sysScheme = useColorScheme();
   const [themePref, setThemePref] = useState<ThemePref>("dark");
   useEffect(() => {
@@ -148,7 +160,7 @@ export default function App() {
     {/* Android 15+ draws every app edge to edge (and an app targeting API 36
         can't opt out), so the status and navigation bars are real insets on
         both platforms now — not an opaque bar Android lays out for us. */}
-    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView key={scheme + accent} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
       <StatusBar style={scheme === "light" ? "dark" : "light"} />
       {!booted || !auth.ready ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
@@ -173,7 +185,7 @@ export default function App() {
       ) : route.name === "board" ? (
         <BoardScreen
           creds={creds}
-          onOpen={(project) => setRoute({ name: "project", project })}
+          onOpen={(project, chat) => setRoute({ name: "project", project, ...(chat ? { chat, focus: { tab: "thread", n: Date.now() } } : {}) })}
           onFleet={() => setRoute({ name: "fleet" })}
           onUnpair={() => {
             void unpair();
@@ -213,7 +225,7 @@ export default function App() {
           {...(route.focus ? { initialTab: route.focus.tab } : {})}
           {...(route.focus?.crewId ? { initialCrewId: route.focus.crewId } : {})}
           {...(route.focus?.runId ? { initialRunId: route.focus.runId } : {})}
-          onBack={() => setRoute(route.from === "fleet" ? { name: "fleet" } : { name: "board" })}
+          onBack={() => { void kv.del("loom.location." + scopeOf(creds.url)).catch(() => {}); setRoute(route.from === "fleet" ? { name: "fleet" } : { name: "board" }); }}
         />
       )}
       <AccountSheet

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Customizable shortcuts (#422).** Settings ▸ Shortcuts records device-local bindings, rejects conflicts, supports disabling/resetting bindings, and updates desktop menu accelerators and palette labels.
+- **Restore the shell (#422).** Project/chat and split-layout persistence already existed; reopening Loom now restores split mode and the active project tab, and the phone remembers its project, chat and tab per machine. Explicit links take precedence.
+- **Recent palette commands (#422).** The eight most recently used commands appear first, deduplicated and remembered on this device.
+- **Notification history (#422).** A searchable palette command opens the last 100 toasts with timestamps, links back to their chats, and a clear-history action.
+- **Accessibility preferences (#422).** Text sizes and OS motion support already existed; Settings now adds a persistent reduced-motion override, including tab transitions, and appearance changes propagate between windows. The phone keeps native font scaling and accessibility motion preferences.
+- **Selected-chat synchronization (#422).** Ordinary windows on the same browser profile follow project/chat selections without rebroadcast loops; split panes retain independent conversations.
+- **Global chat search in the palette and phone (#422).** Reuses the existing daemon search and `loom find --all`, preserving project-scoped access and guest refusal; unopened projects now return saved chat titles too.
+- **Accent presets on the phone (#422).** The six web presets already existed; the phone now offers the same device-local choices, and web windows apply accent changes live.
+- **Actionable empty tabs (#422).** Existing empty-state explanations now have direct task, memory and agent actions on web/phone; Team retains its create/join flow and gains a useful fallback when team access is unavailable.
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

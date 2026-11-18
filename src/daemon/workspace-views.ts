@@ -6,6 +6,7 @@
  * for the read and closed again, so a search doesn't spin up every project's agents.
  */
 
+import { ConversationStore } from "../core/conversations.js";
 import { EventLog } from "../core/eventlog.js";
 import { listProjects, projectLoomDir } from "../core/registry.js";
 import { searchChats } from "../core/search.js";
@@ -21,7 +22,8 @@ async function withLog<T>(info: { id: string; dir: string }, live: Map<string, P
   let log: EventLog | null = null;
   try {
     log = await EventLog.open(projectLoomDir(info.dir));
-    return fn(log, (id) => id);
+    const chats = new ConversationStore(info.dir).chats();
+    return fn(log, (id) => chats.find(c => c.id === id)?.title ?? id);
   } catch {
     return null;
   } finally {

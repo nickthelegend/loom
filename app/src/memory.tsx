@@ -6,7 +6,7 @@
  * from wherever you are.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { addMemory, forgetMemory, getMemories, updateMemory, type Creds, type Memory, type Project } from "./api";
 import { Empty, Panel, Unreachable, ago } from "./components";
@@ -30,6 +30,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const draftInput = useRef<TextInput>(null);
   const [draft, setDraft] = useState("");
   const [draftKind, setDraftKind] = useState<(typeof KINDS)[number]>("fact");
   const [busy, setBusy] = useState(false);
@@ -83,7 +84,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
 
       {/* remember something */}
       <Panel>
-        <TextInput value={draft} onChangeText={setDraft} placeholder="Remember something for every agent…" placeholderTextColor={T.faint}
+        <TextInput ref={draftInput} value={draft} onChangeText={setDraft} placeholder="Remember something for every agent…" placeholderTextColor={T.faint}
           multiline style={{ color: T.text, fontSize: 14, minHeight: 44, lineHeight: 20, textAlignVertical: "top" }} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {KINDS.map((k) => (
@@ -122,7 +123,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
               <MemoryCard key={m.id} m={m} open={open === m.id} onToggle={() => setOpen(open === m.id ? null : m.id)} creds={creds} projectId={project.id} onChanged={load} />
             ))
           ) : (
-            <Empty text={list.length ? "Nothing matches." : "No memories yet. Agents add them as they work, or remember something above."} />
+            <Empty text={list.length ? "Nothing matches." : "No memories yet. Record a fact for your agents."} action={list.length ? "Clear filters" : "Remember something"} onAction={() => { if (list.length) { setQ(""); setKind(null); } else draftInput.current?.focus(); }} />
           )}
         </>
       ) : !err ? (
