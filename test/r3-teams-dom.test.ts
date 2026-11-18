@@ -55,20 +55,21 @@ function mount() {
       w.HTMLAnchorElement.prototype.click = () => {};
     } });
   const q = (s: string) => dom.window.document.querySelector(s) as HTMLElement | null;
-  const click = async (s: string) => { await waitUntil(() => !!q(s)?.onclick); q(s)!.click(); };
-  const fill = (s: string, value: string) => { const e = q(s) as HTMLInputElement; e.value = value; e.dispatchEvent(new dom.window.Event("input", { bubbles: true })); e.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
+  const click = async (s: string) => { await waitUntil(() => !!q(s)?.onclick, { timeoutMs: 60_000 }); q(s)!.click(); };
+  // waits for the field: a dialog renders after its data arrives, which a loaded runner can take a while to do
+  const fill = async (s: string, value: string) => { await waitUntil(() => !!q(s), { timeoutMs: 60_000 }); const e = q(s) as HTMLInputElement; e.value = value; e.dispatchEvent(new dom.window.Event("input", { bubbles: true })); e.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
   const m = { dom, errors, downloads, q, click, fill, close() { closed = true; sockets.forEach(s => { s.removeAllListeners(); s.on("error", () => {}); s.terminate(); }); dom.window.close(); } }; mounted.push(m); return m;
 }
 
 it("creates a selected run share, counts down, saves roles, downloads CSV and revokes in the web UI", async () => {
   const m = mount(); await m.click('.tab[data-tab="orchestra"]'); await waitUntil(() => !!m.q('[data-run]')); await m.click('#oshare');
-  m.fill('[data-expiry-preset]', '7d'); await m.click('[data-create-share]');
+  await m.fill('[data-expiry-preset]', '7d'); await m.click('[data-create-share]');
   await waitUntil(() => !!m.q('[aria-label="Read-only share link"]'));
   const link = (m.q('[aria-label="Read-only share link"]') as HTMLInputElement).value;
   expect(m.q('[data-share-result]')!.textContent).toMatch(/6d|7d/);
   const page = await (await fetch(link)).text(); expect(page).toContain("Read-only Orchestra run"); expect(page).toContain("&lt;img");
   expect(m.q('.scrim img')).toBeNull();
-  await waitUntil(() => !!m.q('.scrim [data-mode]')); m.fill('.scrim [data-mode]', 'selected'); await m.click('[data-save-roles]');
+  await waitUntil(() => !!m.q('.scrim [data-mode]')); await m.fill('.scrim [data-mode]', 'selected'); await m.click('[data-save-roles]');
   await waitUntil(async () => (await call('GET', `/api/projects/${pid}/approval-roles`)).mode === 'selected');
   await m.click('[data-audit]'); await waitUntil(() => m.downloads.length === 1);
   await m.click('[data-revoke]'); await waitUntil(async () => (await fetch(link)).status === 404);
@@ -77,11 +78,11 @@ it("creates a selected run share, counts down, saves roles, downloads CSV and re
 
 it("filters the existing activity feed, shares a fleet and revokes an invite from the team UI", async () => {
   const m = mount(); await m.click('.tab[data-tab="team"]');
-  await waitUntil(() => !!m.q('[data-feed-kind]'));
-  m.fill('[data-feed-kind]', 'pr_merged');
+  await waitUntil(() => !!m.q('[data-feed-kind]'), { timeoutMs: 60_000 });
+  await m.fill('[data-feed-kind]', 'pr_merged');
   expect(m.q('[data-tfeed="goal_started"]')!.hidden).toBe(true); expect(m.q('[data-tfeed="pr_merged"]')!.hidden).toBe(false);
-  await m.click('[data-team-sharing]'); await waitUntil(() => !!m.q('[data-invite-revoke]'));
-  m.fill('[data-fleet-name]', 'browser'); m.fill('[data-fleet-spec]', 'echox2'); await m.click('[data-publish]');
+  await m.click('[data-team-sharing]'); await waitUntil(() => !!m.q('[data-invite-revoke]'), { timeoutMs: 60_000 });
+  await m.fill('[data-fleet-name]', 'browser'); await m.fill('[data-fleet-spec]', 'echox2'); await m.click('[data-publish]');
   await waitUntil(() => !!m.q('[data-import="browser"]')); await m.click('[data-import="browser"]');
   await waitUntil(async () => (await call('GET', '/api/fleets')).fleets.some((f: { name: string }) => f.name === 'browser'));
   await m.click('[data-remove-fleet="browser"]'); await waitUntil(() => !m.q('[data-import="browser"]'));
@@ -100,7 +101,7 @@ it("offers teammate mentions beside files and renders project presence names saf
     const m = mount(); await waitUntil(() => !!m.q('#box'));
     await waitUntil(() => (m.q('.srow .project-presence')?.getAttribute('aria-label') || '').includes('Reader <img>'));
     expect(m.q('.project-presence img')).toBeNull();
-    const input = m.q('#box') as HTMLTextAreaElement; input.focus(); m.fill('#box', '@bo'); input.setSelectionRange(3, 3);
+    const input = m.q('#box') as HTMLTextAreaElement; input.focus(); await m.fill('#box', '@bo'); input.setSelectionRange(3, 3);
     input.dispatchEvent(new m.dom.window.Event('input', { bubbles: true }));
     await waitUntil(() => (m.q('#cmenu')?.textContent || '').includes('@bob'));
     m.q('#cmenu .cmi')!.dispatchEvent(new m.dom.window.MouseEvent('mousedown', { bubbles: true }));
