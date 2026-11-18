@@ -1,3 +1,5 @@
+import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
+import { firstUnread, variables } from "./chat-composer-model";
 /**
  * The three screens: Pair, Board, Project — quiet graphite.
  *
@@ -897,6 +899,7 @@ export function ProjectScreen(props: {
   // Composer extras: plan mode and the prompt library.
   const [plan, setPlan] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
+  const [templateText, setTemplateText] = useState<string | null>(null);
   const [intakeOpen, setIntakeOpen] = useState(false);
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
@@ -961,11 +964,46 @@ export function ProjectScreen(props: {
   const [selected, setSelected] = useState<string | null>(
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
   );
-  const [text, setText] = useState("");
+  const { text, setText, error: draftError } = useDaemonDraft(creds, project.id, chatId);
   /** What's lined up behind the running turn — see core/prompt-queue.ts. */
   const [queue, setQueue] = useState<QueueView | null>(null);
   const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [pins, setPins] = useState<LoomEvent[]>([]);
+  const [presentation, setPresentation] = useState<ChatPresentation>({ expanded: {}, costUsd: 0, tokens: 0, turns: 0 });
+  const [bookmarks, setBookmarks] = useState<Array<{ chat: string; title: string; event: LoomEvent }> | null>(null);
+  const [unreadId, setUnreadId] = useState<number | null>(null);
+  const jumpId = useRef<number | null>(null);
+  const bookmarkJump = useRef<{ chat: string; id: number } | null>(null);
+  const composerBase = `/api/projects/${project.id}/chats/${encodeURIComponent(chatId)}`;
+  const activeComposer = useRef(composerBase);
+  activeComposer.current = composerBase;
+  useEffect(() => {
+    setPins([]); setPresentation({ expanded: {}, costUsd: 0, tokens: 0, turns: 0 }); setTemplateText(null);
+  }, [composerBase]);
+  const composerError = (e: unknown) => setErr(e instanceof Error ? e.message : String(e));
+  const reloadComposer = () => Promise.all([
+    api<{ pins: LoomEvent[] }>(creds, composerBase + "/pins"),
+    api<ChatPresentation>(creds, composerBase + "/presentation"),
+  ]).then(([p, t]) => { if (activeComposer.current === composerBase) { setPins(p.pins); setPresentation(t); } });
+  useEffect(() => {
+    let live = true;
+    Promise.all([api<{ pins: LoomEvent[] }>(creds, composerBase + "/pins"), api<ChatPresentation>(creds, composerBase + "/presentation")])
+      .then(([p, t]) => { if (live) { setPins(p.pins); setPresentation(t); } }).catch(composerError);
+    return () => { live = false; };
+  }, [creds, composerBase, events.length]);
+  useEffect(() => { if (draftError) setErr(draftError); }, [draftError]);
+  const jumpMessage = async (id: number) => {
+    let all = events;
+    while (!all.some(e => e.id === id) && all.length && all[0]!.id > id) {
+      const page = await api<{ events: LoomEvent[] }>(creds, `/api/projects/${project.id}/events?chat=${encodeURIComponent(chatId)}&limit=200&before=${all[0]!.id}`);
+      if (activeComposer.current !== composerBase) return;
+      if (!page.events.length) break;
+      all = [...page.events, ...all];
+    }
+    if (activeComposer.current === composerBase) { jumpId.current = id; setEvents([...all]); }
+  };
+
   const lastId = useRef(0);
   // Keep the phone's copy of this thread current, a beat after it settles.
   useEffect(() => {
@@ -1022,7 +1060,22 @@ export function ProjectScreen(props: {
       setEvents(c.data);
       setThreadCachedAt(c.at);
     });
-    void getEvents(creds, project.id, chatId)
+    setUnreadId(null); jumpId.current = null;
+    const opening = async () => {
+      const raw = await kv.get(seenKey);
+      let last: number | undefined;
+      try { last = raw ? (JSON.parse(raw) as SeenMap)[chatId] : undefined; } catch { /* first visit */ }
+      const result = await getEvents(creds, project.id, chatId);
+      const target = bookmarkJump.current?.chat === chatId ? bookmarkJump.current.id : last;
+      while (target !== undefined && result.events.length && result.events[0]!.id > target) {
+        const page = await api<{ events: LoomEvent[] }>(creds, `/api/projects/${project.id}/events?chat=${encodeURIComponent(chatId)}&limit=200&before=${result.events[0]!.id}`);
+        if (!live || !page.events.length) break;
+        result.events = [...page.events, ...result.events];
+      }
+      if (live) { const unread = firstUnread(result.events, last); setUnreadId(unread); jumpId.current = bookmarkJump.current?.chat === chatId ? bookmarkJump.current.id : unread; bookmarkJump.current = null; }
+      return result;
+    };
+    void opening()
       .then(({ events, live: typing }) => {
         if (!live) return;
         threadFresh.current = true;
@@ -1206,6 +1259,16 @@ export function ProjectScreen(props: {
   const [sideQ, setSideQ] = useState<string | null>(null);
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
+    const template = /^\/template\s+(.+)$/i.exec(text.trim());
+    if (template) {
+      try {
+        const r = await api<{ templates: Array<{ title: string; text: string }> }>(creds, "/api/templates");
+        const found = r.templates.find(p => p.title.toLowerCase() === template[1]!.trim().toLowerCase());
+        if (!found) throw new Error("No template with that name. Open Prompts to see saved templates.");
+        if (activeComposer.current === composerBase) setTemplateText(found.text);
+      } catch (e) { composerError(e); }
+      return;
+    }
     const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
     if (btw) { setText(""); setSideQ(btw[1] ?? ""); return; }
     if (attach.uploading) return setErr("still uploading the picture…");
@@ -1229,6 +1292,7 @@ export function ProjectScreen(props: {
           .catch(() => {});
       }
     } catch (e) {
+      setText(current => current || message);
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
@@ -1317,7 +1381,18 @@ export function ProjectScreen(props: {
       retry: (eventId: number) => void createBranch(creds, project.id, chatId, { fromEventId: eventId, mode: "retry" }).then(after).catch((e: Error) => setErr(e.message)),
     };
   }, [branchListing, creds, project.id, chatId]);
-  const threadCtx = useMemo(() => ({ creds, projectId: project.id, agents: project.agents.map((a) => a.id), branches: branchCtx }), [creds, project.id, project.agents, branchCtx]);
+  const composerActions: ChatActions = {
+    pins, bookmarks: chats.find(c => c.id === chatId)?.starred ?? [],
+    quote: id => void api<{ quote: string }>(creds, composerBase + `/markdown?eventId=${id}`).then(r => setText(t => r.quote + t)).catch(composerError),
+    pin: id => void api(creds, composerBase + "/pins", { method: pins.some(e => e.id === id) ? "DELETE" : "POST", body: JSON.stringify({ eventId: id }) }).then(reloadComposer).catch(composerError),
+    bookmark: id => void api(creds, composerBase + "/star", { method: "POST", body: JSON.stringify({ eventId: id, on: !composerActions.bookmarks.includes(id) }) }).then(reloadChats).catch(composerError),
+    copyChat: () => copyChat(creds, project.id, chatId), expanded: presentation.expanded,
+    expand: (id, expanded) => {
+      setPresentation(p => ({ ...p, expanded: { ...p.expanded, [id]: expanded } }));
+      void api(creds, composerBase + "/presentation", { method: "PUT", body: JSON.stringify({ eventId: id, expanded }) }).catch(composerError);
+    },
+  };
+  const threadCtx = { creds, projectId: project.id, agents: project.agents.map(a => a.id), branches: branchCtx, composer: composerActions };
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
@@ -1364,14 +1439,14 @@ export function ProjectScreen(props: {
         >
           <Text style={{ color: T.dim, fontSize: 17, lineHeight: 20 }}>←</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <TouchableOpacity onLongPress={composerActions.copyChat} style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={{ color: T.text, fontWeight: "600", fontSize: 14 }}>
             {project.name}
           </Text>
           <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }}>
-            {project.needsInput ? "needs input" : usd(project.costUsd) || "idle"}
+            {`$${presentation.costUsd.toFixed(4)} · ${presentation.tokens} tokens · ${presentation.turns} turns`}
           </Text>
-        </View>
+        </TouchableOpacity>
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (
@@ -1627,6 +1702,15 @@ export function ProjectScreen(props: {
               </Text>
             </View>
           ) : null}
+          <View style={{ backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}>
+            <ScrollView horizontal contentContainerStyle={{ paddingHorizontal: 12, gap: 12 }}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => void api<{ bookmarks: Array<{ chat: string; title: string; event: LoomEvent }> }>(creds, `/api/projects/${project.id}/bookmarks`).then(r => setBookmarks(r.bookmarks)).catch(composerError)} style={{ paddingVertical: 10 }}><Text style={{ color: T.dim }}>Bookmarks</Text></TouchableOpacity>
+              {pins.map(p => <TouchableOpacity key={p.id} accessibilityRole="button" onPress={() => void jumpMessage(p.id).catch(composerError)} onLongPress={() => composerActions.pin(p.id)} style={{ paddingVertical: 10, maxWidth: 240 }}><Text numberOfLines={1} style={{ color: T.thread }}>Pinned · {String(p.payload.text ?? "")}</Text></TouchableOpacity>)}
+            </ScrollView>
+          </View>
+          <Sheet visible={bookmarks !== null} onClose={() => setBookmarks(null)} title="Bookmarks">
+            {!bookmarks?.length ? <Text style={{ color: T.dim, padding: 16 }}>No bookmarks yet.</Text> : bookmarks.map(b => <TouchableOpacity key={b.event.id} onPress={() => { setBookmarks(null); if (b.chat === chatId) void jumpMessage(b.event.id).catch(composerError); else { bookmarkJump.current = { chat: b.chat, id: b.event.id }; setChatId(b.chat); } }} style={{ padding: 16 }}><Text style={{ color: T.text }}>{b.title} · {String(b.event.payload.text ?? "")}</Text></TouchableOpacity>)}
+          </Sheet>
           <ThreadCtx.Provider value={threadCtx}>
           <FlatList
             ref={listRef}
@@ -1647,7 +1731,7 @@ export function ProjectScreen(props: {
                 Array.isArray(item.payload?.questions) && item.payload.questions.length ? (
                 <QuestionEvent creds={creds} projectId={project.id} e={item} answered={answered.get(String(item.payload.requestId))} />
               ) : (
-                <EventLine e={item} kindOf={kindOf} />
+                <View>{item.id === unreadId ? <Text accessibilityRole="header" style={{ textAlign: "center", color: T.thread, marginVertical: 14 }}>Unread</Text> : null}<EventLine e={item} kindOf={kindOf} /></View>
               )
             }
             ListHeaderComponent={
@@ -1670,12 +1754,20 @@ export function ProjectScreen(props: {
             }
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
             onContentSizeChange={() => {
-              listRef.current?.scrollToEnd({ animated: true });
-              // a card measured after the first pass (a question, an image) would end up under the dock
-              setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 300);
+              if (jumpId.current !== null) {
+                const index = shownEvents.findIndex(e => e.id === jumpId.current);
+                if (index >= 0) listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+              } else if (!unreadId) listRef.current?.scrollToEnd({ animated: false });
             }}
-            // the keyboard closing after a send resizes the list without changing its content
-            onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
+            onScrollToIndexFailed={({ index, averageItemLength }) => {
+              listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+              const target = jumpId.current;
+              setTimeout(() => {
+                if (activeComposer.current === composerBase && target !== null && jumpId.current === target)
+                  listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+              }, 100);
+            }}
+            onScrollBeginDrag={() => { jumpId.current = null; }}
             style={{ flex: 1 }}
           />
           </ThreadCtx.Provider>
@@ -2027,12 +2119,13 @@ export function ProjectScreen(props: {
           </View>
           <IntakeSheet visible={intakeOpen} creds={creds} projectId={project.id} onClose={() => setIntakeOpen(false)}
             onOpenChat={(chat) => { setIntakeOpen(false); reloadChats(); setChatId(chat); setTab("thread"); }} />
+          <TemplateForm text={templateText} onClose={() => setTemplateText(null)} onUse={t => { setText(t); setTemplateText(null); }} />
           <PromptsSheet
             creds={creds}
             visible={promptsOpen}
             onClose={() => setPromptsOpen(false)}
             draft={text}
-            onInsert={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n${t}` : t))}
+            onInsert={(t) => { if (variables(t).length) setTemplateText(t); else setText(cur => cur.trim() ? `${cur.trimEnd()}\n${t}` : t); }}
           />
         </>
       ) : tab === "crew" ? (

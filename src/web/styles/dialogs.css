@@ -1567,3 +1567,12 @@
   .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
   .trycallout .btn{flex:none}
   .dempty .trydemo{margin-top:4px}
+
+.chat-totals{padding:6px 18px;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.chat-pins{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:4px;background:var(--background);border-bottom:1px solid var(--border)}
+.chat-pins:empty{display:none}
+.chat-pins .btn{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unread-divider{display:flex;align-items:center;gap:12px;color:var(--thread-ink);font-size:12px;margin:18px 0}
+.unread-divider:before,.unread-divider:after{content:"";height:1px;flex:1;background:var(--border)}
+.template-form{width:min(420px,90vw);padding:24px;background:var(--background);border:1px solid var(--border);border-radius:var(--radius)}
+.template-form .field{display:flex;flex-direction:column;gap:6px;margin:12px 0}
