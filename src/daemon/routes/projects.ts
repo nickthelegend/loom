@@ -1,3 +1,4 @@
+import { applyStarterTemplate } from "../../core/starter-templates.js";
 import type { Express, RequestHandler } from 'express';
 import { type Request } from "express";
 import fs from "node:fs";
@@ -127,13 +128,17 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
     })();
   });
 
-  app.post("/api/projects", (req, res) => {
+  app.post("/api/projects", ownerDevice, (req, res) => {
     void (async () => {
-      const { dir, name } = (req.body ?? {}) as { dir?: string; name?: string };
+      const { dir, name, template } = (req.body ?? {}) as { dir?: string; name?: string; template?: string };
       if (!dir) return void res.status(400).json({ error: "missing dir" });
       const resolved = path.resolve(dir);
       if (!fs.existsSync(resolved)) {
         return void res.status(400).json({ error: `no such directory: ${resolved}` });
+      }
+      if (template !== undefined) {
+        try { applyStarterTemplate(resolved, template); }
+        catch (error) { return void res.status(400).json({ error: (error as Error).message }); }
       }
       const { info, config } = await addProjectAt(resolved, name);
       res.json({ project: info, config });

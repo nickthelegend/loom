@@ -1,5 +1,6 @@
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
+import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -571,6 +572,7 @@ export class LoomDaemon {
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
     registerScoreboardRoutes(app);
+    registerCliSettingsRoutes(app);
     registerAgentSkillsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);

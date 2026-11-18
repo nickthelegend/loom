@@ -96,10 +96,10 @@ describe("loom send --wait", () => {
     expect(r.err).toMatch(/✓ solo/);
   });
 
-  it("--json is one object a script can parse", async () => {
+  it("--json ends its NDJSON stream with a machine-readable outcome", async () => {
     const r = await runCli(["send", "--wait", "--json", "again"]);
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.out)).toMatchObject({ status: "ok", agent: "solo", reply: "echo(solo): again", costUsd: 0.001 });
+    expect(JSON.parse(r.out.trim().split("\n").at(-1)!)).toMatchObject({ status: "ok", agent: "solo", reply: "echo(solo): again", costUsd: 0.001 });
   });
 
   it("exits 1 on a failed turn, 2 on a question, 124 on a timeout", async () => {
@@ -108,10 +108,10 @@ describe("loom send --wait", () => {
     expect(failed.err).toContain("the CLI crashed");
     const asked = await runCli(["send", "--wait", "--json", "ask: Postgres or SQLite?"]);
     expect(asked.code).toBe(2);
-    expect(JSON.parse(asked.out)).toMatchObject({ status: "needs_input", question: "Postgres or SQLite?" });
+    expect(JSON.parse(asked.out.trim().split("\n").at(-1)!)).toMatchObject({ status: "needs_input", question: "Postgres or SQLite?" });
     const slow = await runCli(["send", "--wait", "--timeout", "1", "--json", "slow sleep:4000"]);
     expect(slow.code).toBe(124);
-    expect(JSON.parse(slow.out)).toEqual({ status: "timeout", agent: "solo" });
+    expect(JSON.parse(slow.out.trim().split("\n").at(-1)!)).toMatchObject({ status: "timeout", agent: "solo" });
   }, 30_000);
 });
 
@@ -163,7 +163,7 @@ describe("the baton and a restart, from a script (field feedback)", () => {
   it("--handoff takes the baton and sends", async () => {
     const r = await runCli(["send", "-a", "two", "--wait", "--json", "--handoff", "hello"], pair);
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.out)).toMatchObject({ status: "ok", agent: "two" });
+    expect(JSON.parse(r.out.trim().split("\n").at(-1)!)).toMatchObject({ status: "ok", agent: "two" });
   }, 30_000);
 
   it("knows which turns are running, so nothing restarts the daemon underneath them", async () => {

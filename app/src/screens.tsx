@@ -1,4 +1,5 @@
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
+import { ProjectTools } from "./cli-tools";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -1498,6 +1499,7 @@ export function ProjectScreen(props: {
             {`$${presentation.costUsd.toFixed(4)} · ${presentation.tokens} tokens · ${presentation.turns} turns`}
           </Text>
         </TouchableOpacity>
+        <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (

@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accent presets on the phone (#422).** The six web presets already existed; the phone now offers the same device-local choices, and web windows apply accent changes live.
 - **Actionable empty tabs (#422).** Existing empty-state explanations now have direct task, memory and agent actions on web/phone; Team retains its create/join flow and gains a useful fallback when team access is unavailable.
 
+- **NDJSON turns (#426).** `loom ask --json` and `loom send --json` stream live text deltas, durable events and per-chat outcomes, with request-correlated queued sends, timeouts and interruption exit codes. `send --json` now implies waiting instead of printing the old one-object result.
+- **Complete shell suggestions (#426).** Existing command-name completions now derive commands, aliases, subcommands and short/long options from Commander for Bash, Zsh and Fish, including user aliases.
+- **Watch an Orchestra run (#426).** `loom watch --run <id>` reuses Orchestra progress events to follow run, task and report changes through completion; `--json` emits only NDJSON and interruption closes the watcher.
+- **HTML chat export (#426).** `loom export --format html` reuses the existing standalone replay renderer. The web export is labelled HTML, and phone Project tools can save or share the same HTML file.
+- **Starter templates (#426).** `loom init --template web|node|library` and `--list-templates`, plus web and phone new-project pickers, create dependency-free starters without overwriting existing files. Template creation requires an owner or unscoped device.
+- **Config validation (#426).** `loom config validate`, project Settings on the web and Project tools on the phone validate the actual `.loom/config.json`, explaining JSON, field-type, duplicate-id and unresolved-agent errors even when the daemon retains its last good config.
+- **Agent-facing tools (#426).** `loom_scoreboard`, `loom_fleets`, `loom_try` and `loom_memory_list` expose the existing APIs over both MCP transports, preserving project scope and the owner-only demo/fleet boundary.
+- **User command aliases (#426).** `loom alias set <name> -- <command> [args...]`, `list` and `rm`, plus web Settings → CLI aliases, persist literal argument lists, reject cycles and preserve built-in commands. Scoped tokens and shared-chat guests cannot manage machine-wide aliases.
+- **TUI scoreboard (#426).** A fifth tab, `/scoreboard` and a palette entry show the existing recorded model standings, refresh live and preserve unknown cost/rate markers. Phone Project tools also provides a scoreboard with time-window filters.
+
 ### Fixed
 
 - **Explorer's "Open in terminal" ran shell syntax in folder names (#430).** The `cd` it typed double-quoted the path, so a folder named `$(…)` or with backticks ran as a command. It is now single-quoted for POSIX shells (`cd /d "…"` for cmd.exe).
