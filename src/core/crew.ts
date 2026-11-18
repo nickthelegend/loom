@@ -1599,7 +1599,7 @@ export class CrewEngine {
         `Loom-Teammate: ${tm.id}`,
         `Loom-Agent: ${kind}`,
       ].join("\n");
-      await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "commit", "-q", "--no-verify", "-m", message], dir);
+      await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "commit", "-q", "-m", message], dir);
       return (await git(["rev-parse", "HEAD"], dir)).trim();
     });
   }

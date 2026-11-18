@@ -286,6 +286,7 @@ export function Segmented<K extends string>(props: {
  * near-white fill with dark text; everything else is a raised neutral key.
  */
 export function Btn(props: {
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   primary?: boolean;
@@ -294,6 +295,9 @@ export function Btn(props: {
   return (
     <TouchableOpacity
       onPress={props.onPress}
+      disabled={props.disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: props.disabled }}
       activeOpacity={0.7}
       style={{
         backgroundColor: props.primary ? T.bright : T.raised,
@@ -757,6 +761,8 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
   if (e.kind === "status" && p.state === "model_fallback") return <Text style={{ color: T.dim, fontSize: 12, padding: 8 }}>{String(p.from ?? "")} → {String(p.to ?? "")}{p.reason ? ` · ${String(p.reason)}` : ""}</Text>;
   if (e.kind === "status" && p.state === "model_cap_warning") return <Text style={{ color: T.warn, fontSize: 12, padding: 8 }}>{String(p.text ?? "")}</Text>;
   if (e.kind === "status" && p.state === "memory_injection") return <View style={{ padding: 8, gap: 4 }}><Text style={{ color: T.dim }}>Why was this injected? · Turn {String(p.turn)}</Text>{(p.memories as Array<{ id: string; text: string; score: number; reason: string }> ?? []).map(m => <Text key={m.id} style={{ color: T.dim, fontSize: 12 }}>{m.text} · score {m.score.toFixed(3)} · {m.reason}</Text>)}</View>;
+  if (e.kind === "review" && p.phase === "started") return <Sys text={`Review checklist\n${(Array.isArray(p.checklist) ? p.checklist : []).map(item => "☐ " + String(item)).join("\n")}`} />;
+  if (e.kind === "status" && p.state === "git_failed") return <Sys text={`Git: ${String(p.text || "commit failed")}`} />;
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
   if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;

@@ -1,5 +1,6 @@
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
+import { GitReviewPanel } from "./git-review";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -2384,6 +2385,10 @@ export function ProjectScreen(props: {
               ) : (
                 <Sys text="working tree is clean" />
               )}
+              <GitReviewPanel creds={creds} id={project.id} chat={chatId} agent={selected ?? project.holder ?? undefined} checkpoints={checkpoints ?? []} onMessage={setCommitMsg} onRewind={() => {
+                void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(e => setErr(String(e)));
+                void getCheckpoints(creds, project.id).then(x => setCheckpoints(x.checkpoints)).catch(e => setErr(String(e)));
+              }} />
               {/* Rewind: the files as they were before a turn — the desktop's rewind menu */}
               {checkpoints && checkpoints.length ? (
                 <View style={{ gap: 2, marginTop: spacing.md }}>

@@ -1,4 +1,5 @@
 import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
+import { draftCommit, selectChatBranch } from "../../core/git-review.js";
 import { branchBriefing } from "../../core/chat-branches.js";
 import { readProjectState } from "../../core/registry.js";
 import { AgentBase } from "../../adapters/base.js";
@@ -8,7 +9,7 @@ import path from "node:path";
 import { triage } from "../../core/review-triage.js";
 import * as checkpoints from "../../core/checkpoint.js";
 import type { EventJournal } from "../../core/eventlog.js";
-import { push as gitPush, stageAndCommitFiles } from "../../core/git.js";
+import { GitError, push as gitPush, stageAndCommitFiles } from "../../core/git.js";
 import { logbook } from "../../core/logbook.js";
 import { writeLoomMcpSession } from "../../core/loom-tools.js";
 import {
@@ -127,6 +128,9 @@ export class RuntimeTurns {
   turnChat = new Map<string, string>();
   /** The requested model survives errors and interrupts that omit provider metadata. */
   turnModel = new Map<string, string | undefined>();
+  private turnPrompt = new Map<string, string>();
+  private branchDispatch = false;
+  private editBranch = new Map<string, Promise<Error | undefined>>();
 
   // A turn's cost lands on a `turn_cost` status just before its `run_complete`
   // (the CLI reports it mid-stream). We hold it here so the completed turn — and
@@ -154,7 +158,7 @@ export class RuntimeTurns {
   lastTurnDiff = new Map<string, Promise<TurnDiff | null>>();
 
   /** App-owned diff/commit writes finish before changing a branch or its files. */
-  async settleBranches(): Promise<void> { await Promise.all(this.postTurn.values()); }
+  async settleBranches(): Promise<void> { await Promise.all([...this.postTurn.values(), ...this.editBranch.values()]); }
 
   private readonly postTurn = new Map<string, Promise<void>>();
 
@@ -183,6 +187,7 @@ export class RuntimeTurns {
    * never do is stop the turn.
    */
   async checkpointBefore(agentId: string, prompt: string): Promise<void> {
+    this.turnPrompt.set(agentId, prompt);
     try {
       const label = prompt.replace(/\s+/g, " ").trim().slice(0, 120) || `a turn by ${agentId}`;
       const cp = await checkpoints.capture(this.host.agentDir(agentId), label);
@@ -201,6 +206,16 @@ export class RuntimeTurns {
     } catch {
       /* never the reason a turn doesn't run */
     }
+  }
+
+  /** Cut a new chat branch as soon as an adapter reports its first edit. */
+  branchOnEdit(agentId: string): void {
+    if (!this.host.config.git?.branchPerChat || !this.preTurnTree.has(agentId) || this.editBranch.has(agentId)) return;
+    const chat = this.turnChat.get(agentId) ?? MAIN_CHAT;
+    this.editBranch.set(agentId, selectChatBranch(this.host.agentDir(agentId), chat, true).then(branch => {
+      this.host.log.append({ kind: "status", agentId, chat, payload: { state: "chat_branch", branch } });
+      return undefined;
+    }, error => error instanceof Error ? error : new Error(String(error))));
   }
 
   /** Every point this project's files can be put back to, newest first. */
@@ -265,12 +280,30 @@ export class RuntimeTurns {
     // agent may already be on its next turn somewhere else. Without it, every
     // "changed N files" card landed in Main whatever thread asked.
     const turnChat = this.turnChat.get(agentId);
-    const pending = diffSinceSnapshot(this.host.agentDir(agentId), before).catch(() => null);
+    const turnPrompt = this.turnPrompt.get(agentId);
+    this.turnPrompt.delete(agentId);
+    const editBranch = this.editBranch.get(agentId);
+    this.editBranch.delete(agentId);
+    const pending = (checkpoint ? checkpoints.turnDiff(this.host.agentDir(agentId), checkpoint) : diffSinceSnapshot(this.host.agentDir(agentId), before)).catch(() => null);
     this.lastTurnDiff.set(agentId, pending);
     const finalized = pending
       .then(async (diff) => {
         if (this.host.closed) return;
         if (diff) {
+          let branchReady = true;
+          if (diff.files.length && this.host.config.git?.branchPerChat) {
+            try {
+              const error = await editBranch;
+              if (error) throw error;
+              if (!editBranch) {
+                const branch = await selectChatBranch(this.host.agentDir(agentId), turnChat ?? MAIN_CHAT, true);
+                this.host.log.append({ kind: "status", agentId, chat: turnChat, payload: { state: "chat_branch", branch } });
+              }
+            } catch (error) {
+              this.host.log.append({ kind: "status", agentId, chat: turnChat, payload: { state: "git_failed", text: String(error) } });
+              branchReady = false;
+            }
+          }
           this.host.log.append({
             kind: "turn_diff",
             ...(turnChat && turnChat !== MAIN_CHAT ? { chat: turnChat } : {}),
@@ -291,7 +324,7 @@ export class RuntimeTurns {
           // files changed through the shell (sed, a script, git apply) never came as a file_edit: log them from the diff,
           // so cards and counts match what changed (#316)
           this.backfillEdits(agentId, turnChat, diff.files.map((f) => f.path));
-          await this.commitTurn(agentId, diff.files.map((f) => f.path));
+          if (branchReady) await this.commitTurn(agentId, diff.files.map((f) => f.path), diff.patch, turnChat, turnPrompt);
         }
         // Learn from the turn once we know which files it touched — the files
         // sharpen candidate retrieval. Runs after the diff so recentTurnFiles
@@ -333,14 +366,14 @@ export class RuntimeTurns {
    * are staged, so two agents finishing close together each commit their own
    * work rather than whoever finishes second swallowing both.
    */
-  async commitTurn(agentId: string, files: string[]): Promise<void> {
+  async commitTurn(agentId: string, files: string[], diff = "", chat = this.turnChat.get(agentId) ?? MAIN_CHAT, turnPrompt?: string): Promise<void> {
     const delivery = this.host.config.git?.delivery ?? "none";
     if ((!this.host.config.git?.commitPerTurn && delivery === "none") || !files.length) return;
     try {
-      const events = this.host.log.list({ limit: 60 });
-      const prompt =
+      const events = this.host.log.list({ chat, limit: 60 });
+      const prompt = turnPrompt ??
         [...events].reverse().find((e) => e.kind === "message" && !e.agentId)?.payload.text ?? "";
-      const subject = String(prompt).split("\n")[0]!.slice(0, 68) || `work by ${agentId}`;
+      const { message: subject } = await draftCommit(String(prompt), diff, this.host.config.git?.messageModel);
       const cfg = this.host.config.agents.find((a) => a.id === agentId);
       const message =
         `${subject}\n\n` +
@@ -350,17 +383,19 @@ export class RuntimeTurns {
       this.host.log.append({
         kind: "status",
         agentId,
+        chat,
         payload: { state: "turn_committed", files: files.length, subject },
       });
       // "push" delivers each committed turn; "pr" leaves pushing to the
       // orchestra's branch (a PR per turn is the flood teams complain about).
       if (delivery === "push") {
         const pushed = await gitPush(this.host.agentDir(agentId));
-        this.host.log.append({ kind: "status", agentId, payload: { state: "turn_pushed", branch: pushed.branch } });
+        this.host.log.append({ kind: "status", agentId, chat, payload: { state: "turn_pushed", branch: pushed.branch } });
       }
     } catch (err) {
       // A commit that can't happen (not a repo, hooks failed, nothing staged
       // after filters) is a Console line, never a failed turn.
+      this.host.log.append({ kind: "status", agentId, chat, payload: { state: "git_failed", text: err instanceof GitError ? err.stderr || err.message : err instanceof Error ? err.message : String(err) } });
       logbook.warn(
         "git",
         `turn commit skipped for ${agentId}`,
@@ -404,9 +439,16 @@ export class RuntimeTurns {
   async sendMessage(text: string, agentId?: string, opts: TurnOptions = {}): Promise<TurnResult> {
     const chat = opts.chat ?? MAIN_CHAT;
     this.host.assertChatWritable(chat);
+    const branchPolicy = Boolean(this.host.config.git?.branchPerChat);
+    if (branchPolicy && (this.branchDispatch || this.busySince.size)) throw new Error("finish the current turn before switching chat branches");
+    if (branchPolicy) this.branchDispatch = true;
     this.sendingChats.set(chat, (this.sendingChats.get(chat) ?? 0) + 1);
-    try { return await this.send(text, agentId, opts); }
+    try {
+      if (branchPolicy) await this.settleBranches();
+      return await this.send(text, agentId, opts);
+    }
     finally {
+      if (branchPolicy) this.branchDispatch = false;
       const remaining = this.sendingChats.get(chat)! - 1;
       if (remaining) this.sendingChats.set(chat, remaining);
       else this.sendingChats.delete(chat);
@@ -609,6 +651,7 @@ export class RuntimeTurns {
         });
       }
       // Snapshot the tree so this prompt's changes can be attributed to it.
+      if (this.host.config.git?.branchPerChat) await selectChatBranch(this.host.agentDir(target), chat, false);
       this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
       assertPrepared();
       // The durable checkpoint also makes this turn rewindable after a restart.
@@ -705,6 +748,7 @@ export class RuntimeTurns {
       assertPrepared();
       if (!this.host.isCurrentAgent(agent)) throw new Error("native target was replaced before dispatch");
       // Snapshot/checkpoint is complete before the frozen context is observed.
+      if (this.host.config.git?.branchPerChat) await selectChatBranch(this.host.agentDir(target), chat, false);
       this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
       await this.checkpointBefore(target, text);
       assertPrepared();

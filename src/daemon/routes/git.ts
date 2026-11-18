@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { Express } from 'express';
-import { claudeText } from "../../core/claude-cli.js";
+import { agentDiffStats, describeChat, draftCommit, REVIEW_TEMPLATES, suggestChangelog } from "../../core/git-review.js";
 import { branches as gitBranches, checkout as gitCheckout, commit as gitCommit, discard as gitDiscard, GitError, fileDiff as gitFileDiff, init as gitInit, log as gitLog, push as gitPush, stage as gitStage, stagedDiff as gitStagedDiff, status as gitStatus, unstage as gitUnstage } from "../../core/git.js";
 import { logbook } from "../../core/logbook.js";
 import { asPaths } from '../system.js';
@@ -32,7 +32,7 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
         // beats anything we'd invent about an exit code.
         const message = err instanceof Error ? err.message : String(err);
         logbook.warn("git", message, err instanceof GitError ? err.stderr : err, rt.info.id);
-        res.status(400).json({ error: message });
+        res.status(400).json({ error: err instanceof GitError ? err.stderr || message : message });
       }
     });
 
@@ -121,27 +121,27 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
     }),
   );
 
-  // Draft a commit message from the staged diff, via the logged-in Claude CLI
-  // — the "Generate" affordance. No key; a no-op-ish 400 when Claude isn't
-  // there, so the field just stays empty and the user types their own.
-  app.post(
-    "/api/projects/:id/git/suggest-message",
-    withRuntime(async (rt, _req, res) => {
-      const diff = await gitStagedDiff(rt.info.dir).catch(() => "");
-      if (!diff.trim()) return void res.status(400).json({ error: "nothing to describe — stage or edit some files first" });
-      try {
-        const prompt =
-          "Write a single-line Conventional Commit subject (type(scope): summary, imperative mood, <72 chars) " +
-          "for this diff. Reply with ONLY the subject line, no quotes, no body.\n\n" +
-          diff;
-        const out = (await claudeText(prompt, { model: "haiku", timeoutMs: 30_000 })).trim();
-        const message = out.split("\n")[0]?.replace(/^["'`]|["'`]$/g, "").trim().slice(0, 120) ?? "";
-        if (!message) return void res.status(502).json({ error: "Claude returned nothing — type a message instead" });
-        res.json({ message });
-      } catch {
-        // claudeText's raw "claude exited N" helps no one at the commit box.
-        res.status(502).json({ error: "couldn't reach Claude to draft a message — type one instead" });
-      }
-    }),
-  );
+  app.get("/api/projects/:id/git/review-templates", withRuntime(async (_rt, _req, res) => {
+    res.json({ templates: REVIEW_TEMPLATES });
+  }));
+  app.get("/api/projects/:id/insights/diffs", withRuntime(async (rt, req, res) => {
+    res.json({ agents: agentDiffStats(rt.log.list({ kinds: ["turn_diff", "orchestra"], sinceTs: Number(req.query.since) || 0 })), from: "event-log" });
+  }));
+  app.post("/api/projects/:id/git/pr-description", withRuntime(async (rt, req, res) => {
+    const chat = String(req.body?.chat ?? "main");
+    if (!rt.chats().some(c => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
+    try { res.json(describeChat(rt.log.list({ chat }), String(req.body?.template ?? "standard"))); }
+    catch (error) { res.status(400).json({ error: String(error) }); }
+  }));
+  app.post("/api/projects/:id/git/changelog", withRuntime(async (rt, req, res) => {
+    try { res.json(await suggestChangelog(rt.info.dir, String(req.body?.branch ?? ""), String(req.body?.base ?? "HEAD"))); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
+  }));
+  app.post("/api/projects/:id/git/suggest-message", withRuntime(async (rt, req, res) => {
+    const diff = await gitStagedDiff(rt.info.dir).catch(() => "");
+    if (!diff.trim()) return void res.status(400).json({ error: "nothing to describe — stage or edit some files first" });
+    const chat = String(req.body?.chat ?? "main");
+    const prompt = rt.log.list({ chat, kinds: ["message"] }).filter(e => !e.agentId).at(-1)?.payload.text;
+    res.json(await draftCommit(String(prompt ?? ""), diff, rt.config.git?.messageModel));
+  }));
 }

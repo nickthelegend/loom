@@ -951,6 +951,8 @@ export class ProjectRuntime {
     defaultAgent?: string;
     git?: {
       commitPerTurn?: boolean;
+      branchPerChat?: boolean;
+      messageModel?: string;
       branchPerTask?: boolean;
       worktreePerAgent?: boolean;
       mergeOnHandoff?: boolean;
@@ -1010,6 +1012,7 @@ export class ProjectRuntime {
         for (const k of [
           "commitPerTurn",
           "branchPerTask",
+          "branchPerChat",
           "worktreePerAgent",
           "mergeOnHandoff",
         ] as const) {
@@ -1018,6 +1021,7 @@ export class ProjectRuntime {
             else delete g[k];
           }
         }
+        if (typeof patch.git.messageModel === "string") g.messageModel = patch.git.messageModel.trim().slice(0, 100) || undefined;
         if (patch.git.delivery !== undefined) {
           if (patch.git.delivery === "none") delete g.delivery;
           else g.delivery = patch.git.delivery as GitDelivery;
@@ -1068,6 +1072,8 @@ export class ProjectRuntime {
     defaultAgent: string;
     git: {
       commitPerTurn: boolean;
+      branchPerChat: boolean;
+      messageModel?: string;
       branchPerTask: boolean;
       worktreePerAgent: boolean;
       mergeOnHandoff: boolean;
@@ -1091,6 +1097,8 @@ export class ProjectRuntime {
       },
       git: {
         commitPerTurn: Boolean(this.config.git?.commitPerTurn),
+        branchPerChat: Boolean(this.config.git?.branchPerChat),
+        messageModel: this.config.git?.messageModel,
         branchPerTask: Boolean(this.config.git?.branchPerTask),
         worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
         mergeOnHandoff: Boolean(this.config.git?.mergeOnHandoff),
@@ -2571,6 +2579,8 @@ export class ProjectRuntime {
 
   /** Put one file back as a checkpoint had it (see checkpoints.restoreFile). */
   async rewindFile(id: string, file: string): Promise<Awaited<ReturnType<typeof checkpoints.restoreFile>>> {
+    await this.turns.settleBranches();
+    if (this.continuity?.store.activeReceipts().length) throw new Error("finish or reconcile native writers before reverting files");
     const busy = [...this.turns.busySince.keys()];
     if (busy.length) {
       throw new Error(`${busy.join(", ")} ${busy.length === 1 ? "is" : "are"} mid-turn — stop the turn first, or the file changes underneath it`);
@@ -2674,6 +2684,7 @@ export class ProjectRuntime {
 
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
+    if (event.kind === "file_edit" && event.agentId) this.turns.branchOnEdit(event.agentId);
     this.trackCost(event);
     void this.warnModelCap(event).catch(() => {});
     this.shield(event);
@@ -3660,10 +3671,10 @@ export class ProjectRuntime {
    * the baton (daemon/review.ts). The target is a file, free text, or —
    * by default — the uncommitted changes.
    */
-  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string; chat?: string }) {
+  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string; chat?: string; template?: string }) {
     this.reviews.check(input.agents); // who, before reading any diff
     const target = this.reviewTarget(input);
-    return this.reviews.start({ agents: input.agents, target, ...(input.focus ? { focus: input.focus } : {}), ...(input.chat ? { chat: input.chat } : {}) });
+    return this.reviews.start({ agents: input.agents, target, template: input.template, ...(input.focus ? { focus: input.focus } : {}), ...(input.chat ? { chat: input.chat } : {}) });
   }
 
   /** What a review reads: a file, free text, or the uncommitted changes. Throws when there's nothing to read. */

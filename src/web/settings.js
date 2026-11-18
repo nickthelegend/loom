@@ -1234,6 +1234,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         var host = document.getElementById("pspolicies"); if (!host) return;
         var POLS = [
           ["git.commitPerTurn", "Commit each turn", "one commit per turn, agent as co-author, staged by the turn\u2019s own files", (cfg.git || {}).commitPerTurn],
+          ["git.branchPerChat", "Branch per chat", "create a chat branch on its first edit", (cfg.git || {}).branchPerChat],
           ["git.branchPerTask", "Branch per card", "dragging a card to Working checks out task/<id>-<slug>", (cfg.git || {}).branchPerTask],
           ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \u2014 applies to agents spawned from now on", (cfg.git || {}).worktreePerAgent],
           ["git.mergeOnHandoff", "Merge on handoff", "with worktrees on: the baton carries agent/&lt;from&gt; into the next agent\u2019s checkout \u2014 refused when either side has uncommitted work; a conflict stops a route", (cfg.git || {}).mergeOnHandoff],

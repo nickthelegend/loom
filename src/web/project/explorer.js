@@ -1,3 +1,4 @@
+import { gitReviewHtml, bindGitReview } from "./git-review.js";
 import { brandMark,wireRoleEditors } from '../agents.js';
 import { api } from '../connection.js';
 import { visibleFiles } from '../diff.js';
@@ -315,6 +316,7 @@ export function createExplorer(view) {
         '<button class="iconbtn xs" id="gitpush" title="push to the remote" aria-label="push">' + ICONS.up + "</button>" +
         "</div>";
 
+      html += gitReviewHtml(view.pid, state.chat || "main");
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
       // Loom's own working files (.loom/: the event log, sessions, memory) are
       // not your changes. Folded into one row, with the fix: ignore them.
@@ -406,6 +408,7 @@ export function createExplorer(view) {
 
     /** Every control in the Source control view. */
     function wireGitRows(el){
+      bindGitReview(view.pid, state.chat || "main");
       function act(path, body, said){
         return api("/api/projects/" + view.pid + "/git/" + path, { method: "POST", body: JSON.stringify(body) })
           .then(function(){ refreshGit(); if (said) toast(said); })
@@ -517,8 +520,8 @@ export function createExplorer(view) {
       var gen = document.getElementById("gitgen");
       if (gen) gen.onclick = function(){
         gen.disabled = true; gen.classList.add("busy");
-        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: "{}" })
-          .then(function(r){ scmDraft = r.message; if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
+        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: JSON.stringify({ chat: state.chat || "main" }) })
+          .then(function(r){ scmDraft = r.message; msgbox = document.getElementById("gmsg"); if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
           .catch(function(e){ toast(e.message); })
           .then(function(){ gen.disabled = false; gen.classList.remove("busy"); });
       };

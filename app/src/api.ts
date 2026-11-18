@@ -1306,6 +1306,7 @@ export const getSpans = (c: Creds, id: string, agentId?: string, limit = 200) =>
 /** Fleet health: one score per agent plus the overall, scored from their own spans. */
 /** One agent's record: turns and how often it finished — and, from what Loom checked, how often its "done" held up. */
 export interface Standing {
+  diff?: { added: number; removed: number; files: number };
   agentId: string;
   turns: number;
   successRate: number;
@@ -1701,6 +1702,8 @@ export interface ProjectConfig {
   git: {
     delivery: GitDelivery;
     commitPerTurn?: boolean;
+    branchPerChat?: boolean;
+    messageModel?: string;
     branchPerTask?: boolean;
     worktreePerAgent?: boolean;
   };

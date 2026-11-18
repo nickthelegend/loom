@@ -1008,7 +1008,16 @@ export class DaemonClient {
   }
 
   /** Read-only reviews by several agents at once (daemon/review.ts). No file and no text: the uncommitted changes. */
-  startReview(id: string, body: { agents: string[]; file?: string; text?: string; focus?: string }): Promise<{ review: import("./review.js").ReviewState }> {
+  describePr(id: string, chat = "main", template = "standard"): Promise<{ description: string; checklist: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/pr-description`, { chat, template });
+  }
+  suggestChangelog(id: string, branch: string, base = "HEAD"): Promise<{ entry: string; commits: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/changelog`, { branch, base });
+  }
+  diffStats(id: string): Promise<{ agents: Array<{ agentId: string; added: number; removed: number; files: number; turns: number }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/diffs`);
+  }
+  startReview(id: string, body: { agents: string[]; file?: string; text?: string; focus?: string; template?: string }): Promise<{ review: import("./review.js").ReviewState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/reviews`, body);
   }
 

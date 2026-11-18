@@ -46,8 +46,11 @@
 
 import { execFile } from "./process.js";
 import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { TurnDiff } from "./worktree.js";
 
-import { GitError } from "./git.js";
+import { GitError, safeRelPath } from "./git.js";
 
 /** Where checkpoints live. Not under refs/heads, so nothing lists them. */
 const REF_PREFIX = "refs/loom/checkpoints";
@@ -109,7 +112,7 @@ async function quiet(args: string[], cwd: string): Promise<string> {
 /** A temporary index path for this capture. Never the repository's own. */
 async function tmpIndex(dir: string, id: string): Promise<string> {
   const gitDir = (await run(["rev-parse", "--absolute-git-dir"], dir)).trim();
-  return `${gitDir}/loom-checkpoint-${id}.index`;
+  return path.join(gitDir, `loom-checkpoint-${id}-${randomUUID()}.index`);
 }
 
 /**
@@ -224,6 +227,31 @@ export async function find(dir: string, id: string): Promise<Checkpoint | null> 
   return (await list(dir)).find((c) => c.id === id) ?? null;
 }
 
+/** Compare actual trees, including files already dirty before the turn and edits committed by an agent. */
+export async function turnDiff(dir: string, id: string): Promise<TurnDiff | null> {
+  const checkpoint = await find(dir, id);
+  if (!checkpoint) return null;
+  const index = await tmpIndex(dir, newId());
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    await run(["read-tree", "HEAD"], dir, env);
+    await run(["add", "-A", "--", "."], dir, env);
+    const tree = (await run(["write-tree"], dir, env)).trim();
+    const args = ["diff", "--no-ext-diff", "--no-renames"];
+    const paths = [checkpoint.commit, tree, "--", ".", ":(exclude).loom"];
+    const names = (await run([...args, "--name-status", "-z", ...paths], dir)).split("\0");
+    const files: TurnDiff["files"] = [];
+    for (let i = 0; i + 1 < names.length; i += 2) if (names[i + 1]) files.push({ status: names[i]! + " ", path: names[i + 1]! });
+    if (!files.length) return null;
+    let added = 0, removed = 0;
+    for (const row of (await run([...args, "--numstat", "-z", ...paths], dir)).split("\0")) {
+      const [a, r] = row.split("\t"); added += Number(a) || 0; removed += Number(r) || 0;
+    }
+    const patch = await run([...args, ...paths], dir);
+    return { files, added, removed, patch: patch.slice(0, 12000), truncated: patch.length > 12000 };
+  } finally { await fs.promises.rm(index, { force: true }); }
+}
+
 export interface RewindPreview { checkpoint: Checkpoint; changed: string[]; diff: string }
 
 /** Compare with a temporary index so untracked files are included without changing the real index or refs. */
@@ -291,19 +319,25 @@ export async function restore(dir: string, id: string): Promise<RestoreResult> {
 export async function restoreFile(dir: string, id: string, file: string): Promise<{ restored: Checkpoint; undo: Checkpoint; path: string; removed: boolean }> {
   const target = await find(dir, id);
   if (!target) throw new GitError(`no checkpoint "${id}" in this project`, "");
-  const rel = file.replace(/^\.?\/+/, "");
-  if (!rel || rel.split("/").includes("..")) throw new GitError(`"${file}" isn't a path inside this project`, "");
+  let rel: string;
+  try { rel = safeRelPath(dir, file); }
+  catch { throw new GitError(`"${file}" isn't a path inside this project`, ""); }
+  if (path.isAbsolute(file) || rel.split("/").includes(".git") || rel.startsWith(":")) throw new GitError("not a restorable project file", "");
+  // A parent symlink would redirect deletion outside the checkout.
+  for (let parent = path.dirname(path.join(dir, rel)); parent !== path.resolve(dir); parent = path.dirname(parent)) {
+    if (fs.existsSync(parent) && fs.lstatSync(parent).isSymbolicLink()) throw new GitError("cannot restore through a symlink", "");
+  }
   const undo = await capture(dir, `before putting back ${rel.slice(0, 80)}`);
   if (!undo) throw new GitError("couldn't save the current files first — nothing was changed", "");
   const existed = (await quiet(["cat-file", "-t", `${target.commit}:${rel}`], dir)) === "blob";
   if (existed) {
-    await run(["checkout", target.commit, "--", rel], dir);
+    await run(["--literal-pathspecs", "checkout", target.commit, "--", rel], dir);
   } else {
-    await quiet(["rm", "-q", "--cached", "--ignore-unmatch", "--", rel], dir);
+    await quiet(["--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", rel], dir);
     await fs.promises.rm(`${dir.replace(/\/+$/, "")}/${rel}`, { force: true });
   }
   // checkout staged it; leave it reading as a plain edit, like a rewind does
-  await quiet(["reset", "-q", "HEAD", "--", rel], dir);
+  await quiet(["--literal-pathspecs", "reset", "-q", "HEAD", "--", rel], dir);
   return { restored: target, undo, path: rel, removed: !existed };
 }
 
