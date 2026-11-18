@@ -158,6 +158,7 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
       const events = rt.log.list({ chat, limit: 20_000 });
       const html = threadReplay(events, { project: rt.info.name, chat: info.title || "Chat" });
       const file = `${rt.info.name}-${info.title || chat}`.replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 80) || "replay";
+      if (req.query.format === "json") return void res.json({ filename: `${file}.html`, content: html });
       res.setHeader("content-type", "text/html; charset=utf-8");
       res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
       res.setHeader("x-content-type-options", "nosniff");

@@ -267,9 +267,15 @@ export class DaemonClient {
     return this.request("GET", "/api/projects");
   }
 
-  addProject(dir: string, name?: string): Promise<{ project: { id: string } }> {
-    return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
+  addProject(dir: string, name?: string, template?: string): Promise<{ project: { id: string } }> {
+    return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}), ...(template ? { template } : {}) });
   }
+
+  templates(): Promise<{ templates: Array<{ name: string; description: string }> }> { return this.request("GET", "/api/templates"); }
+  validateConfig(id: string): Promise<import("../core/config-validation.js").ConfigValidation> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/config/validate`); }
+  aliases(): Promise<{ aliases: import("../core/aliases.js").CommandAliases }> { return this.request("GET", "/api/aliases"); }
+  saveAlias(name: string, args: string[]): Promise<unknown> { return this.request("PUT", "/api/aliases", { name, args }); }
+  removeAlias(name: string): Promise<unknown> { return this.request("DELETE", "/api/aliases", { name }); }
 
   onboarding(): Promise<OnboardingReport> { return this.request("GET", "/api/onboarding"); }
 
@@ -1148,6 +1154,24 @@ export class DaemonClient {
 
   revokeClient(clientId: string): Promise<{ revoked: boolean }> {
     return this.request("DELETE", `/api/pair/clients/${encodeURIComponent(clientId)}`);
+  }
+
+  /** Wait for subscription acknowledgement before sending work that may finish immediately. */
+  async subscribeFrames(project: string, onFrame: (frame: Record<string, any>) => void): Promise<() => void> {
+    const params = new URLSearchParams({ project });
+    const ws = new WebSocket(`ws://${this.cfg.host}:${this.cfg.port}/ws?${params}`, [`loom.bearer.${this.cfg.adminToken}`]);
+    return new Promise((resolve, reject) => {
+      let ready = false;
+      const timer = setTimeout(() => { ws.terminate(); reject(new Error("event subscription timed out")); }, 5000);
+      ws.on("message", data => {
+        let frame: Record<string, any>;
+        try { frame = JSON.parse(String(data)); } catch { return; }
+        if (frame.type === "hello" && !ready) { ready = true; clearTimeout(timer); resolve(() => ws.close()); }
+        else if (frame.projectId === project) onFrame(frame);
+      });
+      ws.on("error", error => { if (!ready) { clearTimeout(timer); reject(error); } });
+      ws.on("close", () => { if (!ready) { clearTimeout(timer); reject(new Error("event subscription closed")); } });
+    });
   }
 
   /** Live event stream; returns a close function. */

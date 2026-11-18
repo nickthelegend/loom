@@ -1,3 +1,4 @@
+import { ProjectTools } from "./cli-tools";
 /**
  * The three screens: Pair, Board, Project — quiet graphite.
  *
@@ -1372,6 +1373,7 @@ export function ProjectScreen(props: {
             {project.needsInput ? "needs input" : usd(project.costUsd) || "idle"}
           </Text>
         </View>
+        <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (

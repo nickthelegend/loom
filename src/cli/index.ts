@@ -6,6 +6,10 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
+import { randomUUID } from "node:crypto";
+import { readAliases, expandAlias } from "../core/aliases.js";
+import { completionWords, completionScript } from "./completions.js";
+import { streamTurns, writeJson, captureDeltas } from "./ndjson.js";
 import { formatOnboarding } from "../core/onboarding.js";
 import { listFleets, saveFleet, removeFleet, expandSavedFleets } from "../core/fleets.js";
 import { scoreboardWindow, bestFleet } from "../core/scoreboard.js";
@@ -417,12 +421,19 @@ program
   .command("init")
   .description("make the current directory a Loom project")
   .option("--name <name>", "project name (default: directory name)")
+  .option("--template <name>", "starter template: web, node or library")
+  .option("--list-templates", "list built-in starter templates")
   .option("--gitignore", "add .loom/ to .gitignore without asking")
   .option("--no-gitignore", "leave .gitignore alone")
-  .action(async (opts: { name?: string; gitignore?: boolean }) => {
+  .action(async (opts: { name?: string; gitignore?: boolean; template?: string; listTemplates?: boolean }) => {
+    if (opts.listTemplates) {
+      const { starterTemplates } = await import("../core/starter-templates.js");
+      for (const t of starterTemplates()) console.log(`${t.name} — ${t.description}`);
+      return;
+    }
     const client = await ensureDaemon();
     const dir = process.cwd();
-    const res = await client.addProject(dir, opts.name);
+    const res = await client.addProject(dir, opts.name, opts.template);
     const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
     const defaults = (await import("../core/user-defaults.js")).readUserDefaults();
     const applied = await applyUserDefaults(client, res.project.id, dir, defaults);
@@ -619,9 +630,11 @@ program
   .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
   .option("--free", "every free model the providers have, up to --limit")
   .option("--limit <n>", "how many models --free may use", "3")
+  .option("--json", "stream NDJSON events and one outcome per model until finished")
+  .option("--timeout <seconds>", "maximum time to stream", "1800")
   .option("--title <title>", "what to call the threads")
   .option("--no-briefing", "don't send the project's memory brief with it")
-  .action(async (words: string[], opts: { models?: string; free?: boolean; limit?: string; title?: string; briefing?: boolean }) => {
+  .action(async (words: string[], opts: { models?: string; free?: boolean; limit?: string; title?: string; briefing?: boolean; json?: boolean; timeout: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     let models = (opts.models ?? "").split(",").map((m) => m.trim()).filter(Boolean);
@@ -642,17 +655,23 @@ program
     } catch (err) {
       if (err instanceof DaemonError) { /* an older daemon without /api/providers: let the asks say it */ } else throw err;
     }
+    const live = opts.json ? await captureDeltas(client, project.id) : undefined;
     try {
+      const since = opts.json ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
       const { asked } = await client.askModels(project.id, words.join(" "), models, {
         ...(opts.title ? { title: opts.title } : {}),
         ...(opts.briefing === false ? { briefing: false } : {}),
       });
+      if (opts.json) {
+        writeJson({ type: "accepted", project: project.id, asked });
+        live?.select(asked);
+        process.exitCode = await streamTurns(client, project.id, since, asked, Math.max(1, Number(opts.timeout) || 1800) * 1000);
+        return;
+      }
       console.log(pc.cyan(`\u279c asked ${asked.length} model${asked.length === 1 ? "" : "s"}:`));
       for (const a of asked) console.log(`  ${pc.bold(a.model)} ${pc.dim(a.chat)}`);
       console.log(pc.dim("answers stream into their own threads \u2014 loom watch, or open the app"));
-    } catch (err) {
-      fail(err instanceof Error ? err.message : String(err));
-    }
+    } finally { live?.close(); }
   });
 
 program
@@ -708,7 +727,17 @@ program
   .command("config <key> [value]")
   .description("CLI settings. auto-restart on|off: whether a newer CLI swaps an older daemon for its own build when no turns are running (off keeps a long unattended chain on the build it started with)")
   .action(async (key: string, value: string | undefined) => {
-    if (key !== "auto-restart") fail(`no setting "${key}" — there's auto-restart`);
+    if (key === "validate") {
+      if (value) throw new Error("usage: loom config validate");
+      const { validateConfigFile } = await import("../core/config-validation.js");
+      const result = validateConfigFile(currentProjectDir() ?? process.cwd());
+      for (const e of result.errors) console.error(`${e.path}: ${e.message}`);
+      for (const w of result.warnings) console.error(`warning: ${w}`);
+      console.log(result.valid ? ".loom/config.json is valid" : ".loom/config.json is invalid");
+      process.exitCode = result.valid ? 0 : 1;
+      return;
+    }
+    if (key !== "auto-restart") fail(`no setting "${key}" — there's auto-restart or validate`);
     const { autoRestartEnabled, setAutoRestart } = await import("../core/daemon-swap.js");
     if (value !== undefined) {
       if (!["on", "off"].includes(value)) fail("auto-restart is on or off");
@@ -1580,11 +1609,34 @@ program
 program
   .command("watch")
   .description("tail this project's events live — turns, handoffs, memory, subtasks")
+  .option("--run <id>", "follow an Orchestra run until it ends")
   .option("--all", "watch every project, prefixed with the project id")
   .option("--json", "one JSON event per line, for piping")
-  .action(async (opts: { all?: boolean; json?: boolean }) => {
+  .action(async (opts: { all?: boolean; json?: boolean; run?: string }) => {
+    if (opts.run && opts.all) throw new Error("--run and --all cannot be used together");
     const client = await ensureDaemon();
     const project = opts.all ? null : await currentProject(client);
+    if (opts.run) {
+      let previous: import("../core/orchestra.js").OrchestraRun | null = null, stopped = false;
+      const stop = () => { stopped = true; };
+      process.once("SIGINT", stop); process.once("SIGTERM", stop);
+      try {
+        while (!stopped) {
+          const { run } = await client.orchestraRun(project!.id, opts.run);
+          for (const event of runEvents(previous, run)) {
+            if (opts.json) writeJson(event); else console.log(formatProgress(event));
+          }
+          previous = run;
+          if (["completed", "failed", "aborted", "moved"].includes(run.status)) {
+            process.exitCode = run.status === "failed" || run.status === "aborted" ? 1 : 0;
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+        process.exitCode = 130;
+      } finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+      return;
+    }
 
     /**
      * One line per event, shaped for a human at a terminal. Everything else in
@@ -3842,8 +3894,8 @@ async function sendWithHandoffConfirm(
   interactive = true,
   fresh = false,
   handoff = false,
-  selection: { model?: string; effort?: string } = {},
-): Promise<{ agentId: string } | null> {
+  selection: { model?: string; effort?: string; requestId?: string } = {},
+): Promise<Awaited<ReturnType<DaemonClient["send"]>> | null> {
   try {
     return await client.send(projectId, text, agentId, { fresh, ...selection });
   } catch (err) {
@@ -3889,7 +3941,7 @@ program
   .option("--effort <level>", "reasoning effort for this message only, where supported")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
   .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 75 interrupted (the daemon restarted), 124 timed out")
-  .option("--json", "with --wait: print the outcome as one JSON object")
+  .option("--json", "stream NDJSON events and the outcome; implies --wait")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
   .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
   .option("--handoff", "with --agent: take the baton from whoever holds it, without asking")
@@ -3905,55 +3957,62 @@ program
         console.error(pc.yellow(`⚠ ${target}'s session here is ${Math.round(weight.tokens / 1000)}k tokens, last used ${ago} ago — its cache has likely expired, so this turn re-reads all of it` +
           `${weight.estUsd !== undefined ? ` (~${fmtUsd(weight.estUsd)} est.)` : ""}. --fresh starts a new session instead.`));
         // a person at a terminal is asked, --wait or not; a script only gets the warning (#300)
-        if (process.stdin.isTTY && process.stdout.isTTY) {
+        if (process.stdin.isTTY && process.stdout.isTTY && !opts.json) {
           const go = await confirm(pc.yellow("send it to the existing session anyway?"));
           if (!go) return void console.log(pc.dim(`not sent — loom send --fresh${opts.agent ? ` -a ${opts.agent}` : ""} "…"`));
         }
       }
     }
     // where the log is now, so the wait reads only what this send causes (#254)
-    const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
+    const since = opts.wait || opts.json ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
     // a question needs a person at a terminal — not a script, and never --json output
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json;
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff), { model: opts.model, effort: opts.effort });
-    if (!result) return;
-    if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
-    const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
-    let seen: LoomEvent[] = [], outcome: TurnOutcome | null = null, cursor = since;
-    // the daemon this turn runs in: if it goes away or comes back as another process, the turn is gone
-    const daemonPid = await client.version().then((v) => v.pid).catch(() => null);
-    let lastPidCheck = Date.now(), interrupted = false;
-    while (Date.now() < deadline && !outcome) {
-      try {
-        const { events } = await client.events(project.id, cursor, 500);
-        if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
-        outcome = turnOutcome(seen, result.agentId, since);
-        if (!outcome && daemonPid && Date.now() - lastPidCheck > 5000) {
-          lastPidCheck = Date.now();
-          if ((await client.version()).pid !== daemonPid) interrupted = true;
-        }
-      } catch {
-        interrupted = true; // the daemon stopped answering (or answered "event log is closed") mid-turn
+    const live = opts.json ? await captureDeltas(client, project.id) : undefined;
+    try {
+      const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff), { model: opts.model, effort: opts.effort, requestId: randomUUID() });
+      if (!result) return;
+      if (opts.json) {
+        writeJson({ type: "accepted", project: project.id, ...result });
+        live?.select([{ ...result, chat: "main" }]);
+        process.exitCode = await streamTurns(client, project.id, since, [{ ...result, chat: "main" }], Math.max(1, Number(opts.timeout) || 1800) * 1000);
+        return;
       }
-      if (interrupted) break;
-      if (!outcome) await new Promise((r) => setTimeout(r, 400));
-    }
-    if (interrupted && !outcome) {
-      // EX_TEMPFAIL: not the agent's failure, and worth trying again
-      process.exitCode = 75;
-      const again = `loom send -a ${result.agentId} --wait "continue where you left off"`;
-      if (opts.json) return void console.log(JSON.stringify({ status: "interrupted", agent: result.agentId, reason: "the Loom daemon restarted or stopped during the turn", resume: again }));
-      return void console.error(pc.yellow(`⚠ the Loom daemon restarted or stopped while ${result.agentId} was working — the turn was interrupted. ` +
-        `What it did so far is still in the working tree. To carry on: ${again}`));
-    }
-    process.exitCode = exitCodeFor(outcome);
-    if (opts.json) return void console.log(JSON.stringify(outcome ?? { status: "timeout", agent: result.agentId }));
-    if (!outcome) return void console.error(pc.yellow(`timed out after ${opts.timeout}s — ${result.agentId} is still working (loom log --follow)`));
-    if (outcome.reply) console.log(outcome.reply);
-    const tail = [outcome.durationMs ? `${(outcome.durationMs / 1000).toFixed(1)}s` : "", outcome.costUsd ? `$${outcome.costUsd.toFixed(4)}` : ""].filter(Boolean).join(" · ");
-    if (outcome.status === "error") console.error(pc.red(`✗ ${outcome.agent}: ${outcome.error}`));
-    else if (outcome.status === "needs_input") console.error(pc.yellow(`? ${outcome.agent} asks: ${outcome.question}`));
-    else console.error(pc.dim(`✓ ${outcome.agent}${tail ? ` · ${tail}` : ""}`));
+      if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
+      const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
+      let seen: LoomEvent[] = [], outcome: TurnOutcome | null = null, cursor = since;
+      // the daemon this turn runs in: if it goes away or comes back as another process, the turn is gone
+      const daemonPid = await client.version().then((v) => v.pid).catch(() => null);
+      let lastPidCheck = Date.now(), interrupted = false;
+      while (Date.now() < deadline && !outcome) {
+        try {
+          const { events } = await client.events(project.id, cursor, 500);
+          if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
+          outcome = turnOutcome(seen, result.agentId, since);
+          if (!outcome && daemonPid && Date.now() - lastPidCheck > 5000) {
+            lastPidCheck = Date.now();
+            if ((await client.version()).pid !== daemonPid) interrupted = true;
+          }
+        } catch {
+          interrupted = true; // the daemon stopped answering (or answered "event log is closed") mid-turn
+        }
+        if (interrupted) break;
+        if (!outcome) await new Promise((r) => setTimeout(r, 400));
+      }
+      if (interrupted && !outcome) {
+        // EX_TEMPFAIL: not the agent's failure, and worth trying again
+        process.exitCode = 75;
+        const again = `loom send -a ${result.agentId} --wait "continue where you left off"`;
+        return void console.error(pc.yellow(`⚠ the Loom daemon restarted or stopped while ${result.agentId} was working — the turn was interrupted. ` +
+          `What it did so far is still in the working tree. To carry on: ${again}`));
+      }
+      process.exitCode = exitCodeFor(outcome);
+      if (!outcome) return void console.error(pc.yellow(`timed out after ${opts.timeout}s — ${result.agentId} is still working (loom log --follow)`));
+      if (outcome.reply) console.log(outcome.reply);
+      const tail = [outcome.durationMs ? `${(outcome.durationMs / 1000).toFixed(1)}s` : "", outcome.costUsd ? `$${outcome.costUsd.toFixed(4)}` : ""].filter(Boolean).join(" · ");
+      if (outcome.status === "error") console.error(pc.red(`✗ ${outcome.agent}: ${outcome.error}`));
+      else if (outcome.status === "needs_input") console.error(pc.yellow(`? ${outcome.agent} asks: ${outcome.question}`));
+      else console.error(pc.dim(`✓ ${outcome.agent}${tail ? ` · ${tail}` : ""}`));
+    } finally { live?.close(); }
   });
 
 program
@@ -4839,16 +4898,24 @@ program
 
 program
   .command("export")
-  .description("write a chat as Markdown — prompts, replies, what was done, what changed")
+  .description("write a chat as Markdown or standalone HTML")
+  .option("--format <format>", "markdown or html", "markdown")
   .option("--chat <chat>", "the chat's id or title (default: main)", "main")
   .option("--out <file>", "write to a file instead of printing")
-  .action(async (opts: { chat: string; out?: string }) => {
+  .action(async (opts: { chat: string; out?: string; format: string }) => {
+    if (!["markdown", "md", "html"].includes(opts.format)) throw new Error("format must be markdown or html");
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const { chats } = await client.chats(project.id);
     const want = opts.chat.trim().toLowerCase();
     const chat = chats.find((c) => c.id === opts.chat) ?? chats.find((c) => c.title.toLowerCase() === want);
     if (!chat) fail(`no chat "${opts.chat}" in ${project.name} — try one of: ${chats.map((c) => c.title).join(", ")}`);
+    if (opts.format === "html") {
+      const html = await client.replay(project.id, chat!.id);
+      if (opts.out) { fs.writeFileSync(opts.out, html); console.error(`exported ${opts.out}`); }
+      else process.stdout.write(html);
+      return;
+    }
     let events: LoomEvent[] = [];
     let before: number | undefined;
     for (let page = 0; page < 20; page++) {
@@ -4994,20 +5061,45 @@ program
     for (const r of rows) console.log(r);
   });
 
-program
-  .command("completion")
-  .description("print a shell completion script: loom completion zsh >> ~/.zshrc (or bash >> ~/.bashrc)")
-  .argument("<shell>", "zsh or bash")
-  .action((shell: string) => {
-    const names = program.commands.map((c) => c.name()).filter((n) => n && n !== "completion").sort();
-    if (shell === "bash") {
-      console.log(`complete -W "${names.join(" ")} completion" loom`);
-    } else if (shell === "zsh") {
-      console.log(`_loom() { compadd -- ${names.join(" ")} completion; }\ncompdef _loom loom 2>/dev/null || { autoload -Uz compinit && compinit && compdef _loom loom; }`);
-    } else fail(`unknown shell "${shell}" — zsh or bash`);
+program.command("alias")
+  .description("list, set or remove user command aliases; arguments are passed literally, never to a shell")
+  .argument("[action]", "list, set or rm", "list")
+  .argument("[name]", "alias name")
+  .argument("[args...]", "command and arguments (after --)")
+  .option("--json", "print aliases as JSON")
+  .action(async (action: string, name: string | undefined, args: string[], opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    if (action === "set") {
+      if (!name || !args.length) throw new Error("usage: loom alias set <name> -- <command> [arguments...]");
+      if (program.commands.some(c => c.name() === name || c.aliases().includes(name))) throw new Error("an alias cannot replace a built-in command");
+      await client.saveAlias(name, args);
+    } else if (action === "rm") {
+      if (!name) throw new Error("usage: loom alias rm <name>");
+      await client.removeAlias(name);
+    } else if (action !== "list") throw new Error("alias action must be list, set or rm");
+    const { aliases } = await client.aliases();
+    if (opts.json) console.log(JSON.stringify(aliases));
+    else for (const [key, value] of Object.entries(aliases)) console.log(`${key} → loom ${value.map(v => JSON.stringify(v)).join(" ")}`);
   });
 
-program.parseAsync().catch((err) => {
+program.command("completion")
+  .description("print completions for bash, zsh or fish")
+  .argument("<shell>", "bash, zsh, fish, or candidates")
+  .argument("[words...]", "command words for candidate lookup")
+  .action((shell: string, words: string[]) => {
+    if (shell === "candidates") console.log(completionWords(program, expandAlias(words, readAliases(), program.commands.map(c => c.name())), Object.keys(readAliases())).join("\n"));
+    else console.log(completionScript(shell));
+  });
+
+async function main() {
+  const args = process.argv.slice(2);
+  // Built-ins always win, including when an alias file was written by an older CLI.
+  const commands = program.commands.flatMap(c => [c.name(), ...c.aliases()]);
+  const expanded = args[0] && !commands.includes(args[0]) && !args[0].startsWith("-") ? expandAlias(args, readAliases(), commands) : args;
+  await program.parseAsync(expanded, { from: "user" });
+}
+
+main().catch((err) => {
   console.error(pc.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
   process.exit(1);
 });

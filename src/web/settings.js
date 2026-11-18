@@ -42,6 +42,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "accounts", label: "Accounts", icon: ICONS.team },
+      { id: "aliases", label: "CLI aliases", icon: ICONS.console },
       { id: "agentskills", label: "Loom for agents", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
@@ -1013,6 +1014,27 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     }
 
     // ---- About --------------------------------------------------------------
+    function renderAliases(){
+      busy();
+      sapi("/api/aliases").then(function(r){
+        pane.innerHTML = '<div class="snote">Aliases on this computer. Arguments are passed literally to Loom; built-in commands take precedence.</div>' +
+          '<div id="aliasrows">' + Object.keys(r.aliases).map(function(name){
+            return '<div class="psrow"><div class="psinfo"><b>' + esc(name) + '</b><code>' + esc(r.aliases[name].join(" ")) + '</code></div><button class="btn xs outline" data-alias-rm="' + esc(name) + '">Remove</button></div>';
+          }).join("") + '</div><div class="field"><label for="aliasname">Name</label><input id="aliasname" placeholder="review"></div>' +
+          '<div class="field"><label for="aliasargs">Command arguments, one per line</label><textarea id="aliasargs" placeholder="send&#10;--wait&#10;Review my changes"></textarea></div>' +
+          '<button class="btn outline" id="aliassave">Save alias</button><div class="snote" id="aliaserror" role="status"></div>';
+        function change(method, body){
+          sapi("/api/aliases", { method: method, body: JSON.stringify(body) }).then(renderAliases).catch(function(e){
+            var out = pane.querySelector("#aliaserror"); if (out) out.textContent = e.message;
+          });
+        }
+        pane.querySelector("#aliassave").onclick = function(){
+          change("PUT", { name: pane.querySelector("#aliasname").value.trim(), args: pane.querySelector("#aliasargs").value.split("\n") });
+        };
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-alias-rm]"), function(b){ b.onclick = function(){ change("DELETE", { name: b.getAttribute("data-alias-rm") }); }; });
+      }).catch(fail);
+    }
+
     function renderAbout(){
       busy();
       sapi("/api/health").then(function(hh){
@@ -1095,6 +1117,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
       else if (cur === "accounts") renderAccounts();
+      else if (cur === "aliases") renderAliases();
       else if (cur === "agentskills") renderAgentSkills();
       else if (cur === "cloud") renderCloud();
       else if (cur === "bridges") renderBridges();
@@ -1154,6 +1177,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           "</div></div>" + '<div class="pscheck" data-chkout="' + esc(a.id) + '"></div>';
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \u00b7 baton " + esc(p.holder || "\u2014") + "</div></div>" +
+        '<div class="psrow"><span class="psinfo">Project config</span><button class="btn xs outline" id="psvalidate">Validate config</button></div><div class="pshint psvalidation" id="psvalidation" role="status"></div>' +
         '<div class="pssec">Agents \u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
         '<div class="pshint">Off agents stay in the roster but can\u2019t take turns or hold the baton. Changes land on the next turn \u2014 no restart. You can\u2019t switch off the baton holder; hand it off first.</div>' +
         '<div class="pssec" style="margin-top:14px">Tools \u2014 skills and MCP servers</div><div class="psrows">' +
@@ -1165,6 +1189,13 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
         '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
+      document.getElementById("psvalidate").onclick = function(){
+        var button = this, out = document.getElementById("psvalidation");
+        button.disabled = true;
+        api("/api/projects/" + encodeURIComponent(pid) + "/config/validate").then(function(r){
+          out.textContent = [r.valid ? ".loom/config.json is valid" : ".loom/config.json is invalid"].concat(r.errors.map(function(e){ return e.path + ": " + e.message; }), r.warnings).join("\n");
+        }).catch(function(e){ out.textContent = e.message; }).finally(function(){ button.disabled = false; });
+      };
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
       drawPsStore();
       api("/api/projects/" + pid + "/skills").then(function(r){
@@ -1406,6 +1437,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             '<input id="npname" spellcheck="false" autocomplete="off" placeholder="e.g. landing page">' +
             '<span class="ferr" id="nperr" role="alert"></span>' +
             '<span class="hintx">A new folder under your Loom projects folder, with git and a first commit.</span></div>' +
+          '<div class="field"><label for="nptemplate">Starter template</label><select id="nptemplate"><option value="">Empty project</option></select><span class="hintx" id="nptemplatehint"></span></div>' +
           '<div class="field"><label>Agents <span class="opt">who works here</span></label>' +
             '<div class="npagents" id="npagents"><div class="obsub">looking for agent CLIs…</div></div>' +
             '<span class="hintx">Tick none to use every agent found on this machine. Same agent twice? Raise the count — each gets its own name.</span></div>' +
@@ -1433,6 +1465,12 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       '<button class="btn primary" id="pcreate">Create project<span class="kbd">⌘↵</span></button></div>' +
     "</div>";
     document.body.appendChild(scrim);
+    api("/api/templates").then(function(r){
+      if (!scrim.isConnected) return;
+      var select = scrim.querySelector("#nptemplate");
+      select.innerHTML += r.templates.map(function(t){ return '<option value="' + esc(t.name) + '">' + esc(t.name + " — " + t.description) + '</option>'; }).join("");
+    }).catch(function(e){ if (scrim.isConnected) scrim.querySelector("#nptemplatehint").textContent = e.message; });
+
     var closed = false;
     function close(){ closed = true; scrim.remove(); document.removeEventListener("keydown", onKey); }
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
@@ -1533,7 +1571,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       // a model agent with no model refuses every turn: ask now, not at the first message
       if (picks.model && picks.model.on && !picks.model.model.trim()) return fieldErr("nperr", null, "Model (API) needs a model id — e.g. openrouter/anthropic/claude-opus-5-5.");
       busy("Creating…");
-      api("/api/projects/new", { method: "POST", body: JSON.stringify(agents.length ? { name: name, agents: agents } : { name: name }) })
+      api("/api/projects/new", { method: "POST", body: JSON.stringify(Object.assign({ name: name, template: document.getElementById("nptemplate").value || undefined }, agents.length ? { agents: agents } : {})) })
         .then(function(j){ opened(j.project || {}, j.config, "created"); })
         .catch(function(err){ idle(); fieldErr("nperr", nameEl, cap(err)); });
     }

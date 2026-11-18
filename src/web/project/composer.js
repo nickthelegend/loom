@@ -983,7 +983,7 @@ export function createComposer(view) {
           { sep: true },
           { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
           { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ view.exportThread(); } },
-          { label: "Export as replay", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
+          { label: "Export as HTML", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
           { sep: true },
           { label: "Rewind…", icon: ICONS.rewind, hint: "put the files back", run: function(){ view.openRewindMenu(); } },
           { sep: true },
