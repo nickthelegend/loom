@@ -1,4 +1,5 @@
 import { Operations } from "./ops";
+import { loadHaptics, setHaptics } from "./phone-preferences";
 /**
  * Account & privacy — the profile sheet behind the avatar on the board.
  *
@@ -105,7 +106,11 @@ export function AccountSheet(props: {
   /** Pair one more computer. */
   onAddMachine?: () => void;
   themePref: ThemePref;
+  biometricLock: boolean;
+  onBiometricLock: (on: boolean) => Promise<void>;
 }) {
+  const [haptics, setHapticsOn] = useState(true);
+  useEffect(() => { void loadHaptics().then(setHapticsOn); }, [props.visible]);
   const profile = profileOf(props.user);
   const team = useTeamSummary(props.creds, props.visible);
   const route = useConnRoute();
@@ -203,6 +208,16 @@ export function AccountSheet(props: {
         <MachinesSection visible={props.visible} onSwitch={props.onSwitchMachine} onAdd={props.onAddMachine} />
       )}
 
+      <Panel>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: T.text }}>Haptic feedback</Text>
+          <Switch accessibilityLabel="Haptic feedback" value={haptics} onValueChange={on => void setHaptics(on).then(() => setHapticsOn(on)).catch(e => setErr(String(e)))} />
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: T.text }}>Biometric lock on app open</Text>
+          <Switch accessibilityLabel="Biometric lock on app open" value={props.biometricLock} onValueChange={on => void props.onBiometricLock(on).catch(e => setErr(String(e)))} />
+        </View>
+      </Panel>
       {/* appearance — the desktop's three choices */}
       <View style={{ gap: 6 }}>
         <SectionLabel text="Appearance" />

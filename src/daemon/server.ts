@@ -429,7 +429,7 @@ export class LoomDaemon {
       const origin = req.headers.origin;
       if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
-        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key");
         // PUT and PATCH belong here: toggling a skill, switching an agent on or
         // off, and updating an MCP server all use them, and a cross-origin
         // client (the Expo web build, a paired browser on another port) had
@@ -850,14 +850,15 @@ export class LoomDaemon {
       // the phone opens this project (and goal, or chat) when the alert is tapped
       data: {
         projectId,
+        daemon: os.hostname(),
         kind: event.kind,
         category,
-        ...(approval ? { approvalId: event.payload.approvalId, daemon: os.hostname() } : {}),
+        ...(approval ? { approvalId: event.payload.approvalId } : {}),
         ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
         ...(typeof event.payload.crewId === "string" ? { crewId: event.payload.crewId } : {}),
         ...(event.chat ? { chat: event.chat } : {}),
       },
-    });
+    }, new Set((readDaemonConfig()?.clients ?? []).filter(c => c.platform === "android" && c.pushGroupByProject && c.pushToken).map(c => c.pushToken!)));
   }
 
   // -------------------------------------------------------------------------

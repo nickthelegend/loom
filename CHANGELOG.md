@@ -121,6 +121,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Intervening update notes (#423).** CLI, web and phone update checks display the tagged changelog between installed and latest versions, including intermediate releases, with an explicit unavailable state when notes cannot be fetched.
 - **Stale-session recovery controls (#423).** Existing stale reporting and reaping now have web/phone project reports and one-click reap; the new action rechecks that the session is still stale before interrupting and respawning it.
 
+- **Phone quick actions (#421).** Home-screen New chat, Approvals, and Projects shortcuts on supported Expo builds, with pairing and unlock respected before navigation.
+- **Phone haptics (#421).** Extend existing feedback to approval decisions and completed turns, with a persistent device-local switch to turn feedback off.
+- **Offline phone sending (#421).** Persist messages with their chat, agent, and plan selection; retry on reconnect with durable daemon delivery receipts, and show failed or uncertain deliveries for review.
+- **Phone chat search (#421).** Reuse the existing chat search API for results and message navigation; search loaded messages with an explicit offline indicator when disconnected.
+- **Project push groups (#421).** Group notifications by computer and project on iOS and Android, preserving individual chat links and approval actions; include an Android SDK 52 grouping backport.
+- **Phone theme continuity (#421).** Light, dark, and system themes already existed; theme changes now preserve mounted screens, drafts, and navigation state.
+- **Phone biometric lock (#421).** Optional Face ID or fingerprint authentication on launch and return, including notification approval actions; cancellation keeps the app locked.
+- **Share text into Loom (#421).** Android share intents and an iOS share extension open a project/chat destination and stage shared text for review before sending.
+- **Ask about diff lines (#421).** Hold an added, removed, or context line on phone or web to stage a chat question with file, line, side, and code; web also supports split diffs and Alt+Enter.
+
 - Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
 - Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
 - Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.

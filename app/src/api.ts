@@ -966,7 +966,7 @@ export class ApiError extends Error {
 async function settle<T>(creds: Creds, status: number, json: Record<string, unknown>): Promise<T> {
   if (status === 401) {
     if (await forgetUnauthorized(creds)) onUnauthorized?.();
-    throw new Error("unauthorized — pair again");
+    throw new ApiError("unauthorized — pair again", 401);
   }
   if (status < 200 || status >= 300) throw new ApiError(String(json.message ?? json.error ?? `HTTP ${status}`), status);
   return json as T;

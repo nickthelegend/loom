@@ -1,6 +1,10 @@
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
+import * as Crypto from "expo-crypto";
+import { outbox } from "./outbox";
+import { ChatSearch } from "./phone-search";
+import { lineQuestion, type PendingMessage, type DiffLocation } from "./phone-batch-model";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -445,6 +449,9 @@ export function BoardScreen(props: {
   onFleet: () => void;
   /** The avatar in the header; opens the account sheet. */
   accountButton?: React.ReactNode;
+  initialApprovals?: boolean;
+  onApprovalsOpened?: () => void;
+  entryHint?: string;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -469,6 +476,7 @@ export function BoardScreen(props: {
   // Pending approvals across every open project (from /api/activity); null = unknown.
   const [approvals, setApprovals] = useState<number | null>(null);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
+  useEffect(() => { if (props.initialApprovals) { setApprovalsOpen(true); props.onApprovalsOpened?.(); } }, [props.initialApprovals]);
   const lastApprovals = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -592,6 +600,7 @@ export function BoardScreen(props: {
           <StatTile value={spend > 0 ? usd(spend) : "$0"} label="Spend" />
         </View>
 
+        {props.entryHint ? <Text style={{ color: T.thread, padding: 12 }}>{props.entryHint}</Text> : null}
         <ApprovalBanner count={approvals ?? 0} onPress={() => setApprovalsOpen(true)} />
 
         {err && <Sys color={T.err} text={cachedAt ? `${err} Showing this phone's copy, ${savedAgo(cachedAt)}.` : err} />}
@@ -859,6 +868,9 @@ export function ProjectScreen(props: {
   /** Open on this tab (a tapped push notification: its goal's Orchestra tab). */
   initialTab?: "thread" | "orchestra" | "crew";
   initialCrewId?: string;
+  initialAction?: "new-chat";
+  sharedDraft?: string;
+  onSharedDraft?: () => void;
   /** With initialTab "orchestra": open on this run. */
   initialRunId?: string;
 }) {
@@ -907,7 +919,7 @@ export function ProjectScreen(props: {
     }
   };
   // New chat asks who answers and on which model (new-chat.tsx), then opens it
-  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(props.initialAction === "new-chat");
   const newChat = () => setNewChatOpen(true);
   const chatCreated = (chat: Chat) => {
     setNewChatOpen(false);
@@ -994,6 +1006,16 @@ export function ProjectScreen(props: {
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
   );
   const { text, setText, error: draftError } = useDaemonDraft(creds, project.id, chatId);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [offlineQueue, setOfflineQueue] = useState<PendingMessage[]>([]);
+  useEffect(() => {
+    let live = true;
+    const update = () => void outbox(creds).then(q => { if (live) setOfflineQueue([...q.items]); }).catch(() => {});
+    update(); const timer = setInterval(update, 1000);
+    return () => { live = false; clearInterval(timer); };
+  }, [creds]);
+  const askLine = (line: DiffLocation) => { setText(t => (t ? t + "\n\n" : "") + lineQuestion(line)); setTab("thread"); };
+
   /** What's lined up behind the running turn — see core/prompt-queue.ts. */
   const [queue, setQueue] = useState<QueueView | null>(null);
   const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
@@ -1183,8 +1205,9 @@ export function ProjectScreen(props: {
       if (ev.chat && ev.chat !== chatId) return; // a different chat
       lastId.current = ev.id;
       setEvents((prev) => [...prev, ev]);
+      if (ev.kind === "run_complete") haptic.success();
       if (ev.kind === "message" && ev.agentId && !ev.payload?.reasoning) {
-        haptic.success(); // a reply landed where you're looking
+
         setSeen((s) => {
           const next = markRead(s, chatId, ev.id);
           if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
@@ -1310,7 +1333,9 @@ export function ProjectScreen(props: {
 
   // /btw <question>: a side chat, read-only and outside the thread (#376)
   const [sideQ, setSideQ] = useState<string | null>(null);
+  const sending = useRef(false);
   const send = async () => {
+    if (sending.current) return;
     if (stt.listening) void stt.toggle(); // stop dictation on send
     const template = /^\/template\s+(.+)$/i.exec(text.trim());
     if (template) {
@@ -1330,24 +1355,16 @@ export function ProjectScreen(props: {
     const typed = text.trim();
     const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
     if (!message) return;
-    attach.clear();
-    haptic.tap();
-    setText("");
-    sttBase.current = "";
+    sending.current = true;
     setErr(null);
     try {
-      if (selected && selected !== project.holder) await handoff(creds, project.id, selected);
-      const res = await sendMessage(creds, project.id, message, selected ?? undefined, chatId, plan ? { plan: true } : undefined);
-      // a prompt to a busy agent joins the queue: show it now, not at the next poll
-      if ((res as { queued?: number }).queued) {
-        void getQueue(creds, project.id)
-          .then(setQueue)
-          .catch(() => {});
-      }
-    } catch (e) {
-      setText(current => current || message);
-      setErr(e instanceof Error ? e.message : String(e));
-    }
+      const q = await outbox(creds);
+      await q.add({ id: Crypto.randomUUID(), project: project.id, chat: chatId, text: message,
+        ...(selected ? { agentId: selected } : {}), ...(plan ? { plan: true } : {}) });
+      attach.clear(); setText(current => current === text ? "" : current); sttBase.current = ""; haptic.tap();
+      setOfflineQueue([...q.items]);
+    } catch (e) { composerError(e); }
+    finally { sending.current = false; }
   };
 
   // Steer (#373): hold Send while a turn runs here and what you typed goes into that turn now,
@@ -1445,7 +1462,7 @@ export function ProjectScreen(props: {
       void api(creds, composerBase + "/presentation", { method: "PUT", body: JSON.stringify({ eventId: id, expanded }) }).catch(composerError);
     },
   };
-  const threadCtx = { creds, projectId: project.id, agents: project.agents.map(a => a.id), branches: branchCtx, composer: composerActions };
+  const threadCtx = { askLine, creds, projectId: project.id, agents: project.agents.map(a => a.id), branches: branchCtx, composer: composerActions };
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
@@ -1765,6 +1782,13 @@ export function ProjectScreen(props: {
           <Sheet visible={bookmarks !== null} onClose={() => setBookmarks(null)} title="Bookmarks">
             {!bookmarks?.length ? <Text style={{ color: T.dim, padding: 16 }}>No bookmarks yet.</Text> : bookmarks.map(b => <TouchableOpacity key={b.event.id} onPress={() => { setBookmarks(null); if (b.chat === chatId) void jumpMessage(b.event.id).catch(composerError); else { bookmarkJump.current = { chat: b.chat, id: b.event.id }; setChatId(b.chat); } }} style={{ padding: 16 }}><Text style={{ color: T.text }}>{b.title} · {String(b.event.payload.text ?? "")}</Text></TouchableOpacity>)}
           </Sheet>
+          <TouchableOpacity accessibilityRole="button" onPress={() => setSearchOpen(o => !o)} style={{ padding: 10 }}><Text style={{ color: T.dim }}>Search this chat</Text></TouchableOpacity>
+          {searchOpen && <ChatSearch creds={creds} project={project.id} chat={chatId} events={events} onJump={id => { setSearchOpen(false); void jumpMessage(id).catch(composerError); }} />}
+          {props.sharedDraft ? <View style={{ padding: 10 }}><Text style={{ color: T.dim }}>Shared text · choose a chat, then add it to your draft</Text><Text numberOfLines={4} style={{ color: T.text }}>{props.sharedDraft}</Text><Btn label="Add shared text" onPress={() => { setText(t => (t ? t + "\n\n" : "") + props.sharedDraft); props.onSharedDraft?.(); }} /><Btn label="Discard shared text" onPress={() => props.onSharedDraft?.()} /></View> : null}
+          {offlineQueue.filter(i => i.project === project.id && i.chat === chatId).map(i => <View key={i.id} style={{ padding: 10 }}>
+            <Text style={{ color: i.error ? T.err : T.dim }}>{i.error || "Waiting to send"} · {i.text.slice(0, 100)}</Text>
+            <Btn label="Discard queued message" onPress={() => void outbox(creds).then(async q => { await q.remove(i.id); setOfflineQueue([...q.items]); }).catch(composerError)} />
+          </View>)}
           <ThreadCtx.Provider value={threadCtx}>
           <FlatList
             ref={listRef}
@@ -2380,7 +2404,7 @@ export function ProjectScreen(props: {
                       </TouchableOpacity>
                     ))}
                   </View>
-                  <DiffView patch={tree.patch} maxHeight={520} />
+                  <DiffView patch={tree.patch} maxHeight={520} onAsk={askLine} />
                 </View>
               ) : (
                 <Sys text="working tree is clean" />
