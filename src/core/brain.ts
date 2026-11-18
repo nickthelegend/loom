@@ -170,6 +170,7 @@ export interface BrainExport {
     agent?: string;
     crew?: string;
     task?: string;
+    /** Kept so a round trip can't make a private or untrusted memory shareable (D13, D43). */
     private?: boolean;
     untrusted?: boolean;
     evidence?: string;
@@ -445,15 +446,15 @@ export class Brain {
    * export is the live memories, not the event log — history stays where it
    * happened; what travels is what the project currently knows.
    */
-  export(projectName: string): BrainExport {
+  export(projectName: string, opts: { includeExpired?: boolean } = {}): BrainExport {
+    const now = Date.now();
     return {
       format: "loom-brain",
       version: 1,
       project: projectName,
-      exportedAt: Date.now(),
-      memories: this.list().map((m) => ({
-        pinned: m.pinned, priority: m.priority, private: m.private, untrusted: m.untrusted,
-        evidence: m.evidence, expiresAt: m.expiresAt,
+      exportedAt: now,
+      // expired memories are dead to retrieval; they don't travel unless asked for
+      memories: this.all().filter((m) => opts.includeExpired || !isExpired(m, now)).map((m) => ({
         kind: m.kind,
         text: m.text,
         entities: m.entities,
@@ -462,6 +463,12 @@ export class Brain {
         ...(m.scope.agent ? { agent: m.scope.agent } : {}),
         ...(m.scope.crew ? { crew: m.scope.crew } : {}),
         ...(m.scope.task ? { task: m.scope.task } : {}),
+        ...(m.private ? { private: true } : {}),
+        ...(m.untrusted ? { untrusted: true } : {}),
+        ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+        ...(m.pinned ? { pinned: true } : {}),
+        ...(m.priority !== undefined ? { priority: m.priority } : {}),
+        ...(m.evidence ? { evidence: m.evidence } : {}),
       })),
     };
   }
@@ -480,8 +487,12 @@ export class Brain {
     }
     let added = 0;
     let known = 0;
+    const now = Date.now();
     for (const m of doc.memories) {
       if (!m?.text?.trim() || !MEMORY_KINDS_SET.has(m.kind)) continue;
+      // an expiry that isn't a number is a broken file, not "never expires"
+      if (m.expiresAt !== undefined && !(typeof m.expiresAt === "number" && Number.isFinite(m.expiresAt))) continue;
+      if (typeof m.expiresAt === "number" && m.expiresAt <= now) continue; // already dead: not resurrected
       const { created } = this.add({
         pinned: m.pinned, priority: m.priority, private: m.private, untrusted: m.untrusted,
         evidence: m.evidence, expiresAt: m.expiresAt,
@@ -492,6 +503,10 @@ export class Brain {
         ...(m.chat || m.agent || m.crew || m.task
           ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}), ...(m.crew ? { crew: m.crew } : {}), ...(m.task ? { task: m.task } : {}) } }
           : {}),
+        // anything but an explicit false keeps the protection: a malformed flag errs private
+        ...(m.private !== undefined && m.private !== false ? { private: true } : {}),
+        ...(m.untrusted !== undefined && m.untrusted !== false ? { untrusted: true } : {}),
+        ...(typeof m.expiresAt === "number" ? { expiresAt: m.expiresAt } : {}),
         provenance,
       });
       if (created) added++;

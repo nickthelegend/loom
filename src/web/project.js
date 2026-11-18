@@ -1,3 +1,4 @@
+import { createChatComposer } from "./project/chat-composer.js";
 import { createApprovalEvents } from './project/approval-events.js';
 import { createBoard } from './project/board.js';
 import { createBrain } from './project/brain.js';
@@ -111,6 +112,7 @@ import { openMenu } from './menus.js';
       get drawStatus() { return drawStatus; }
     });
     var { drawStatus, refresh, loadHistory, connect, drawEmpty, threadScroller, wantScroll, stickOrFlag, toBottom, liveFor, nearBottom, loadEarlier } = createThread({
+      get chatComposer() { return chatComposer; },
       get loadQueue() { return loadQueue; },
       get autosizeBox() { return autosizeBox; },
       get jumpToMessage() { return jumpToMessage; },
@@ -243,6 +245,9 @@ import { openMenu } from './menus.js';
     // project over one socket, so the thread filters to this chat itself.
     var chatId = state.currentChat ? state.currentChat() : "main";
     state.chat = chatId;
+    var chatComposer = createChatComposer({ pid: pid, chat: chatId, resize: function(){ autosizeBox(); }, save: saveDraft, jump: jumpToMessage });
+    state.showBookmarks = chatComposer.bookmarks;
+    state.copyChatMarkdown = chatComposer.copyChat;
     // Point state.project at the new project NOW. refresh() below replaces it
     // with the fuller per-project payload, but that lands a fetch later — and
     // everything drawn in the meantime (the Explorer's title above all) would
@@ -395,7 +400,7 @@ import { openMenu } from './menus.js';
         "</div>" +
         '<div class="paneswrap">' +
         '<div class="mainpane" id="mainpane">' +
-        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="chat-totals" class="chat-totals"></div><div id="chat-pins" class="chat-pins"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
         '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
@@ -521,7 +526,7 @@ import { openMenu } from './menus.js';
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<span class="spacer"></span>' + headerActions + "</header>" +
         '<div class="chips" id="chips"></div>' +
-        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="chat-totals" class="chat-totals"></div><div id="chat-pins" class="chat-pins"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
         '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         composerHtml +
         "</div>";
@@ -1063,7 +1068,7 @@ import { openMenu } from './menus.js';
       }
       // a tool row opens to what it did (args, output, exit code, error); its details stay selectable
       var trow = ev.target.closest && ev.target.closest(".tool.hasdet");
-      if (trow && !ev.target.closest(".tooldet") && !ev.target.closest("a,button")) { ev.preventDefault(); trow.classList.toggle("open"); return; }
+      if (trow && !ev.target.closest(".tooldet") && !ev.target.closest("a,button")) { ev.preventDefault(); trow.classList.toggle("open"); chatComposer.toggleTool(Number(trow.getAttribute("data-event-id")), trow.classList.contains("open")); return; }
       // an artifact an agent made (a page, an image, a doc), shown as itself
       var art = ev.target.closest && ev.target.closest("[data-artifact]");
       if (art) { ev.preventDefault(); ev.stopPropagation(); openArtifactDock(art.getAttribute("data-artifact")); return; }
@@ -1560,6 +1565,7 @@ import { openMenu } from './menus.js';
       items.push({ label: "Copy text", icon: ICONS.copy, run: function(){
         copyText(mine ? decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl) : bubbleText(msgEl)); toast("copied");
       } });
+      items = items.concat(chatComposer.messageItems(id));
       if (mine) {
         var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
         items.push({ label: "Edit as a new version", icon: ICONS.pencil, hint: "\u2039 \u203a to switch", run: function(){ if (!branches.editAsBranch(msgEl, raw)) composeFor(raw, null, false); } });
@@ -1579,8 +1585,7 @@ import { openMenu } from './menus.js';
         } });
         items.push({ sep: true });
       }
-      items.push({ label: starred ? "Unstar" : "Star", icon: ICONS.star, run: function(){ toggleStar(id); } });
-      items.push({ label: "Quote in reply", icon: ICONS.quote, run: function(){ quoteIntoComposer(bubbleText(msgEl)); } });
+      items.push({ label: starred ? "Remove bookmark" : "Bookmark", icon: ICONS.star, run: function(){ toggleStar(id); } });
       items.push({ label: "Make a card", icon: ICONS.board, hint: "on the board", run: function(){
         openBoardTaskModal(pid, "working", function(){ if (state.reloadBoard) state.reloadBoard(); }, bubbleText(msgEl).split("\n")[0].slice(0, 200));
       } });
@@ -1626,7 +1631,7 @@ import { openMenu } from './menus.js';
               el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 900);
             }
           }
-          toast(on ? "starred · ⋯ beside the composer → Starred messages" : "unstarred");
+          toast(on ? "Bookmarked · find it in Bookmarks" : "Bookmark removed");
           if (state.refreshShell) state.refreshShell();
         })
         .catch(function(err){ toast(err.message); });
@@ -1688,26 +1693,24 @@ import { openMenu } from './menus.js';
 
     // ---- drafts and recall ------------------------------------------------------
     function draftKey(cid){ return "loomDraft:" + pid + ":" + (cid || chatId); }
-    var draftTimer = null;
+    var draftTimer;
     function saveDraft(){
+      var box = document.getElementById("box"); if (!box) return;
+      try { localStorage.setItem(draftKey(), box.value); } catch (e) {}
+      var text = box.value;
       clearTimeout(draftTimer);
-      draftTimer = setTimeout(function(){
-        if (pageGone()) return;
-        var box = document.getElementById("box"); if (!box) return;
-        try {
-          if (box.value.trim()) localStorage.setItem(draftKey(), box.value);
-          else localStorage.removeItem(draftKey());
-        } catch (e) {}
-      }, 250);
+      draftTimer = setTimeout(function(){ chatComposer.saveDraft(text); }, 250);
     }
-    function clearDraft(){ clearTimeout(draftTimer); try { localStorage.removeItem(draftKey()); } catch (e) {} }
+    function clearDraft(){
+      clearTimeout(draftTimer);
+      try { localStorage.removeItem(draftKey()); } catch (e) {}
+      chatComposer.saveDraft("");
+    }
     function restoreDraft(){
-      var box = document.getElementById("box"); if (!box || box.value) return;
-      var d = null;
-      try { d = localStorage.getItem(draftKey()); } catch (e) {}
-      if (!d) return;
-      box.value = d; autosizeBox();
-      var form = document.getElementById("cform"); if (form) form.classList.toggle("hastext", !!d.trim());
+      var box = document.getElementById("box"); if (!box) return;
+      if (!box.value) { try { box.value = localStorage.getItem(draftKey()) || ""; } catch (e) {} }
+      autosizeBox();
+      chatComposer.loadDraft();
     }
     var recall = { i: -1, shown: "" };
     function myPrompts(){

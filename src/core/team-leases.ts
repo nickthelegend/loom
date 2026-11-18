@@ -140,11 +140,30 @@ export function overlap(a: LeaseScope, b: LeaseScope): string[] {
 
 /** The first hard zone this scope touches, or null. */
 export function zoneOf(scope: LeaseScope, zones: string[]): string | null {
+  return zonesOf(scope, zones)[0] ?? null;
+}
+
+/** Every hard zone this scope touches, in policy order. */
+export function zonesOf(scope: LeaseScope, zones: string[]): string[] {
+  const out: string[] = [];
   for (const z of zones) {
     const re = globToRegExp(z);
     const zp = literalPrefix(z);
-    if (scope.files.some((f) => re.test(f))) return z;
-    if (scope.prefixes.some((p) => p !== "" && (under(p, zp) || (zp !== "" && under(zp, p))))) return z;
+    if (scope.files.some((f) => re.test(f))) out.push(z);
+    else if (scope.prefixes.some((p) => p !== "" && (under(p, zp) || (zp !== "" && under(zp, p))))) out.push(z);
+  }
+  return out;
+}
+
+/**
+ * The first hard zone this scope touches that a rival already holds (D31).
+ * Every zone is checked: a claim spanning two zones is refused when either is
+ * taken, not only when the first one listed is.
+ */
+export function heldZone<L extends LeaseScope>(scope: LeaseScope, zones: string[], rivals: L[]): { zone: string; holder: L } | null {
+  for (const zone of zonesOf(scope, zones)) {
+    const holder = rivals.find((l) => zonesOf(l, [zone]).length > 0);
+    if (holder) return { zone, holder };
   }
   return null;
 }

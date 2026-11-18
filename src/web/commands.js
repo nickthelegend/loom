@@ -75,6 +75,8 @@ import { devMode, SIMPLE_TABS } from './mode.js';
         state.showTab("crew");
         setTimeout(function(){ var t = document.getElementById("crewsaytext"); if (t) t.focus(); }, 150);
         return;
+      case "copy-chat-markdown": if (state.copyChatMarkdown) state.copyChatMarkdown(); return;
+      case "bookmarks": if (state.showBookmarks) state.showBookmarks(); return;
       case "export-chat": if (state.exportThread) state.exportThread(); else toast("open a chat first"); return;
       case "find": if (state.openFind) state.openFind(); else toast("open a chat first"); return;
       case "palette": if (!scrim) openPalette(); return;
@@ -157,6 +159,8 @@ import { devMode, SIMPLE_TABS } from './mode.js';
     ["crew", "New crew goal", "⌘⇧G", ICONS.team, true],
     ["add-project", "Add a project", "⌘O", ICONS.folderPlus, false],
     ["project-settings", "Project settings", "", ICONS.gear, true],
+    ["bookmarks", "Bookmarks", "", ICONS.bookmark, true],
+    ["copy-chat-markdown", "Copy chat as Markdown", "", ICONS.copy, true],
     ["export-chat", "Export this chat as Markdown", "⌘⇧E", ICONS.download, true],
     ["find", "Find in this chat", "⌘F", ICONS.search, true],
     ["prompts", "Saved prompts", "⌘⇧V", ICONS.clipboard, true],

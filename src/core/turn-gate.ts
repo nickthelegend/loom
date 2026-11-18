@@ -77,6 +77,14 @@ export interface GateDeps {
   sleep(ms: number): Promise<void>;
 }
 
+/** A turn that was stopped while it waited for a slot. */
+export class GateCancelled extends Error {
+  constructor() {
+    super("stopped while waiting for a free slot");
+    this.name = "GateCancelled";
+  }
+}
+
 /** A counting gate with a memory check; one per daemon process (turnGate below). */
 export class TurnGate {
   private running = new Set<string>();
@@ -114,19 +122,33 @@ export class TurnGate {
    * Wait for a slot; resolves with release(). `onWait` hears why it's waiting (once, and
    * again if the reason changes), so the thread can say "waiting for a free slot".
    */
-  async acquire(label: string, onWait?: (why: string) => void): Promise<() => void> {
+  async acquire(label: string, onWait?: (why: string) => void, signal?: AbortSignal): Promise<() => void> {
     const started = this.deps.now();
     let said: string | null = null;
-    for (;;) {
-      const why = this.blocker();
-      if (!why) break;
-      if (this.deps.now() - started > MAX_WAIT_MS) {
-        onWait?.(`waited ${Math.round(MAX_WAIT_MS / 60_000)} min for a free slot — starting anyway`);
-        break;
+    // one listener for the whole wait: Stop wakes the current poll early
+    let wake: (() => void) | null = null;
+    const onAbort = () => wake?.();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      for (;;) {
+        // Stop pressed while this turn waited: it never takes a slot, and never runs.
+        if (signal?.aborted) throw new GateCancelled();
+        const why = this.blocker();
+        if (!why) break;
+        if (this.deps.now() - started > MAX_WAIT_MS) {
+          onWait?.(`waited ${Math.round(MAX_WAIT_MS / 60_000)} min for a free slot — starting anyway`);
+          break;
+        }
+        if (why.replace(/\d+%/, "") !== said?.replace(/\d+%/, "")) { said = why; onWait?.(why); }
+        await (signal
+          ? Promise.race([this.deps.sleep(POLL_MS), new Promise<void>((r) => { wake = r; })])
+          : this.deps.sleep(POLL_MS));
+        wake = null;
       }
-      if (why.replace(/\d+%/, "") !== said?.replace(/\d+%/, "")) { said = why; onWait?.(why); }
-      await this.deps.sleep(POLL_MS);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
+    if (signal?.aborted) throw new GateCancelled();
     const key = `${++this.seq}:${label}`;
     this.running.add(key);
     let released = false;

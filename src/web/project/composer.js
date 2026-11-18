@@ -1,3 +1,4 @@
+import { useTemplate } from "./chat-composer.js";
 import { devMode } from '../mode.js';
 import { forecastChip,usageMeter } from '../usage.js';
 import { agentGlyph,agentLabel,agentSub,labelOf } from '../agents.js';
@@ -69,6 +70,8 @@ export function createComposer(view) {
       if (state.cmode === "orch" && devMode()) return view.sendOrchestra();
       var box = document.getElementById("box");
       var text = (box.value || "").trim();
+      var template = /^\/template\s+(.+)$/i.exec(text);
+      if (template) return useTemplate(template[1].trim(), function(value){ box.value = value; autosizeBox(); view.saveDraft(); });
       // A message can be pure attachments — "look at this" with an image.
       if (!text && !view.attach.length) return;
       if (view.attach.some(function(a){ return a.uploading; })) { toast("still uploading\u2026"); return; }
@@ -183,7 +186,7 @@ export function createComposer(view) {
       }).catch(function(err){
         if (err && err.offline) { var bx = document.getElementById("box"); if (bx && !bx.value) { bx.value = full; autosizeBox(); } view.holdForReconnect(full); return; }
         toast(err.message);
-        if (p.continuity && !box.value) { box.value = full; autosizeBox(); }
+        if (!box.value) { box.value = full; autosizeBox(); view.saveDraft(); }
       });
     }
 
@@ -356,6 +359,9 @@ export function createComposer(view) {
     // Static, and every one runs something real — no decorative commands.
     function slashCommands(){
       return [
+        { label: "Use template (/template name)", sub: "saved prompts with a field for every variable", icon: ICONS.bookmark, run: function(){
+          api('/api/templates').then(function(j){ openMenu(100, 100, [{ head: 'Templates' }].concat(j.templates.map(function(p){ return { label: p.title, run: function(){ useTemplate(p.id, function(value){ var box = document.getElementById('box'); box.value = value; autosizeBox(); view.saveDraft(); }); } }; }))); }).catch(function(err){ toast(err.message); });
+        } },
         { label: "Ask on the side (/btw)", sub: "a quick question that stays out of this thread", icon: ICONS.chat, run: function(){
             var box = document.getElementById("box");
             var t = (box.value || "").trim();
@@ -981,12 +987,22 @@ export function createComposer(view) {
           { label: "Normal", icon: !view.replyLength() ? ICONS.check : "", run: function(){ view.setReplyLength(""); } },
           { label: "Detailed", icon: view.replyLength() === "detailed" ? ICONS.check : "", hint: "reasoning, trade-offs", run: function(){ view.setReplyLength("detailed"); } },
           { sep: true },
-          { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
+          { label: "Bookmarks", icon: ICONS.bookmark, run: function(){ state.showBookmarks(); } },
+          { label: "Copy chat as Markdown", icon: ICONS.copy, run: function(){ state.copyChatMarkdown(); } },
+          { label: "Bookmarked in this chat", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
           { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ view.exportThread(); } },
           { label: "Export as replay", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
           { sep: true },
           { label: "Rewind…", icon: ICONS.rewind, hint: "put the files back", run: function(){ view.openRewindMenu(); } },
           { sep: true },
+          { label: "Save as template", icon: ICONS.bookmark, run: function(){
+            var text = document.getElementById('box').value;
+            if (!text.trim()) return toast('Type a template first, with {{variables}} where needed');
+            askText('Template name', { placeholder: 'review' }).then(function(name){
+              if (!name || !name.trim()) return;
+              return api('/api/templates', { method: 'POST', body: JSON.stringify({ name: name.trim(), text: text }) }).then(function(){ toast('Saved. Use /template ' + name.trim()); });
+            }).catch(function(err){ toast(err.message); });
+          } },
           { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "⇧V", run: function(){ openPrompts(); } },
           { label: "Attach a file", icon: ICONS.plus, run: function(){ var a = document.getElementById("attach"); if (a) a.click(); } },
         ];

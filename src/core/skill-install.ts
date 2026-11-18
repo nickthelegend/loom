@@ -103,6 +103,51 @@ function assertSafeId(id: string): string {
 }
 
 /**
+ * Prove a path under the project really is under it before writing or deleting.
+ *
+ * The id check keeps `dest` lexically inside `<project>/skills`, but a symlink
+ * at `skills` (or at `skills/<id>`) still sends mkdir, copy and a forced
+ * removal wherever it points. Every existing component is resolved through its
+ * links and the result has to land inside the real project root.
+ */
+export function assertReallyInside(projectDir: string, p: string): void {
+  const root = (() => {
+    try {
+      return fs.realpathSync(projectDir);
+    } catch {
+      return path.resolve(projectDir);
+    }
+  })();
+  const rest: string[] = [];
+  let probe = path.resolve(p);
+  let real: string;
+  for (;;) {
+    try {
+      real = path.join(fs.realpathSync(probe), ...rest.reverse());
+      break;
+    } catch {
+      let link = false;
+      try {
+        link = fs.lstatSync(probe).isSymbolicLink();
+      } catch {
+        /* not there yet */
+      }
+      if (link) throw new SkillInstallError(`refusing ${p} — it goes through a link that points nowhere`);
+      const parent = path.dirname(probe);
+      if (parent === probe) {
+        real = path.resolve(p);
+        break;
+      }
+      rest.push(path.basename(probe));
+      probe = parent;
+    }
+  }
+  if (real !== root && !real.startsWith(root + path.sep)) {
+    throw new SkillInstallError(`refusing ${p} — it resolves to ${real}, outside the project`);
+  }
+}
+
+/**
  * Read and validate the SKILL.md that makes a directory a skill.
  *
  * A directory with no SKILL.md is not a skill, and one whose frontmatter has no
@@ -162,6 +207,7 @@ export function authorSkill(
     throw new SkillInstallError(`refusing "${id}" — it resolves outside ${skillsDir}`);
   }
   const file = path.join(dest, "SKILL.md");
+  assertReallyInside(projectDir, dest);
   if (fs.existsSync(file)) {
     throw new SkillInstallError(`"${id}" already exists — edit ${file} instead`);
   }
@@ -218,6 +264,9 @@ export function installSkillFromDir(
     throw new SkillInstallError(`${src} is already this project's "${id}" skill`);
   }
 
+  // `skills` (or `skills/<id>`) as a link out of the project would aim the
+  // mkdir, the copy and the forced removal below at someone else's files
+  assertReallyInside(projectDir, dest);
   const existed = fs.existsSync(dest);
   if (existed && !opts.force) {
     throw new SkillInstallError(`a skill named "${id}" is already installed — pass force to replace it`);

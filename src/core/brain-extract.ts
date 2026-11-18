@@ -236,7 +236,14 @@ export function applyExtraction(
       try {
         const updated = brain.update(
           target.id,
-          { text: op.text, ...(op.confidence !== undefined ? { confidence: op.confidence } : {}), evidence: op.evidence },
+          {
+            text: op.text,
+            ...(op.confidence !== undefined ? { confidence: op.confidence } : {}),
+            evidence: op.evidence,
+            // new words from outside content are outside content, whatever the
+            // memory was before (D43); a trusted turn never clears the flag
+            ...(opts.untrusted ? { untrusted: true } : {}),
+          },
           opts.by,
         );
         res.updated.push(updated);
