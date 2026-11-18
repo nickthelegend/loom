@@ -2166,6 +2166,8 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
     await new Promise((r) => setTimeout(r, 3000));
     run = (await steady(() => client.orchestraRun(projectId, runId))).run;
   }
+  const blockedSecrets = run.tasks.flatMap(task => task.secrets ?? []);
+  if (blockedSecrets.length) return { ok: false, runId, status: run.status, secrets: blockedSecrets, error: "secrets in the run's changes — not applied" };
   if (run.status !== "completed") return { ok: false, runId, status: run.status, error: run.status === "waiting_human" ? `it's waiting on you: ${run.question ?? "a question"}` : (run.error ?? run.status) };
   const { execFileSync } = await import("node:child_process");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });

@@ -37,6 +37,8 @@ import { intakePrBody, recordIntakeRun } from "./intake.js";
 import { listAccounts, resolveAgentAccount, type Account } from "./accounts.js";
 import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile } from "./process.js";
+import { SecretScanError } from "./git-safety.js";
+import type { SecretFinding } from "./secret-scan.js";
 import fs from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
@@ -229,6 +231,8 @@ export interface OrchestraTask extends OrchestraModel {
   files?: string[];
   /** Changes against the race's base commit. Binary files count as files, with zero lines. */
   diffStat?: { files: number; insertions: number; deletions: number };
+  /** A blocked commit/merge may leave the integration diff empty; retain its findings. */
+  secrets?: SecretFinding[];
   error?: string;
   costUsd?: number;
   /** The integration branch's merge commit for this task, and the lines it changed (stacks, D59). */
@@ -936,6 +940,7 @@ export function workerBriefing(opts: {
 function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err instanceof SecretScanError) { reject(err); return; }
       if (err) reject(new Error((stderr || `${err.message} (exit ${err.code ?? "unknown"}, signal ${err.signal ?? "none"})`).trim(), { cause: err }));
       else resolve(stdout);
     });
@@ -2456,6 +2461,7 @@ export class OrchestraEngine {
         await this.integrate(run, task);
       } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
+      if (err instanceof SecretScanError) task.secrets = err.findings;
       if (run.race) await this.snapshotRaceTask(run, task).catch(() => {});
       if ((task.status as TaskStatus) !== "cancelled") {
         task.status = "failed";
@@ -2463,6 +2469,8 @@ export class OrchestraEngine {
       }
     }
     task.finishedAt = Date.now();
+    // Only a successfully scanned retry resolves an earlier safety failure.
+    if ((task.status as TaskStatus) === "done") delete task.secrets;
     task.reported = false;
     this.save(run);
     this.emit(run, "task", { task: taskSummary(task) });
@@ -2658,6 +2666,7 @@ export class OrchestraEngine {
         task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
       } catch (err) {
         await git(["merge", "--abort"], run.dir).catch(() => {});
+        if (err instanceof SecretScanError) throw err;
         task.status = "conflict";
         task.error = `merge conflict: ${(err as Error).message.slice(0, 400)}`;
       }
@@ -2764,6 +2773,11 @@ export class OrchestraEngine {
   }
 
   private async finish(run: OrchestraRun, status: "completed" | "failed", error?: string, summary?: string): Promise<void> {
+    if (status === "completed" && run.tasks.some(t => t.secrets?.length)) {
+      status = "failed";
+      error = "secrets in the run's changes — not applied";
+      summary = undefined;
+    }
     // Do the slow parts first, then flip the status and announce it in one
     // synchronous step: a client that sees "completed" must also find the
     // completed event (polling status in the gap raced this).
