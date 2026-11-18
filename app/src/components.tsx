@@ -1,8 +1,9 @@
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
+import { MessagePressable, type ChatActions } from "./chat-composer";
+
 import { createContext, useContext, useState } from "react";
-import * as Clipboard from "expo-clipboard";
-import { Alert, Image, Platform, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Image, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
 import { actOnLoop, interrupt, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
@@ -434,17 +435,6 @@ export function LiveReplies(props: { live: LiveMap }) {
   );
 }
 
-/** Long-press a message: copy it, or hand it to another app. */
-function messageActions(text: string, who: string, extra: Array<{ text: string; onPress: () => void }> = []): void {
-  haptic.tap();
-  Alert.alert(who, text.length > 140 ? text.slice(0, 140) + "…" : text, [
-    ...extra,
-    { text: "Copy", onPress: () => void Clipboard.setStringAsync(text) },
-    { text: "Share…", onPress: () => void Share.share({ message: text }).catch(() => {}) },
-    { text: "Cancel", style: "cancel" },
-  ]);
-}
-
 /** One event in the thread. turn_diff renders as an expandable change card. */
 /**
  * Which daemon and project the thread belongs to, so a picture in it can be
@@ -459,7 +449,7 @@ export interface BranchCtx {
   edit: (eventId: number, text: string) => void;
   retry: (eventId: number) => void;
 }
-export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx } | null>(null);
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx; composer?: ChatActions } | null>(null);
 
 /** ‹ n/m › under a message that has other versions (#375). */
 function BranchPager(props: { eventId: number; mine: boolean }) {
@@ -534,25 +524,28 @@ const tokText = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0
 const usdText = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
 
 /** One tool call: what it touched, and whether it failed. */
-function ToolLine(props: { p: Record<string, unknown>; inGroup?: boolean }) {
+function ToolLine(props: { p: Record<string, unknown>; inGroup?: boolean; id?: number }) {
+  const composer = useContext(ThreadCtx)?.composer;
+  const open = !!composer?.expanded[String(props.id)];
   const p = props.p;
   const failed = toolFailed(p);
   const why = typeof p.exitCode === "number" && p.exitCode !== 0 ? ` · exit ${p.exitCode}` : failed ? " · failed" : "";
   const imgs = Array.isArray(p.images) ? p.images.length : 0;
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, paddingLeft: props.inGroup ? 10 : 30, marginVertical: props.inGroup ? 1 : 3 }}>
+    <Pressable onPress={() => props.id && composer?.expand(props.id, !open)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, paddingLeft: props.inGroup ? 10 : 30, marginVertical: props.inGroup ? 1 : 3 }}>
       <Text style={{ color: failed ? T.err : T.faint, fontSize: 11.5, fontFamily: T.mono }}>{failed ? "✗" : "›"}</Text>
       <Text style={{ color: failed ? T.err : T.dim, fontSize: 12, fontFamily: T.mono, flexShrink: 1 }} numberOfLines={2}>
         {p.server ? `${String(p.server)} · ` : ""}
         {String(p.summary ?? p.tool ?? "tool")}
         {why}
       </Text>
+      {open && (p.preview || p.output || p.args || p.command || p.error) ? <Text selectable style={{ width: "100%", color: T.dim, fontFamily: T.mono, fontSize: 12 }}>{[p.args ? JSON.stringify(p.args, null, 2) : String(p.command ?? ""), String(p.preview ?? p.output ?? ""), String(p.error ?? "")].filter(Boolean).join("\n")}</Text> : null}
       {imgs ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, width: "100%" }}>
           {(p.images as Array<{ path?: string }>).filter((im) => im?.path).map((im) => <ProjImage key={im.path} path={im.path!} size={96} />)}
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -560,7 +553,15 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
   const { e } = props;
   const p = e.payload as Record<string, unknown>;
   const [open, setOpen] = useState(false);
-  const branchCtx = useContext(ThreadCtx)?.branches;
+  const context = useContext(ThreadCtx);
+  const branchCtx = context?.branches;
+  const composer = context?.composer;
+  const messageExtras = composer ? [
+    { text: composer.pins.some(p => p.id === e.id) ? "Unpin message" : "Pin message", onPress: () => composer.pin(e.id) },
+    { text: composer.bookmarks.includes(e.id) ? "Remove bookmark" : "Bookmark", onPress: () => composer.bookmark(e.id) },
+    { text: "Quote reply", onPress: () => composer.quote(e.id) },
+    { text: "Copy chat as Markdown", onPress: composer.copyChat },
+  ] : [];
   // a new version of your prompt (iOS can ask for the text in place), or of an agent's reply
   const editVersion = (text: string) => branchCtx && Platform.OS === "ios"
     ? [{ text: "Edit as a new version", onPress: () => Alert.prompt("Edit your message", undefined, (t) => { if (t?.trim() && t.trim() !== text.trim()) branchCtx.edit(e.id, t.trim()); }, "plain-text", text) }]
@@ -570,7 +571,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
   if (e.kind === "message") {
     const author = e.agentId ?? String(p.author ?? "user");
     if (!e.agentId && author === "loom") {
-      return <Sys text={`▸ ${String(p.text).split("\n")[0]}`} />;
+      return <MessagePressable text={String(p.text ?? "")} actions={messageExtras}><Sys text={`▸ ${String(p.text).split("\n")[0]}`} /></MessagePressable>;
     }
     const mine = !e.agentId;
     const text = String(p.text ?? "");
@@ -580,25 +581,25 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       const { images, files, rest } = splitAttachments(text);
       if (images.length || files.length)
         return (
-          <View style={{ alignSelf: "flex-end", maxWidth: "92%", marginVertical: 8, alignItems: "flex-end", gap: 6 }}>
+          <MessagePressable text={text} actions={[...editVersion(text), ...messageExtras]} style={{ alignSelf: "flex-end", maxWidth: "92%", marginVertical: 8, alignItems: "flex-end", gap: 6 }}>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
               {images.map((im) => <ProjImage key={im} path={im} />)}
               {files.map((f) => <Text key={f} style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }}>📎 {f.split("/").pop()}</Text>)}
             </View>
             {rest ? (
-              <Pressable delayLongPress={350} onLongPress={() => messageActions(rest, "Your message", editVersion(text))}
+              <View
                 style={{ backgroundColor: T.panel, borderColor: T.line, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 }}>
-                <Text style={{ color: T.text, fontSize: 14.5, lineHeight: 22 }}>{rest}</Text>
-              </Pressable>
+                <Markdown text={rest} />
+              </View>
             ) : null}
-          </View>
+          </MessagePressable>
         );
     }
     if (mine)
       return (
-        <Pressable
+        <MessagePressable
           delayLongPress={350}
-          onLongPress={() => messageActions(text, "Your message", editVersion(text))}
+          text={text} actions={[...editVersion(text), ...messageExtras]}
           accessibilityHint="long-press to copy or share"
           style={{
             alignSelf: "flex-end",
@@ -612,15 +613,15 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
             paddingHorizontal: 14,
           }}
         >
-          <Text style={{ color: T.text, fontSize: 14.5, lineHeight: 22 }}>{text}</Text>
+          <Markdown text={text} />
           <BranchPager eventId={e.id} mine />
-        </Pressable>
+        </MessagePressable>
       );
     const kind = props.kindOf?.(author) ?? author;
     return (
-      <Pressable
+      <MessagePressable
         delayLongPress={350}
-        onLongPress={() => messageActions(text, agentLabel(kind), retryVersion)}
+        text={text} actions={[...retryVersion, ...messageExtras]}
         accessibilityHint="long-press to copy or share"
         style={{ marginTop: 10, marginBottom: 2, gap: 6 }}
       >
@@ -646,7 +647,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
             <Text style={{ color: T.faint, fontSize: 11, marginTop: 6 }}>stopped — this is what it had written</Text>
           )}
         </View>
-      </Pressable>
+      </MessagePressable>
     );
   }
 
@@ -724,28 +725,29 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
     );
   }
 
-  if (e.kind === "tool_call") return <ToolLine p={p} />;
+  if (e.kind === "tool_call") return <ToolLine p={p} id={e.id} />;
   if ((e.kind as string) === "tool_group") {
+    const groupOpen = open || !!composer?.expanded[String(e.id)];
     const calls = (p.calls as LoomEvent[] | undefined) ?? [];
     const failed = calls.filter((c) => toolFailed(c.payload as Record<string, unknown>)).length;
     return (
       <View style={{ paddingLeft: 30, marginVertical: 3 }}>
         <TouchableOpacity
-          onPress={() => setOpen(!open)}
+          onPress={() => composer ? composer.expand(e.id, !groupOpen) : setOpen(!open)}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
+          accessibilityState={{ expanded: groupOpen }}
           style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingVertical: 5, paddingHorizontal: 10,
             borderRadius: 8, borderWidth: 1, borderColor: T.line, backgroundColor: T.panel }}
         >
-          <Text style={{ color: T.faint, fontSize: 11 }}>{open ? "▾" : "›"}</Text>
+          <Text style={{ color: T.faint, fontSize: 11 }}>{groupOpen ? "▾" : "›"}</Text>
           <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>{summarizeTools(calls)}</Text>
           {failed ? <Text style={{ color: T.err, fontSize: 12 }}>· {failed} failed</Text> : null}
         </TouchableOpacity>
-        {open ? (
+        {groupOpen ? (
           <View style={{ marginTop: 4, gap: 2 }}>
             {calls.map((c) => (
-              <ToolLine key={c.id} p={c.payload as Record<string, unknown>} inGroup />
+              <ToolLine key={c.id} id={c.id} p={c.payload as Record<string, unknown>} inGroup />
             ))}
           </View>
         ) : null}
