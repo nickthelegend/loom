@@ -116,8 +116,10 @@ export interface RetrieveOpts {
   files?: string[];
   /** Only memories scoped to this agent (or to nobody). */
   agent?: string;
-  /** Only memories scoped to this chat (or to nobody). */
+  /** Only memories scoped to this chat (or to nobody); omitted means all chats. */
   chat?: string;
+  /** Injection requires a matching chat even when the caller has no chat context. */
+  strictChatScope?: boolean;
   limit?: number;
   /** Drop anything the extractor wasn't sure about. */
   minConfidence?: number;
@@ -383,7 +385,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     if (isExpired(m, now)) return false;
     if (opts.minConfidence !== undefined && m.confidence < opts.minConfidence) return false;
     if (m.scope.agent && m.scope.agent !== opts.agent) return false;
-    if (m.scope.chat && m.scope.chat !== opts.chat) return false;
+    if ((opts.chat !== undefined || opts.strictChatScope) && m.scope.chat && m.scope.chat !== opts.chat) return false;
     if (m.scope.crew && m.scope.crew !== opts.crew) return false;
     return true;
   });

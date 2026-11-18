@@ -9,7 +9,8 @@ describe("#419 phone memory controls", () => {
     const params = new URLSearchParams(route.slice(8));
     assert.equal(params.get("q"), "sqlite & tests");
     assert.equal(params.get("kind"), "decision");
-    assert.equal(params.get("agent"), "echo");
+    assert.equal(params.get("author"), "echo");
+    assert.equal(params.has("agent"), false);
     assert.equal(params.get("since"), "2026-01-01");
     assert.equal(params.get("until"), "2026-01-31");
     assert.equal(params.get("chat"), "one/two");

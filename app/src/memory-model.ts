@@ -2,7 +2,7 @@ export interface MemoryFilters { q?: string; kind?: string; agent?: string; sinc
 
 export function memoryQuery(filters: MemoryFilters): string {
   const query = new URLSearchParams({ limit: "500" });
-  for (const key of ["q", "kind", "agent", "since", "until", "chat"] as const) if (filters[key]?.trim()) query.set(key, filters[key]!.trim());
+  for (const key of ["q", "kind", "agent", "since", "until", "chat"] as const) if (filters[key]?.trim()) query.set(key === "agent" ? "author" : key, filters[key]!.trim());
   if (filters.includeArchived) query.set("includeArchived", "1");
   return (filters.q?.trim() ? "/search?" : "?") + query;
 }

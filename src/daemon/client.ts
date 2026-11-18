@@ -726,10 +726,10 @@ export class DaemonClient {
   searchBrain(
     id: string,
     q: string,
-    opts: { agent?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
+    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
   ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
     const params = new URLSearchParams({ q });
-    for (const key of ["agent", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
+    for (const key of ["agent", "author", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
     if (opts.explain) params.set("explain", "1");
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);

@@ -38,8 +38,15 @@ it("validates filter and mutation input, filters by author/kind/date, and report
   const memory = await add("filter419 sqlite storage", { kind: "decision" });
   await add("filter419 sqlite task", { kind: "task" });
   const date = new Date().toISOString().slice(0, 10);
-  const result = await brain<{ hits: Array<{ memory: Memory }> }>(`/search?q=filter419&kind=decision&agent=user&since=${date}&until=${date}`);
+  const result = await brain<{ hits: Array<{ memory: Memory }> }>(`/search?q=filter419&kind=decision&author=user&since=${date}&until=${date}`);
   expect(result.hits.map(h => h.memory.id)).toEqual([memory.id]);
+  const shared = await brain<{ hits: Array<{ memory: Memory }> }>("/search?q=filter419&kind=decision&agent=helper&author=user");
+  expect(shared.hits.map(h => h.memory.id)).toEqual([memory.id]);
+  const otherAuthor = await brain<{ hits: Array<{ memory: Memory }> }>("/search?q=filter419&agent=helper&author=echo");
+  expect(otherAuthor.hits).toEqual([]);
+  const scoped = await add("scope419 private receiver fact", { scope: { agent: "echo" } });
+  expect((await client.searchBrain(project, "scope419", { agent: "echo", author: "user" })).hits.map(h => h.memory.id)).toContain(scoped.id);
+  expect((await client.searchBrain(project, "scope419", { agent: "helper", author: "user" })).hits.map(h => h.memory.id)).not.toContain(scoped.id);
   const list = await brain<{ memories: Array<Memory & { stale: boolean }> }>("?kind=decision&agent=user");
   expect(list.memories.find(m => m.id === memory.id)?.stale).toBe(false);
   for (const query of ["kind=unknown", "since=wrong", "since=2026-12-31&until=2026-01-01"]) expect((await request(`/api/projects/${project}/brain?${query}`)).status).toBe(400);

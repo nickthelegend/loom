@@ -1161,7 +1161,7 @@ program
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const { hits } = await client.searchBrain(project.id, words.join(" "), {
-      ...opts, explain: Boolean(opts.explain),
+      ...opts, agent: undefined, author: opts.agent, explain: Boolean(opts.explain),
     });
     if (!hits.length) return void console.log(pc.dim("nothing retrieved — the briefing would carry no memories for this"));
     for (const h of hits) {

@@ -22,7 +22,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
     archived: z.boolean().optional(), private: z.boolean().optional(), untrusted: z.boolean().optional(),
     evidence: z.string().max(100_000).optional(), expiresAt: z.number().finite().nullable().optional() });
   const filters = (query: import("express").Request["query"]) => {
-    const input = z.object({ kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(), agent: z.string().optional(),
+    const input = z.object({ kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(), author: z.string().optional(),
       since: z.string().optional(), until: z.string().optional() }).parse(query);
     const date = (value: string | undefined, end: boolean) => {
       if (value === undefined) return undefined;
@@ -32,7 +32,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
     };
     const since = date(input.since, false), until = date(input.until, true);
     if (since !== undefined && until !== undefined && since > until) throw new Error("since must precede until");
-    return { kind: input.kind, author: input.agent, since, until };
+    return { kind: input.kind, author: input.author, since, until };
   };
   // Keep concrete continuity routes before /brain/:mid. Diagnostics contain
   // stored evidence; provider acceptance is never labelled understanding.
@@ -160,7 +160,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
       const q = req.query as Record<string, string | undefined>;
       try {
         const memories = rt.brain.list({
-          ...filters(req.query),
+          ...filters({ ...req.query, author: req.query.author ?? req.query.agent }),
           includeArchived: q.includeArchived === "1",
           ...(q.chat ? { chat: q.chat } : {}),
           ...(q.includeExpired === "1" ? { includeExpired: true } : {}),
@@ -185,6 +185,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
       try {
         const hits = await rt.searchBrain({
           ...filters(req.query),
+          ...(q.agent ? { agent: q.agent } : {}),
           includeArchived: q.includeArchived === "1",
           ...(q.q ? { query: q.q } : {}),
           ...(files.length ? { files } : {}),

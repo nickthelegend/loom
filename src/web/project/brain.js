@@ -26,7 +26,7 @@ export function createBrain(view) {
       if (!el.querySelector(".brain")) el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
       var current = ++generation;
       var params = new URLSearchParams({ limit: '500' });
-      ['q','agent','since','until'].forEach(function(key){ if (filters[key]) params.set(key, filters[key]); });
+      ['q','agent','since','until'].forEach(function(key){ if (filters[key]) params.set(key === 'agent' ? 'author' : key, filters[key]); });
       if (view.brainKind) params.set('kind', view.brainKind);
       if (filters.archived) params.set('includeArchived', '1');
       if (filters.q) params.set('chat', view.chatId || 'main');

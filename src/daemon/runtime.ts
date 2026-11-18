@@ -3709,7 +3709,7 @@ export class ProjectRuntime {
       await this.ensureStarted(to);
       return { from, ...(merge ? { merge } : {}) };
     }
-    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds);
+    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds, opts.chat);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
     await target.injectMemory(prepared.memory);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");

@@ -37,8 +37,10 @@ describe("#419 brain and memory", () => {
     expect(brain.all()).toHaveLength(scopes.length);
     add("Run the tests.", { scope: { chat: "main" } });
     expect(brain.all()).toHaveLength(scopes.length);
-    const hits = retrieve(brain, { query: "tests" });
+    const hits = retrieve(brain, { query: "tests", strictChatScope: true });
     expect(hits.every(h => !h.memory.scope.chat && !h.memory.scope.agent && !h.memory.scope.crew)).toBe(true);
+    // Search without a chat filter retains shared recall across chats.
+    expect(new Set(retrieve(brain, { query: "tests", agent: "reader" }).map(h => h.memory.scope.chat))).toEqual(new Set([undefined, "main", "other"]));
     expect(retrieve(brain, { query: "tests", chat: "main" }).some(h => h.memory.scope.chat === "other")).toBe(false);
   });
 
@@ -49,12 +51,12 @@ describe("#419 brain and memory", () => {
     add("Secret chat rule.", { pinned: true, priority: 100, scope: { chat: "secret" } });
     add("Expired rule.", { pinned: true, expiresAt: Date.now() - 1 });
     add("Uncertain rule.", { pinned: true, confidence: 0.1 });
-    const hits = retrieve(brain, { query: "unrelated", limit: 1, minConfidence: 0.6, explain: true });
+    const hits = retrieve(brain, { query: "unrelated", strictChatScope: true, limit: 1, minConfidence: 0.6, explain: true });
     expect(hits.map(h => h.memory.id)).toEqual([b.id, a.id]);
     expect(compileBrief(hits.map(h => h.memory)).indexOf(b.text)).toBeLessThan(compileBrief(hits.map(h => h.memory)).indexOf(a.text));
     brain.update(a.id, { archived: true }, "user");
-    expect(retrieve(brain, { limit: 0, minConfidence: 0.6 }).map(h => h.memory.id)).toEqual([b.id]);
-    const team = retrieveTiered(brain.all().map(m => ({ ...m, tier: "own" as const, updatedAt: 1 })), { limit: 1, minConfidence: 0.6 });
+    expect(retrieve(brain, { strictChatScope: true, limit: 0, minConfidence: 0.6 }).map(h => h.memory.id)).toEqual([b.id]);
+    const team = retrieveTiered(brain.all().map(m => ({ ...m, tier: "own" as const, updatedAt: 1 })), { strictChatScope: true, limit: 1, minConfidence: 0.6 });
     expect(team.map(h => h.memory.id)).toEqual([b.id]);
   });
 
@@ -147,6 +149,16 @@ describe("#419 brain and memory", () => {
     brain.update(pin.id, { text: "Edited later." }, "user");
     expect(saved.payload).toMatchObject({ turn: 123, memories: [{ id: pin.id, text: pin.text, reason: "pinned" }] });
     expect(log.list({ kinds: ["status"] })[0]!.payload).toEqual(saved.payload);
+    const event = log.append({ kind: "message", payload: { text: "Relevant native query" } });
+    const mainBrief = await briefings.retrieveBrief([event], "echo");
+    expect(mainBrief).toContain("Edited later.");
+    expect(mainBrief).not.toContain("A different chat pin.");
+    const otherBrief = await briefings.retrieveBrief([event], "echo", "other");
+    expect(otherBrief).toContain("A different chat pin.");
+    expect(otherBrief).not.toContain("Edited later.");
+    const noChatBrief = briefings.brainBrief({ query: "Relevant native query", agent: "echo" });
+    expect(noChatBrief).not.toContain("Edited later.");
+    expect(noChatBrief).not.toContain("A different chat pin.");
     briefings.close();
   });
 
