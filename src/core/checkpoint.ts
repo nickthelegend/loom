@@ -107,8 +107,9 @@ async function quiet(args: string[], cwd: string): Promise<string> {
 }
 
 /** A temporary index path for this capture. Never the repository's own. */
-function tmpIndex(dir: string, id: string): string {
-  return `${dir.replace(/\/+$/, "")}/.git/loom-checkpoint-${id}.index`;
+async function tmpIndex(dir: string, id: string): Promise<string> {
+  const gitDir = (await run(["rev-parse", "--absolute-git-dir"], dir)).trim();
+  return `${gitDir}/loom-checkpoint-${id}.index`;
 }
 
 /**
@@ -136,7 +137,8 @@ export async function capture(dir: string, label: string): Promise<Checkpoint | 
   if (!head) return null;
 
   const id = newId();
-  const index = tmpIndex(dir, id);
+  const index = await tmpIndex(dir, id).catch(() => null);
+  if (!index) return null;
   const env = { GIT_INDEX_FILE: index };
   try {
     // Start from HEAD so the tree is HEAD-plus-your-changes rather than
@@ -228,7 +230,7 @@ export interface RewindPreview { checkpoint: Checkpoint; changed: string[]; diff
 export async function preview(dir: string, id: string): Promise<RewindPreview> {
   const checkpoint = await find(dir, id);
   if (!checkpoint) throw new GitError(`no checkpoint "${id}" in this project`, "");
-  const index = tmpIndex(dir, newId());
+  const index = await tmpIndex(dir, newId());
   const env = { GIT_INDEX_FILE: index };
   try {
     await run(["read-tree", "HEAD"], dir, env);

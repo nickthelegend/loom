@@ -1,0 +1,37 @@
+import { afterEach, expect, it } from "vitest";
+import { readDaemonConfig } from "../src/core/registry.js";
+import { readTriggers } from "../src/core/triggers.js";
+import { DaemonClient } from "../src/daemon/client.js";
+import { LoomDaemon } from "../src/daemon/server.js";
+import { ProjectRuntime } from "../src/daemon/runtime.js";
+import { TriggerRunner } from "../src/daemon/triggers.js";
+import { makeProjectDir, tmpDir } from "./helpers.js";
+import { deferred } from "./r3-fix-helpers.js";
+
+let daemon: LoomDaemon;
+afterEach(async () => { await daemon?.close(); });
+it("#15 serializes simultaneous first deliveries before assigning a chat or admitting work", async () => {
+  process.env.LOOM_HOME = tmpDir("r3-triggers");
+  process.env.LOOM_NO_NOTIFY = "1";
+  daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
+  await daemon.listen();
+  const client = new DaemonClient(readDaemonConfig()!);
+  const dir = makeProjectDir();
+  const id = (await client.addProject(dir)).project.id;
+  const { trigger } = await client.addTrigger(id, { name: "concurrent", kind: "webhook", minIntervalSec: 60, prompt: "hello" });
+  const gate = deferred();
+  const runtime = (daemon as unknown as { runtime(id: string): Promise<ProjectRuntime> }).runtime.bind(daemon);
+  const rt = await runtime(id);
+  rt.queue.setPaused(true);
+  const chats = rt.chats().length;
+  const runner = new TriggerRunner(async project => { await gate.promise; return runtime(project); });
+  const first = runner.fire(id, dir, trigger.id, { kind: "webhook", delivery: "first" });
+  const second = runner.fire(id, dir, trigger.id, { kind: "webhook", delivery: "second" });
+  gate.release();
+  const results = await Promise.all([first, second]);
+  expect(results.filter(r => r.ok)).toHaveLength(1);
+  expect(results.find(r => !r.ok)?.note).toMatch(/within 60s/);
+  expect(rt.chats()).toHaveLength(chats + 1);
+  expect(rt.queue.length).toBe(1);
+  expect(readTriggers(dir).triggers[0]!.chat).toBe(rt.queue.snapshot().items[0]!.chat);
+});

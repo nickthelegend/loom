@@ -84,7 +84,7 @@ import {
 } from "../core/skills.js";
 import { type TurnFacts } from "../core/step-conditions.js";
 import { suggestHandoff } from "../core/suggestions.js";
-import { cappedPermission, type TeamPolicy } from "../core/team-policy.js";
+import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { capCrewPermission, DEFAULT_CREW_POLICY } from "../core/crew-policy.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 import {
@@ -418,6 +418,7 @@ export class ProjectRuntime {
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
+      assertChatWritable: (id) => this.assertChatWritable(id),
       briefingFor: async (query, agentId, files) =>
         [
           this.activeSkillsBlock(),
@@ -426,7 +427,10 @@ export class ProjectRuntime {
         ]
           .filter(Boolean)
           .join("\n\n"),
-      gate: (agentId) => {
+      gate: (agentId, kind) => {
+        if (this.teamPolicy && kind && !agentAllowed(this.teamPolicy, kind)) {
+          throw new Error(`team policy doesn't allow ${kind} on this repo (loom.team.json)`);
+        }
         if (this.continuity) throw new ContinuityError("unsupported", "parallel orchestra execution is outside sequential native continuity");
         this.enforceQuarantine(agentId);
         this.enforceBudget(agentId);
@@ -791,7 +795,8 @@ export class ProjectRuntime {
         // adapter option cannot leave half of an edit applied.
         // pooled like at startup, so a reloaded agent still honours each chat's own model (#370)
         if (after && after.enabled !== false) prepared.set(id, createAgent(
-          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id), true,
+          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } },
+          next.git?.worktreePerAgent && tierForKind(after.kind) === "adapter" ? worktreePath(this.info.dir, `agent-${id}`) : this.agentDir(id), true,
         ));
       }
       const was = this.configOnDisk ?? this.config;
@@ -1195,7 +1200,7 @@ export class ProjectRuntime {
     const existing = this.agentDirs.get(agentId);
     if (existing) return existing;
     const wt = worktreePath(this.info.dir, `agent-${agentId}`);
-    if (!fs.existsSync(wt)) {
+    if (!fs.existsSync(path.join(wt, ".git"))) {
       try {
         await gitAddWorktree(this.info.dir, {
           slug: `agent-${agentId}`,
@@ -1206,14 +1211,7 @@ export class ProjectRuntime {
         try {
           await gitAddWorktree(this.info.dir, { slug: `agent-${agentId}`, branch: `agent/${agentId}` });
         } catch {
-          logbook.warn(
-            "git",
-            `worktree for ${agentId} could not be created — falling back to the shared tree`,
-            String(err),
-            this.info.id,
-          );
-          this.agentDirs.set(agentId, this.info.dir);
-          return this.info.dir;
+          throw new Error(`worktree for ${agentId} could not be created: ${String(err)}`);
         }
       }
     }
@@ -1231,11 +1229,20 @@ export class ProjectRuntime {
   private spawnAgent(cfg: AgentConfig, prepared?: AnyAgent): AnyAgent {
     // The project id rides along so an adapter can file approvals ("always
     // ask") against the right project — see core/approvals.ts.
+    const isolated = this.config.git?.worktreePerAgent && tierForKind(cfg.kind) === "adapter";
+    const dir = isolated ? worktreePath(this.info.dir, `agent-${cfg.id}`) : this.agentDir(cfg.id);
     const agent = prepared ?? createAgent(
       { ...cfg, options: { ...this.policyOptions(cfg), loomProject: this.info.id } },
-      this.agentDir(cfg.id),
+      dir,
       true,
     );
+    if (isolated) {
+      const start = agent.start.bind(agent);
+      agent.start = async () => {
+        await this.ensureAgentWorktree(cfg.id);
+        await start();
+      };
+    }
     // What this turn has typed since its last finished message. A turn that
     // is stopped (or dies) mid-reply never sends that message, and the words
     // you watched arrive would vanish — so they're kept, marked partial.
@@ -1783,6 +1790,9 @@ export class ProjectRuntime {
     // Queued prompts have not entered history; silently leaving them behind would lose work.
     if (this.queue.snapshot().items.some(item => (item.chat ?? MAIN_CHAT) === id))
       throw new ChatMoveError("busy: send or remove queued prompts before moving this chat");
+    if (this.orchestra.chatBusy(id)) {
+      throw new ChatMoveError("busy: finish or abort the Orchestra run before moving this chat");
+    }
     const busy = () => this.turns.sendingChats.has(id) || [...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id);
     if (!wait && busy()) throw new ChatMoveError("busy");
     this.movingChats.add(id);
@@ -2540,7 +2550,8 @@ export class ProjectRuntime {
   private async commitTurn(agentId: string, files: string[]): Promise<void> { return this.turns.commitTurn(agentId, files); }
 
   private extractMemory(agentId: string, files: string[]): void {
-    if (!this.continuity && this.agent(agentId)?.kind !== "demo") this.briefings.extractMemory(agentId, files);
+    const agent = this.agents.get(agentId);
+    if (!this.continuity && agent && agent.kind !== "demo") this.briefings.extractMemory(agentId, files);
   }
 
   workingTree(): Promise<WorkingTree> {
@@ -3665,6 +3676,8 @@ export class ProjectRuntime {
     // agent that will refuse every prompt it gets.
     this.enforceQuarantine(to);
     this.enforceBudget(to);
+    // Handoff writes memory before startup; prepare the checkout before either can touch it.
+    if (this.config.git?.worktreePerAgent) await this.ensureAgentWorktree(to);
     if ((opts.source ?? "user") === "user") this.routes.onManualHandoff();
 
     // Audit trail: snapshot the outgoing holder's working-tree state into the

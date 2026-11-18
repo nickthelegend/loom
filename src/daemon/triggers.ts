@@ -18,6 +18,7 @@ const SEEN_MAX = 500;
 export class TriggerRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private seen = new Map<string, number>();
+  private firing = new Map<string, Promise<TriggerRun>>();
 
   constructor(private runtime: (projectId: string) => Promise<ProjectRuntime>) {}
 
@@ -45,6 +46,15 @@ export class TriggerRunner {
    * also recorded in the trigger's run history.
    */
   async fire(projectId: string, dir: string, triggerId: string, opts: { kind: "scheduled" | "webhook" | "manual"; body?: unknown; event?: string; delivery?: string }): Promise<TriggerRun> {
+    const key = `${projectId}:${triggerId}`;
+    const prior = this.firing.get(key) ?? Promise.resolve();
+    const next = prior.catch(() => {}).then(() => this.fireOne(projectId, dir, triggerId, opts));
+    this.firing.set(key, next);
+    try { return await next; }
+    finally { if (this.firing.get(key) === next) this.firing.delete(key); }
+  }
+
+  private async fireOne(projectId: string, dir: string, triggerId: string, opts: { kind: "scheduled" | "webhook" | "manual"; body?: unknown; event?: string; delivery?: string }): Promise<TriggerRun> {
     const data = readTriggers(dir);
     const t = data.triggers.find((x) => x.id === triggerId);
     const now = Date.now();
@@ -60,7 +70,7 @@ export class TriggerRunner {
     };
     if (!t) return { trigger: triggerId, at: now, ok: false, note: "no such trigger" };
     if (opts.delivery) {
-      const key = `${triggerId}:${opts.delivery}`;
+      const key = `${projectId}:${triggerId}:${opts.delivery}`;
       if (this.seen.has(key)) return { trigger: triggerId, at: now, ok: false, note: "skipped: already delivered" };
       this.seen.set(key, now);
       if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.keys().next().value!);

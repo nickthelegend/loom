@@ -453,6 +453,7 @@ export interface OrchestraHost {
   createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   /** Does this thread exist? Asked before a run is told to answer in one. */
   chatExists?(id: string): boolean;
+  assertChatWritable?(id: string): void;
   /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
   /**
    * The memory brief for a task. May be async: with the dense channel on
@@ -460,8 +461,8 @@ export interface OrchestraHost {
    * millisecond of real work rather than a lookup.
    */
   briefingFor(query: string, agentId: string, files?: string[]): string | Promise<string>;
-  /** Throws when `agentId` is over budget or quarantined. */
-  gate(agentId: string): void;
+  /** Throws when the resolved kind is forbidden, or the agent is over budget or quarantined. */
+  gate(agentId: string, kind?: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
   observe(event: LoomEvent): void;
   /** A reply as it's written, for the live view (never logged — see StreamDelta). */
@@ -1037,6 +1038,10 @@ export class OrchestraEngine {
     return [...this.live.values()].find((a) => a.id === instanceId);
   }
   private gitLock = new Mutex();
+  private admissionLock = new Mutex();
+  private operations = new Map<string, Promise<unknown>>();
+  private stopping = new Set<string>();
+  private startingChats = new Map<string, number>();
   private turnText = new Map<string, string>();
   private orchestratorBusy = new Set<string>();
   // Run-scoped credentials never belong in the persisted/public run record.
@@ -1177,6 +1182,13 @@ export class OrchestraEngine {
     return this.list().find((r) => !isTerminal(r.status));
   }
 
+  /** Chat moves wait until all of a run's writers, including preparation and stop, have settled. */
+  chatBusy(chat: string): boolean {
+    if (this.startingChats.has(chat)) return true;
+    return this.list().some(run => (run.chat === chat || run.tasks.some(task => task.chat === chat)) &&
+      (!isTerminal(run.status) || this.stopping.has(run.id) || [...this.operations.keys()].some(key => key.startsWith(`${run.id}/`))));
+  }
+
   /** Every goal in flight, with the paths it expects to touch. */
   runningScopes(): GoalScope[] {
     return this.list()
@@ -1250,6 +1262,21 @@ export class OrchestraEngine {
   }
 
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
+    if (opts.chat) {
+      this.host.assertChatWritable?.(opts.chat);
+      this.startingChats.set(opts.chat, (this.startingChats.get(opts.chat) ?? 0) + 1);
+    }
+    try { return await this.admissionLock.run(() => this.startAdmitted(opts)); }
+    finally {
+      if (opts.chat) {
+        const remaining = this.startingChats.get(opts.chat)! - 1;
+        if (remaining) this.startingChats.set(opts.chat, remaining);
+        else this.startingChats.delete(opts.chat);
+      }
+    }
+  }
+
+  private async startAdmitted(opts: OrchestraStartOptions): Promise<OrchestraRun> {
     if (opts.workers?.some(w => w.startsWith("best:"))) {
       if (opts.workers.length !== 1 || !/^best:\d+$/.test(opts.workers[0]!)) throw new Error("use best:N as the entire worker fleet");
       opts = { ...opts, workers: await this.selectBest(Number(opts.workers[0]!.slice(5)), this.host.roster().map(a => a.id)) };
@@ -1289,7 +1316,7 @@ export class OrchestraEngine {
       for (const k of kinds) { const cfg = this.resolveAgent(`team:${k}`); if (cfg && !workers.some((x) => x.id === cfg.id)) workers.push(cfg); }
     }
     if (opts.race && workers.length < 2) throw new Error("a race needs at least two agents");
-    this.host.gate(orchCfg.id);
+    this.host.gate(orchCfg.id, orchCfg.kind);
     const blocked = this.host.coordinator?.()?.canStart?.();
     if (blocked) throw new Error(blocked);
 
@@ -1460,6 +1487,7 @@ export class OrchestraEngine {
   /** The human answers an orchestrator's question (or adds direction mid-run). */
   async reply(runId: string, text: string): Promise<OrchestraRun> {
     const run = this.mustGet(runId);
+    this.host.assertChatWritable?.(run.chat);
     const msg = text.trim();
     if (!msg) throw new Error("empty reply");
     if (isTerminal(run.status) && run.status !== "completed") {
@@ -1500,6 +1528,7 @@ export class OrchestraEngine {
    */
   async reopen(runId: string, text: string, why: string): Promise<OrchestraRun> {
     const run = this.mustGet(runId);
+    this.host.assertChatWritable?.(run.chat);
     if (run.status !== "completed") throw new Error(`run ${run.id} is ${run.status} — only a completed goal can be reopened`);
     run.status = "reviewing";
     run.summary = undefined;
@@ -1526,38 +1555,50 @@ export class OrchestraEngine {
     run.moving = true;
     this.save(run);
     this.emit(run, "moving", { to: where });
-    const grace = opts.graceMs ?? 120_000;
-    const busy = () => this.orchestratorBusy.has(run.id) || run.tasks.some((t) => t.status === "running");
-    const deadline = Date.now() + grace;
-    while (busy() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-    // Out of patience: stop what's still going; each such task resumes where it left off.
-    for (const t of run.tasks) {
-      if (t.status !== "running") continue;
-      t.status = "pending";
-      t.queued.unshift("You were moved to another machine mid-task. Your work so far is committed in this worktree — continue your task where you left off.");
-    }
-    await this.stopAll(run);
-    this.orchestratorBusy.delete(run.id);
-    const refs: string[] = [];
-    await this.gitLock.run(async () => {
-      await commitAll(run.dir, `orchestra ${run.id}: moved to ${where}`).catch(() => false);
-      await git(["push", "-q", "-f", "origin", `${run.branch}:${runRef(run.id, "main")}`], run.dir);
-      refs.push(runRef(run.id, "main"));
+    try {
+      const grace = opts.graceMs ?? 120_000;
+      const busy = () => this.orchestratorBusy.has(run.id) || run.tasks.some((t) => t.status === "running");
+      const deadline = Date.now() + grace;
+      while (busy() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+      // Out of patience: stop what's still going; each such task resumes where it left off.
       for (const t of run.tasks) {
-        if (!t.dir || !t.branch || !fs.existsSync(t.dir)) continue;
-        await commitAll(t.dir, `orchestra ${run.id}/${t.id}: work in progress, moved to ${where}`).catch(() => false);
-        await git(["push", "-q", "-f", "origin", `${t.branch}:${runRef(run.id, t.id)}`], t.dir);
-        refs.push(runRef(run.id, t.id));
+        if (t.status !== "running") continue;
+        t.status = "pending";
+        t.queued.unshift("You were moved to another machine mid-task. Your work so far is committed in this worktree — continue your task where you left off.");
       }
-    });
-    const record: OrchestraRun = JSON.parse(JSON.stringify({ ...run, moving: undefined, movedTo: undefined }));
-    run.moving = undefined;
-    run.status = "moved";
-    run.movedTo = { where, at: Date.now() };
-    this.save(run);
-    this.forgetRun(run.id);
-    this.emit(run, "moved", { to: where, refs });
-    return { record, refs };
+      await this.stopAll(run);
+      this.orchestratorBusy.delete(run.id);
+      const refs: string[] = [];
+      await this.gitLock.run(async () => {
+        await commitAll(run.dir, `orchestra ${run.id}: moved to ${where}`).catch(() => false);
+        await git(["push", "-q", "-f", "origin", `${run.branch}:${runRef(run.id, "main")}`], run.dir);
+        refs.push(runRef(run.id, "main"));
+        for (const t of run.tasks) {
+          if (!t.dir || !t.branch || !fs.existsSync(t.dir)) continue;
+          await commitAll(t.dir, `orchestra ${run.id}/${t.id}: work in progress, moved to ${where}`).catch(() => false);
+          await git(["push", "-q", "-f", "origin", `${t.branch}:${runRef(run.id, t.id)}`], t.dir);
+          refs.push(runRef(run.id, t.id));
+        }
+      });
+      const record: OrchestraRun = JSON.parse(JSON.stringify({ ...run, moving: undefined, movedTo: undefined }));
+      run.moving = undefined;
+      run.status = "moved";
+      run.movedTo = { where, at: Date.now() };
+      this.save(run);
+      this.forgetRun(run.id);
+      this.emit(run, "moved", { to: where, refs });
+      return { record, refs };
+    } catch (error) {
+      run.moving = undefined;
+      this.rebrief.add(run.id);
+      this.save(run);
+      this.emit(run, "move_failed", { message: (error as Error).message });
+      if (run.status === "running") this.schedule(run);
+      else if (run.status === "planning" || run.status === "reviewing") {
+        void this.orchestratorTurn(run, `The move failed; continue here.\n\n${this.statusReport(run)}`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1759,6 +1800,7 @@ export class OrchestraEngine {
       if (!pick) throw new Error(`pick an entrant to apply: ${run.tasks.map((t) => t.id).join(", ")}`);
       if (pick.status !== "done" || !pick.branch) throw new Error(`${pick.id} didn't finish, so there's nothing of it to apply`);
       await this.gitLock.run(async () => {
+        await this.assertNoMerge(dir);
         if (run.applied) throw new Error(`${run.applied.task ?? "an entrant"} was already applied from this race`);
         try {
           await git(
@@ -1766,7 +1808,9 @@ export class OrchestraEngine {
             dir,
           );
         } catch (err) {
-          await git(["merge", "--abort"], dir).catch(() => {});
+          if (await gitOk(["rev-parse", "--verify", "MERGE_HEAD"], dir)) {
+            await git(["merge", "--abort"], dir).catch(() => {});
+          }
           throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
         }
         run.applied = { at: Date.now(), into, task: pick.id };
@@ -1786,6 +1830,7 @@ export class OrchestraEngine {
     }
     let already = false;
     await this.gitLock.run(async () => {
+      await this.assertNoMerge(dir);
       await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
       // already in this branch (a worker pushed it and you pulled, or it was applied by hand):
       // record it, without a merge commit that changes nothing (field: a chain left a run "unapplied")
@@ -1799,7 +1844,9 @@ export class OrchestraEngine {
           dir,
         );
       } catch (err) {
-        await git(["merge", "--abort"], dir).catch(() => {});
+        if (await gitOk(["rev-parse", "--verify", "MERGE_HEAD"], dir)) {
+          await git(["merge", "--abort"], dir).catch(() => {});
+        }
         throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
       }
     });
@@ -1807,6 +1854,12 @@ export class OrchestraEngine {
     this.save(run);
     this.emit(run, "applied", { into, ...(already ? { already: true } : {}) });
     return { merged: run.branch, into, ...(already ? { already: true } : {}) };
+  }
+
+  private async assertNoMerge(dir: string): Promise<void> {
+    if (await gitOk(["rev-parse", "--verify", "MERGE_HEAD"], dir)) {
+      throw new Error("a merge is already in progress — finish or abort it before Apply");
+    }
   }
 
   /** What one task changed on its branch since the run began — a race entrant's diff. */
@@ -1820,15 +1873,15 @@ export class OrchestraEngine {
   }
 
   /**
-   * Remove the worktrees of runs that finished more than `days` ago — they're
-   * on their branches; the checkouts are only disk (#295). Returns the runs swept.
+   * Remove clean worktrees of runs that finished more than `days` ago.
+   * Dirty worktrees stay: their branches may not contain all their work.
    */
   async sweep(days = ORCHESTRA_KEEP_DAYS, now = Date.now()): Promise<string[]> {
     const swept: string[] = [];
     for (const run of [...this.runs.values()]) {
       if (!isTerminal(run.status) || now - (run.updatedAt ?? 0) < days * 86_400_000) continue;
       if (!run.dir || !fs.existsSync(run.dir)) continue;
-      await this.cleanup(run.id).catch(() => {});
+      try { await this.cleanup(run.id); } catch { continue; }
       // the run's folder goes too once its worktrees are out of it
       const root = path.dirname(run.dir);
       if (path.basename(root) === run.id) fs.rmSync(root, { recursive: true, force: true });
@@ -1844,7 +1897,15 @@ export class OrchestraEngine {
     await this.stopAll(run);
     const dirs = [run.dir, ...run.tasks.map((t) => t.dir).filter((d): d is string => !!d)];
     await this.gitLock.run(async () => {
-      for (const d of dirs) await git(["worktree", "remove", "--force", d], this.host.projectDir).catch(() => {});
+      for (const d of dirs) {
+        if (!fs.existsSync(d)) continue;
+        if ((await git(["status", "--porcelain", "--untracked-files=all", "--ignored"], d)).trim()) {
+          throw new Error(`worktree ${d} has uncommitted files — keep or commit them before cleanup`);
+        }
+      }
+      for (const d of dirs) {
+        if (fs.existsSync(d)) await git(["worktree", "remove", d], this.host.projectDir);
+      }
       await git(["worktree", "prune"], this.host.projectDir).catch(() => {});
     });
     this.emit(run, "cleaned");
@@ -1910,13 +1971,33 @@ export class OrchestraEngine {
     return run;
   }
 
+  private async track<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const pending = fn();
+    this.operations.set(key, pending);
+    try { return await pending; }
+    finally { if (this.operations.get(key) === pending) this.operations.delete(key); }
+  }
+
+  private cancelled(run: OrchestraRun, task?: OrchestraTask): boolean {
+    return isTerminal(run.status) || Boolean(run.moving) || this.stopping.has(run.id) || Boolean(task && task.status !== "running");
+  }
+
   private async stopAll(run: OrchestraRun): Promise<void> {
-    for (const [key, agent] of [...this.live.entries()]) {
-      if (!key.startsWith(`${run.id}/`)) continue;
-      this.live.delete(key);
-      if (agent.busy()) await agent.interrupt().catch(() => {});
-      await agent.stop().catch(() => {});
-    }
+    this.stopping.add(run.id);
+    const mine = (key: string) => key.startsWith(`${run.id}/`);
+    try {
+      for (const [key, agent] of this.live) {
+        if (mine(key) && agent.busy()) await agent.interrupt().catch(() => {});
+      }
+      // Startup can finish after interrupt. Wait before the final stop so it cannot resurrect an adapter.
+      await Promise.allSettled([...this.operations].filter(([key]) => mine(key)).map(([, pending]) => pending));
+      for (const [key, agent] of [...this.live]) {
+        if (!mine(key)) continue;
+        this.live.delete(key);
+        if (agent.busy()) await agent.interrupt().catch(() => {});
+        await agent.stop().catch(() => {});
+      }
+    } finally { this.stopping.delete(run.id); }
   }
 
   // ── the orchestrator ──
@@ -1938,7 +2019,7 @@ export class OrchestraEngine {
   }
 
   private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
-    if (isTerminal(run.status) || run.moving) return;
+    if (this.cancelled(run)) return;
     // a resumed run's orchestrator is a fresh session: its first turn carries the instructions again
     if (!briefing && this.rebrief.delete(run.id)) briefing = this.briefingOf(run);
     if (this.overBudget(run)) return;
@@ -1953,9 +2034,13 @@ export class OrchestraEngine {
     this.turnText.set(key, "");
     let reply = "";
     try {
-      this.host.gate(run.orchestrator.agent);
+      this.host.assertChatWritable?.(run.chat);
+      this.host.gate(run.orchestrator.agent, this.resolveAgent(run.orchestrator.agent)?.kind ?? run.orchestrator.kind);
       const agent = this.orchestratorAgent(run);
-      await agent.start();
+      this.host.gate(agent.id, agent.kind);
+      await this.track(key, () => agent.start());
+      if (this.cancelled(run)) { this.orchestratorBusy.delete(run.id); return; }
+      this.host.gate(agent.id, agent.kind);
       this.host.append({
         kind: "message",
         chat: run.chat,
@@ -1965,17 +2050,18 @@ export class OrchestraEngine {
         project: this.host.projectId, api: this.host.apiUrl?.() ?? "",
       } : undefined) : null;
       try {
-        await agent.send({ text, ...(briefing ? { briefing } : {}),
-          ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) } satisfies SendInput);
+        await this.track(key, () => agent.send({ text, ...(briefing ? { briefing } : {}),
+          ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) } satisfies SendInput));
       } finally { mcp?.cleanup(); }
       reply = this.turnText.get(key) ?? "";
       this.turnText.delete(key); // read once per turn; reset before the next
     } catch (err) {
       this.orchestratorBusy.delete(run.id);
+      if (this.cancelled(run)) return;
       return this.finish(run, "failed", `orchestrator failed: ${(err as Error).message}`);
     }
     this.orchestratorBusy.delete(run.id);
-    if (isTerminal(run.status)) return;
+    if (this.cancelled(run)) return;
 
     const actions = parseOrchestraActions(reply);
     if (actions === null) {
@@ -2191,7 +2277,7 @@ export class OrchestraEngine {
       task.reported = false;
       this.emit(run, "task", { task: taskSummary(task) });
     }
-    if (run.status !== "running" || run.moving) return;
+    if (run.status !== "running" || this.cancelled(run)) return;
     if (this.overBudget(run)) return;
     const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
     let slots = run.maxParallel - inFlight;
@@ -2295,12 +2381,12 @@ export class OrchestraEngine {
     this.admitting.add(key);
     let a: Admission;
     try {
-      a = await coord.admit(run, task);
+      a = await this.track(key, () => coord.admit(run, task));
     } catch (err) {
       a = { go: false, hold: { kind: "capacity", reason: `team hub unreachable: ${(err as Error).message}`, since: Date.now() } };
     }
     this.admitting.delete(key);
-    if (isTerminal(run.status) || task.status !== "pending") return;
+    if (isTerminal(run.status) || run.moving || this.stopping.has(run.id) || task.status !== "pending") return;
     if (!a.go) {
       const was = task.hold?.reason;
       task.hold = { ...a.hold, since: task.hold?.since ?? a.hold.since, checkedAt: Date.now() };
@@ -2317,7 +2403,7 @@ export class OrchestraEngine {
     if (a.note) this.addNote(run.id, a.note);
     if (a.rebase) {
       try {
-        await this.syncWithBase(run);
+        await this.track(key, () => this.syncWithBase(run));
       } catch (err) {
         task.hold = { kind: "decide", reason: `couldn't bring fresh ${run.baseBranch ?? "main"} into the goal before starting: ${(err as Error).message}`, since: Date.now() };
         this.save(run);
@@ -2352,7 +2438,7 @@ export class OrchestraEngine {
 
   /** When nothing can move without the orchestrator, give it a turn. */
   private maybeReview(run: OrchestraRun): void {
-    if (run.status !== "running" || this.orchestratorBusy.has(run.id)) return;
+    if (run.status !== "running" || this.cancelled(run) || this.orchestratorBusy.has(run.id)) return;
     if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))) return;
     if (run.race) {
       // A race has no reviewer: it's over when every entrant has finished.
@@ -2426,6 +2512,7 @@ export class OrchestraEngine {
   }
 
   private async runTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    if (isTerminal(run.status) || run.moving || this.stopping.has(run.id) || task.status !== "pending") return;
     task.status = "running";
     task.attempts++;
     task.startedAt ??= Date.now();
@@ -2436,24 +2523,30 @@ export class OrchestraEngine {
 
     const key = `${run.id}/${task.id}`;
     try {
-      if (!isRemoteWorker(task.agent)) this.host.gate(task.agent);
+      this.host.assertChatWritable?.(task.chat);
+      if (!isRemoteWorker(task.agent)) this.host.gate(task.agent, task.kind);
       if (!task.dir) {
         const slug = task.id;
         const branch = `${run.branch.replace(/\/main$/, "")}/${slug}`;
         const dir = path.join(path.dirname(run.dir), slug);
-        await this.gitLock.run(async () => {
+        await this.track(key, () => this.gitLock.run(async () => {
+          if (this.cancelled(run, task)) return;
           // Branch from the integration tip, so dependencies' work is there.
           const tip = (await git(["rev-parse", "HEAD"], run.dir)).trim();
+          if (this.cancelled(run, task)) return;
           await createWorktree(this.host.projectDir, dir, branch, tip);
-        });
-        task.branch = branch;
-        task.dir = dir;
-        this.save(run);
+        }));
+        if (fs.existsSync(dir)) {
+          task.branch = branch;
+          task.dir = dir;
+          this.save(run);
+        }
       }
+      if (this.cancelled(run, task)) return;
       if (isRemoteWorker(task.agent)) {
         await this.runRemoteTask(run, task);
         if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
-        await this.integrate(run, task);
+        await this.track(key, () => this.integrate(run, task));
       } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
       if (run.race) await this.snapshotRaceTask(run, task).catch(() => {});
@@ -2477,6 +2570,7 @@ export class OrchestraEngine {
    * task already reported itself) — runTask then has nothing more to record.
    */
   private async runLocalTurn(run: OrchestraRun, task: OrchestraTask, key: string): Promise<boolean> {
+    if (this.cancelled(run, task)) return false;
     let agent = this.live.get(key);
     const freshSession = !agent;
     if (!agent) {
@@ -2492,8 +2586,9 @@ export class OrchestraEngine {
       }, task.dir!);
       this.live.set(key, agent);
       this.wire(run, agent, cfg.id, task.chat, key);
-      await agent.start();
+      await this.track(key, () => agent!.start());
     }
+    if (this.cancelled(run, task)) return false;
 
     // The first attempt always sends the task itself — a follow-up the
     // orchestrator queued in the same breath waits its turn behind it.
@@ -2521,18 +2616,20 @@ export class OrchestraEngine {
           runGoal: run.goal,
           task,
           branch: task.branch!,
-          brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
+          brain: await this.track(key, async () => this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? [])),
           ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
         })
       : undefined;
+    if (this.cancelled(run, task)) return false;
+    this.host.gate(task.agent, task.kind);
     const mcp = agent.capabilities.mcp && this.host.apiUrl?.() ? writeLoomMcpSession(this.host.mcps?.(), {
       project: this.host.projectId, api: this.host.apiUrl(), run: run.id, task: task.id,
     }) : null;
     try {
-      await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
-        ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) });
+      await this.track(key, () => agent!.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
+        ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) }));
     } finally { mcp?.cleanup(); }
-    if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
+    if (isTerminal(run.status) || this.stopping.has(run.id) || (task.status as TaskStatus) === "cancelled") return false;
     // paused mid-turn (pauseTask): not finished, nothing to integrate yet
     if ((task.status as TaskStatus) === "pending") {
       this.schedule(run);
@@ -2573,7 +2670,7 @@ export class OrchestraEngine {
       // worktree before merging.
       task.status = "pending";
     } else {
-      await this.integrate(run, task);
+      await this.track(key, () => this.integrate(run, task));
     }
     return true;
   }
@@ -2586,7 +2683,8 @@ export class OrchestraEngine {
   private async runRemoteTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const coord = this.host.coordinator?.();
     if (!coord?.runRemote) throw new Error("no teammate's machine can take this task (Loom Teams isn't set up here)");
-    const base = (await git(["rev-parse", "HEAD"], task.dir!)).trim();
+    const base = (await this.track(`${run.id}/${task.id}`, () => git(["rev-parse", "HEAD"], task.dir!))).trim();
+    if (this.cancelled(run, task)) return;
     // a later attempt is the orchestrator's follow-up, on top of what the first one did
     const followUp = task.attempts > 1 ? task.queued.shift() : undefined;
     const prompt = followUp
@@ -2635,6 +2733,7 @@ export class OrchestraEngine {
     if (run.race) {
       // An entrant's work stays on its own branch, to be compared, not merged.
       await this.snapshotRaceTask(run, task);
+      if (isTerminal(run.status) || task.status !== "running") return;
       task.status = "done";
       return;
     }
@@ -2647,11 +2746,13 @@ export class OrchestraEngine {
       // Anything the orchestrator left lying in the integration tree would
       // block the merge; record it rather than lose it.
       await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`);
+      if (isTerminal(run.status) || task.status !== "running") return;
       try {
         await git(
           ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `orchestra ${task.id}: ${task.title}`, task.branch!],
           run.dir,
         );
+        if (isTerminal(run.status) || task.status !== "running") return;
         task.status = "done";
         task.mergeCommit = (await git(["rev-parse", "HEAD"], run.dir)).trim();
         const stat = await git(["diff", "--shortstat", `${task.mergeCommit}^1`, task.mergeCommit], run.dir).catch(() => "");
