@@ -6,6 +6,8 @@
  * what is sent, because "anonymous analytics" alone is a claim, not a fact.
  */
 
+import { ACCENTS, type Accent } from "./shell-model";
+import { accent, pickAccent } from "./theme";
 import type { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "react-native";
@@ -226,6 +228,18 @@ export function AccountSheet(props: {
           </View>
         </Panel>
       </View>
+
+      <Panel>
+        <SectionLabel text="Accent colour · this device" />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {(Object.keys(ACCENTS) as Accent[]).map(a => <TouchableOpacity key={a} accessibilityRole="radio" accessibilityLabel={a}
+            accessibilityState={{ selected: accent === a }} onPress={() => pickAccent(a)}
+            style={{ padding: 10, borderRadius: radii.key, borderWidth: 1, borderColor: accent === a ? T.thread : T.line }}>
+            <Text style={{ color: T.text }}>{a}</Text>
+          </TouchableOpacity>)}
+        </View>
+        <Text style={{ color: T.dim, fontSize: 12, marginTop: 8 }}>Text follows your phone’s font size. Motion follows its accessibility setting.</Text>
+      </Panel>
 
       {/* privacy — only a build that can send the stats (Supabase configured) asks about them */}
       {supabaseConfigured && (

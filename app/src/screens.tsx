@@ -10,6 +10,9 @@ import { firstUnread, variables } from "./chat-composer-model";
  * it is actually about.
  */
 
+import { ShellSearch } from "./shell-search";
+import { scopeOf } from "./cache-model";
+import { parseLocation } from "./shell-model";
 import { forecastLine } from "./forecast-model";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { INSTALL_URL, open as openLink } from "./links";
@@ -434,7 +437,7 @@ function ProjectCard(props: { p: Project; onPress: () => void }) {
 
 export function BoardScreen(props: {
   creds: Creds;
-  onOpen: (p: Project) => void;
+  onOpen: (p: Project, chat?: { id: string; title: string }) => void;
   onUnpair: () => void;
   /** Opens the Fleet screen: every agent in every open project. */
   onFleet: () => void;
@@ -577,6 +580,8 @@ export function BoardScreen(props: {
         <Text style={{ color: T.text, fontSize: 24, fontWeight: "800", letterSpacing: -0.3 }}>
           Welcome back
         </Text>
+
+        <ShellSearch creds={props.creds} onOpen={props.onOpen} />
 
         {/* stat tiles — real Loom metrics */}
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
@@ -860,12 +865,33 @@ export function ProjectScreen(props: {
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
   const [crewFocus, setCrewFocus] = useState(props.initialCrewId);
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
+  const [locationReady, setLocationReady] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    void kv.get("loom.location." + scopeOf(creds.url)).then(async raw => {
+      if (gone) return;
+      const last = parseLocation(raw);
+      if (last?.project === project.id) {
+        if (!props.initialChat) {
+          const result = await getChats(creds, project.id).catch(() => null);
+          if (gone) return;
+          setChatId(result && !result.chats.some(c => c.id === last.chat) ? "main" : last.chat);
+        }
+        if (!props.initialChat && !props.initialTab && TABS.some(t => t.key === last.tab)) setTab(last.tab as Tab);
+      }
+      setLocationReady(true);
+    }).catch(() => { if (!gone) setLocationReady(true); });
+    return () => { gone = true; };
+  }, [creds.url, project.id]);
+  useEffect(() => {
+    if (locationReady) void kv.set("loom.location." + scopeOf(creds.url), JSON.stringify({ project: project.id, chat: chatId, tab })).catch(() => {});
+  }, [locationReady, creds.url, project.id, chatId, tab]);
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
   const [importing, setImporting] = useState(false);
   const [groupOpen, setGroupOpen] = useState<{ g: NonNullable<Chat["group"]>; chats: Chat[] } | null>(null);
   const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
-  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
+  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => { setChats(chats); }).catch(() => {});
   // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
   const act = async (fn: () => Promise<unknown>, gone?: string) => {
     try {

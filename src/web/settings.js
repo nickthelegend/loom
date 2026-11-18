@@ -1,6 +1,7 @@
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
 
+import { renderShortcuts } from './shortcuts.js';
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,logout } from './connection.js';
@@ -41,6 +42,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       { id: "setup", label: "Setup", icon: ICONS.tasks },
       { id: "diagnostics", label: "Diagnostics", icon: ICONS.console },
       { id: "models", label: "Models", icon: ICONS.gear },
+      { id: "shortcuts", label: "Shortcuts", icon: ICONS.keyboard },
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
@@ -389,6 +391,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           var on = appearancePref("accent", "cyan") === k;
           return '<button type="button" class="accentsw' + (on ? " on" : "") + '" data-accent="' + k + '" aria-pressed="' + on + '" title="' + k + '" style="--sw:' + ACCENTS[k][0] + '"></button>';
         }).join("") + "</div></div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Motion</div><div class="pd">Reduce animations, or follow your operating system.</div></div><div class="pc">' + seg("motion", [{ v: "system", l: "System" }, { v: "reduce", l: "Reduced" }], appearancePref("motion", "system")) + "</div></div>";
       h += '<div class="sgrouph">Notifications · this device</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">When a long turn finishes</div>' +
         '<div class="pd">A notification when an agent finishes something that took more than 20 seconds, while Loom is in the background.</div></div>' +
@@ -413,6 +416,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         toast(v === "on" ? "you’ll hear when long turns finish" : "finish notifications off");
       });
       bindSeg("chime", function(v){ setDevicePref("chime", v === "on"); if (v === "on") chime(); });
+      bindSeg("motion", function(v){ try { localStorage.setItem("loomPref:motion", v); } catch (e) {} applyAppearance(); });
       bindSeg("textsize", function(v){ try { localStorage.setItem("loomPref:textsize", v); } catch (e) {} applyAppearance(); });
       bindSeg("density", function(v){ try { localStorage.setItem("loomPref:density", v); } catch (e) {} applyAppearance(); });
       Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(b){
@@ -1095,6 +1099,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       gen++;
       if (cur === "diagnostics") renderDiag();
       else if (cur === "models") renderModelRouting(pane, pid, sapi);
+      else if (cur === "shortcuts") renderShortcuts(pane);
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();

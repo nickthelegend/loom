@@ -72,7 +72,7 @@ export function createBrain(view) {
         if (!shown.length) {
           list = '<div class="bempty">' + (memories.length ? "" : emptyArt("brain")) + (memories.length
             ? "No " + esc(view.brainKind) + " memories yet."
-            : continuity.enabled ? "Your original user messages are protected automatically. Review packets and source-backed checkpoints through native continuity diagnostics." : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
+            : continuity.enabled ? "Your original user messages are protected automatically. Review packets and source-backed checkpoints through native continuity diagnostics." : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + '<div><button class="btn outline xs" id="memory-start">Remember a decision</button></div></div>';
         } else if (state.brainGraph && devMode()) {
           list = '<div class="bgraph" id="bgraph"></div>';
         } else {
@@ -233,6 +233,8 @@ export function createBrain(view) {
         };
         // Add is live only when there's something to add — an Add that did
         // nothing on an empty box looked broken.
+        var start = document.getElementById("memory-start");
+        if (start) start.onclick = function(){ document.getElementById("decbox").focus(); document.getElementById("decbox").scrollIntoView({ block: "center" }); };
         var decBtn = document.querySelector("#decform button[type=submit]");
         var decBox = document.getElementById("decbox");
         var decSync = function(){ if (decBtn) decBtn.disabled = !(decBox.value || "").trim(); };

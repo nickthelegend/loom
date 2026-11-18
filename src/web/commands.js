@@ -4,7 +4,7 @@ import { openConnectPhone } from './connect-phone.js';
 import { api } from './connection.js';
 import { openJoin } from './join.js';
 import { openShortcuts,setFocusMode } from './navigation.js';
-import { askText,toast } from './notifications.js';
+import { openNotificationHistory,askText,toast } from './notifications.js';
 import { openPalette } from './palette.js';
 import { openProjectModal,openProjectSettings,openSettingsModal } from './settings.js';
 import { isDesktop } from './shell.js';
@@ -34,6 +34,8 @@ import { devMode, SIMPLE_TABS } from './mode.js';
     var needProject = function(){ if (!state.pid || !state.showTab) { toast("open a project first"); return false; } return true; };
     // a menu shortcut for a Developer tool, pressed in Simple mode: say where it is rather than half-open it
     if (!devMode() && devOnly(item)) { toast("That\u2019s a Developer mode tool \u2014 turn it on in Settings \u2192 Preferences"); return; }
+    var command = COMMANDS.find(function(c){ return c.id === item; });
+    if (command && item !== "palette" && (!command.needsProject || state.pid)) rememberCommand(item);
     if (item.indexOf("tab:") === 0) { if (needProject()) state.showTab(item.slice(4)); return; }
     if (item.indexOf("theme:") === 0) {
       setThemePref(item.slice(6)); // "system" follows the OS from here on
@@ -103,12 +105,13 @@ import { devMode, SIMPLE_TABS } from './mode.js';
       case "approvals": click("apbadge", "no tool calls are waiting on you"); return;
       case "add-agent": if (state.showRail) { if (!document.querySelector(".dshell.railopen")) click("railbtn"); state.showRail("agents"); } else toast("open a project first"); return;
       case "tools": if (state.showTab) state.showTab("thread"); click("morebtn", "open a chat first"); return;
-      case "home": if (state.selectProject && state.projects && state.projects.length) location.hash = ""; return;
+      case "home": if (state.goHome) state.goHome(); else location.hash = "#home"; return;
       case "invite": click("invitebtn", "open a project on GitHub to invite someone to it"); return;
       case "join":
         askLink();
         return;
-      case "shortcuts": openShortcuts(); return;
+      case "shortcuts": openSettingsModal("shortcuts"); return;
+      case "notifications": openNotificationHistory(); return;
       case "triggers": if (needProject()) openTriggers(state.pid, state.project && state.project.name); return;
       case "bridges": if (!scrim) openSettingsModal("bridges"); return;
       case "split-right": case "split-down": {
@@ -153,6 +156,8 @@ import { devMode, SIMPLE_TABS } from './mode.js';
    * The same names the menu bar sends, so ⌘K and the menu never drift.
    */
   var COMMANDS = [
+    ["palette", "Search everything", "⌘K", ICONS.search, false],
+    ["notifications", "Notification history", "", ICONS.clock, false],
     ["new-chat", "New chat", "⌘N", ICONS.chat, true],
     ["new-task", "New task", "⌘⇧N", ICONS.tasks, false],
     ["orchestrate", "New orchestra", "⌘⇧O", ICONS.orchestra, true],
@@ -192,6 +197,12 @@ import { devMode, SIMPLE_TABS } from './mode.js';
     ["team-settings", "Team settings", "", ICONS.team, false],
     ["pair", "Connect a phone", "⌘⇧P", ICONS.phone, false],
     ["cloud", "Loom Cloud", "", ICONS.cloud, false],
+    ["import-chats", "Import chats from your agents", "⌘⇧I", ICONS.download, true],
+    ["project:next", "Next project", "⌥⌘ArrowDown", ICONS.folder, false],
+    ["project:prev", "Previous project", "⌥⌘ArrowUp", ICONS.folder, false],
+    ["chat:next", "Next chat", "⌘⇧]", ICONS.chat, true],
+    ["chat:prev", "Previous chat", "⌘⇧[", ICONS.chat, true],
+    ["home", "All projects", "⌘⇧H", ICONS.folder, false],
     ["settings", "Settings", "⌘,", ICONS.gear, false],
     ["theme:light", "Light theme", "", ICONS.sun, false],
     ["theme:dark", "Dark theme", "", ICONS.moon, false],
@@ -206,4 +217,6 @@ import { devMode, SIMPLE_TABS } from './mode.js';
     return !!DEV_COMMANDS[id];
   }
 
-export { COMMANDS,devOnly,runCommand };
+function recentCommands(){ try { var ids = JSON.parse(localStorage.getItem('loomRecentCommands:v1') || '[]'); return Array.isArray(ids) ? ids.filter(function(id){ return typeof id === 'string'; }).slice(0, 8) : []; } catch (e) { return []; } }
+function rememberCommand(id){ try { localStorage.setItem('loomRecentCommands:v1', JSON.stringify([id].concat(recentCommands().filter(function(v){ return v !== id; })).slice(0, 8))); } catch (e) {} }
+export { COMMANDS,devOnly,runCommand,recentCommands };

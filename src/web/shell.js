@@ -1,4 +1,5 @@
 /** Browser shell module. See README.md for ownership and startup. */
+import { publishSelection,saveTab } from './session.js';
 import { devMode } from './mode.js';
 import { agentGlyph,agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
@@ -1033,6 +1034,7 @@ import { openTriggers } from './triggers-ui.js';
       var info = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
       if (info && info.error) { drawUnavailable(info); drawList(); return; }
       renderProject(pid, dmain, true);
+      publishSelection(pid, currentChat());
       drawList();
     }
     /**
@@ -1061,11 +1063,15 @@ import { openTriggers } from './triggers-ui.js';
     state.selectProject = select;
     state.setChat = setChat; // the palette jumps to a conversation by id
     /** The conversation you're in, per project, remembered across reloads. */
+    var liveChats = {};
     function currentChat(){
       if (!cur) return "main";
-      try { return localStorage.getItem("loomChat:" + cur) || "main"; } catch (e) { return "main"; }
+      try { return liveChats[cur] || (liveChats[cur] = localStorage.getItem("loomChat:" + cur) || "main"); } catch (e) { return "main"; }
     }
     function setChat(pidC, cid){
+      liveChats[pidC] = cid;
+      saveTab(pidC, "thread");
+      publishSelection(pidC, cid);
       try { localStorage.setItem("loomChat:" + pidC, cid); } catch (e) {}
       // opening a conversation means reading it: land on Chat, not the tab the project was on
       if (state.tabByProject) delete state.tabByProject[pidC];

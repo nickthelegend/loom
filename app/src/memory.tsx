@@ -37,6 +37,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const draftInput = useRef<TextInput>(null);
   const [draft, setDraft] = useState("");
   const [draftKind, setDraftKind] = useState<(typeof KINDS)[number]>("fact");
   const [busy, setBusy] = useState(false);
@@ -97,7 +98,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
       </Panel>
       {/* remember something */}
       <Panel>
-        <TextInput value={draft} onChangeText={setDraft} placeholder={chat.trim() ? "Remember something for this chat…" : "Remember something for every agent…"} placeholderTextColor={T.faint}
+        <TextInput ref={draftInput} value={draft} onChangeText={setDraft} placeholder={chat.trim() ? "Remember something for this chat…" : "Remember something for every agent…"} placeholderTextColor={T.faint}
           multiline style={{ color: T.text, fontSize: 14, minHeight: 44, lineHeight: 20, textAlignVertical: "top" }} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {KINDS.map((k) => (
@@ -136,7 +137,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
               <MemoryCard key={m.id} m={m} open={open === m.id} onToggle={() => setOpen(open === m.id ? null : m.id)} creds={creds} projectId={project.id} onChanged={load} />
             ))
           ) : (
-            <Empty text={list.length ? "Nothing matches." : "No memories yet. Agents add them as they work, or remember something above."} />
+            <Empty text={list.length ? "Nothing matches." : "No memories yet. Record a fact for your agents."} action={list.length ? "Clear filters" : "Remember something"} onAction={() => { if (list.length) { setQ(""); setKind(null); } else draftInput.current?.focus(); }} />
           )}
         </>
       ) : !err ? (
