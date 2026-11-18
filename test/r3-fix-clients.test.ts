@@ -69,8 +69,11 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(webDir, "README.md"), "# r3web\n");
   git("add", "-A");
   git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed");
-  fs.mkdirSync(path.join(webDir, EVIL_DIR));
-  fs.writeFileSync(path.join(webDir, EVIL_DIR, "x.txt"), "x\n");
+  // Windows forbids ">" in a folder name; the quoting test below is about POSIX shells anyway
+  if (process.platform !== "win32") {
+    fs.mkdirSync(path.join(webDir, EVIL_DIR));
+    fs.writeFileSync(path.join(webDir, EVIL_DIR, "x.txt"), "x\n");
+  }
   webId = (await admin.addProject(webDir)).project.id;
 
   cliDir = makeProjectDir({ name: "r3cli", agents: [{ id: "solo", kind: "echo" }] });
@@ -216,7 +219,7 @@ const click = (el: Element | null) => {
 // ---------------------------------------------------------------------------
 
 describe("#430.1 Explorer's Open in terminal", () => {
-  it("types a cd whose directory name is data, not shell syntax", async () => {
+  it.skipIf(process.platform === "win32")("types a cd whose directory name is data, not shell syntax", async () => {
     const m = mount(`#p/${webId}`);
     await ready(m, '.railbar .rvbtn[data-view="explorer"]');
     click($(m, '.railbar .rvbtn[data-view="explorer"]'));
