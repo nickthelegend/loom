@@ -1,10 +1,15 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 
 vi.mock("../app/node_modules/react-native/index.js", () => ({ Platform: { OS: "ios", select: (v: Record<string, unknown>) => v.ios ?? v.default } }));
 
+// These load the phone app's own modules, which need its dependencies (expo, react-native):
+// installed for the app's job and locally, not for the daemon's test matrix.
+const appDeps = fs.existsSync(path.resolve("app/node_modules/expo/package.json"));
+
+describe.skipIf(!appDeps)("phone native entry points", () => {
 it("keeps the theme palette stable while switching preferences and following system changes", async () => {
   const { T, pickTheme, onThemePref, setScheme } = await import("../app/src/theme.js");
   const original = T.bg, palette = T; const preferences: string[] = [];
@@ -37,4 +42,5 @@ it("configures all native entry points and backports Android grouping idempotent
   expect(config.plugins.find((p: unknown[]) => Array.isArray(p) && p[0] === "expo-share-intent")[1]).toEqual({
     iosActivationRules: { NSExtensionActivationSupportsText: true, NSExtensionActivationSupportsWebURLWithMaxCount: 1 }, androidIntentFilters: ["text/*"],
   });
+});
 });

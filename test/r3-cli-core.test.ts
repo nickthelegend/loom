@@ -79,7 +79,9 @@ describe("2.1 aliases and completions", () => {
     expect(() => completionScript("bad")).toThrow();
   });
   it("generates executable Bash and Zsh completion functions with the right command context", () => {
-    for (const shell of ["bash", "zsh"]) {
+    // each shell runs only where it's installed (CI's Linux images have no zsh; Windows has neither for real)
+    const installed = (shell: string) => process.platform !== "win32" && (() => { try { execFileSync(shell, ["-c", "true"], { stdio: "ignore" }); return true; } catch { return false; } })();
+    for (const shell of ["bash", "zsh"].filter(installed)) {
       const script = completionScript(shell);
       const prefix = 'loom() { [ "$*" = "completion candidates -- send" ] || return 2; printf "%s\\n" --json --wait; }; compdef() { :; }; compadd() { printf "%s\\n" "$@"; };\n';
       const invoke = shell === "bash" ? 'COMP_WORDS=(loom send --j); COMP_CWORD=2; _loom; printf "%s\\n" "${COMPREPLY[@]}"' : 'words=(loom send --j); CURRENT=3; _loom';
