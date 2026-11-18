@@ -55,6 +55,8 @@ import {
   type QueueTarget
 } from "../core/prompt-queue.js";
 import {
+  AVATAR_MAX,
+  isAvatarDataUrl,
   newId,
   projectLoomDir,
   readProjectConfig,
@@ -851,7 +853,7 @@ export class ProjectRuntime {
     if (dataUrl === null || dataUrl === "") delete cfg.avatar;
     else {
       if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error("a picture is a PNG, JPEG or WebP image");
-      if (dataUrl.length > 120_000) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
+      if (!isAvatarDataUrl(dataUrl)) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
       cfg.avatar = dataUrl;
     }
     this.saveConfig();
@@ -3851,7 +3853,7 @@ export class ProjectRuntime {
             permissions: permissionFor(cfg.kind, cfg.options),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             ...sampling(cfg),
-            ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
+            ...(isAvatarDataUrl(cfg.avatar) ? { avatar: cfg.avatar } : {}),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3881,7 +3883,7 @@ export class ProjectRuntime {
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
           ...sampling(cfg),
-          ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
+          ...(isAvatarDataUrl(cfg.avatar) ? { avatar: cfg.avatar } : {}),
           ...(isNativeKind(cfg.kind) ? { context: this.nativeUsage.context(cfg.id), limits: this.nativeUsage.limitsFor(cfg.kind, cfg.id) } : {}),
           ...((f) => (f ? { forecast: f } : {}))(this.accounting.forecast(cfg.id)),
         };

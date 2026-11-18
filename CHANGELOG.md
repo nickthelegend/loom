@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Explorer's "Open in terminal" ran shell syntax in folder names (#430).** The `cd` it typed double-quoted the path, so a folder named `$(…)` or with backticks ran as a command. It is now single-quoted for POSIX shells (`cd /d "…"` for cmd.exe).
+- **Agent pictures from `.loom/config.json` could inject HTML (#430).** A hand-written `avatar` reached every client unchecked, and the web app checked only its `data:image/…` prefix before writing it into an attribute. The daemon now reports a picture only when the whole value is a small PNG/JPEG/WebP data URL (the avatar API's own rule), and the web app validates and escapes it in the thread, the agent glyph and Project settings.
+- **`loom send --wait` to a busy agent printed the running turn's result (#430).** A queued send now waits for the `turn_started` carrying its own request id and reads its outcome from there; a send that ran at once or answered a question reads as before.
+- **`loom route` hung when the route failed while starting (#430).** A first step that couldn't start (quarantined, over budget) failed the route inside the start call, before the CLI subscribed. A route that comes back already over now exits at once with its reason, and following is backed by polling the route's state.
+- **TUI `/prompt` sent to the agent selected at startup (#430).** It now uses the agent selected now (and the current baton holder and project name) for substitution, handoff and sending.
+- **Source Control's five-second refresh wiped a half-written commit message (#430).** The draft, and its caret while focused, survive redraws and switching rail views; it clears after a commit.
+- **Phone: leaving Terminal silenced the chat on Loom Cloud (#430).** Both screens share one relay client, and the Terminal's stream replaced the chat's then unsubscribed it. Readers of the same feed now share one subscription, and closing one leaves the others reading.
+- **Phone: a dropped Loom Cloud connection left requests pending forever (#430).** Closing the relay client now settles every request in flight with a 503 (so callers' error handling and spinners finish) and answers new ones the same way.
+- **Phone: a late 401 from one computer unpaired another (#430).** A 401 now forgets only the pairing that made the request (that address and token); a repeat, or one for a token since replaced, changes nothing, and the screen only moves when the active computer was the one revoked.
+- **Phone: replies missed while the feed was down never appeared (#430).** On every stream (re)connection the chat now fetches the events since the newest one shown and reconciles the replies being typed, so a reply that finished offline shows up and a stale half-reply goes.
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

@@ -8,7 +8,7 @@ import { AppState, Platform, type AppStateStatus } from "react-native";
 import type { LiveSnapshot } from "./live-model";
 import { RelayClient, parseCloudFragment } from "./relay-client";
 import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
-import { activeMachine, credsOf, nextAfter, removeMachine, renameMachine, upsertMachine, type Machine } from "./machines-model";
+import { activeMachine, credsOf, forgetRevoked, nextAfter, removeMachine, renameMachine, upsertMachine, type Machine } from "./machines-model";
 import { supabaseRelayTransport } from "./relay-transport";
 
 // Credentials live in the device keychain on native; on web (Expo web, used for
@@ -546,6 +546,20 @@ export async function saveCreds(creds: Creds, name?: string): Promise<void> {
   await writeMachines(up.list, up.id);
 }
 
+/**
+ * Forget the pairing a 401 came back for — that computer and that token only. False when it's
+ * already gone (a second 401 for it, or it was paired again since) or it wasn't the active one:
+ * then nothing about the screen you're on changes.
+ */
+async function forgetUnauthorized(revoked: Creds): Promise<boolean> {
+  const { machines, activeId } = await listMachines();
+  const out = forgetRevoked(machines, activeId, revoked);
+  if (!out.removed) return false;
+  if (out.wasActive) connection.reset();
+  await writeMachines(out.list, out.activeId);
+  return out.wasActive;
+}
+
 /** This computer let go of the phone (revoked, or unpaired here): forget it; another paired one carries on. */
 export async function clearCreds(): Promise<void> {
   connection.reset();
@@ -913,7 +927,7 @@ export async function api<T>(
   }
   connection.sawDirect(creds);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  return settle<T>(res.status, json);
+  return settle<T>(creds, res.status, json);
 }
 
 async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
@@ -932,7 +946,7 @@ async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeo
     ...(timeoutMs ? { timeoutMs } : {}),
   });
   const json = (res.body && typeof res.body === "object" ? res.body : {}) as Record<string, unknown>;
-  return settle<T>(res.status, json);
+  return settle<T>(creds, res.status, json);
 }
 
 /**
@@ -946,11 +960,10 @@ export class ApiError extends Error {
   }
 }
 
-/** The shared tail of both routes: 401 unpairs, other errors carry the daemon's words. */
-async function settle<T>(status: number, json: Record<string, unknown>): Promise<T> {
+/** The shared tail of both routes: 401 unpairs the computer it came from, other errors carry the daemon's words. */
+async function settle<T>(creds: Creds, status: number, json: Record<string, unknown>): Promise<T> {
   if (status === 401) {
-    await clearCreds();
-    onUnauthorized?.();
+    if (await forgetUnauthorized(creds)) onUnauthorized?.();
     throw new Error("unauthorized — pair again");
   }
   if (status < 200 || status >= 300) throw new ApiError(String(json.message ?? json.error ?? `HTTP ${status}`), status);
@@ -1048,11 +1061,11 @@ export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
 
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
-export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
-  // `live`: replies being typed in this chat right now (newer daemons only)
+export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60, since?: number) =>
+  // `live`: replies being typed in this chat right now (newer daemons only; not with `since`)
   api<{ events: LoomEvent[]; live?: LiveSnapshot[] }>(
     c,
-    `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
+    `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}${since !== undefined ? `&since=${since}` : ""}`,
   );
 /** A chat from an agent's own history on the daemon's machine (core/chat-import.ts). */
 export interface ImportableChat {
@@ -2142,7 +2155,7 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
   let closed = false;
   let mode: "direct" | "cloud" | null = null;
   let ws: WebSocket | null = null;
-  let relay: RelayClient | null = null;
+  let closeRelay: (() => void) | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let chain: Promise<void> = Promise.resolve();
 
@@ -2155,8 +2168,9 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
       ws.close();
       ws = null;
     }
-    relay?.closeStream();
-    relay = null;
+    // only this reader's: the client is shared, and another screen may still be reading
+    closeRelay?.();
+    closeRelay = null;
     mode = null;
   };
 
@@ -2199,8 +2213,7 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
     try {
       const client = await connection.relayClient();
       if (closed || mode !== "cloud") return;
-      relay = client;
-      client.openStream(`Bearer ${creds.token}`, { onFrame }, projectId);
+      closeRelay = client.openStream(`Bearer ${creds.token}`, { onFrame }, projectId);
     } catch {
       mode = null;
       later(() => void pick(), 3000);
