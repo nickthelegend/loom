@@ -27,6 +27,8 @@ export interface RouteContext {
   startCloud: () => Promise<void>;
   stopCloud: (opts?: { rotate?: boolean; }) => Promise<void>;
   pushTokens: () => string[];
+  /** Close the sockets of credentials that no longer authorize (after a revoke). */
+  revalidateSockets: () => void;
   runtime: (idOrName: string) => Promise<ProjectRuntime>;
   specRunner: SpecRunner;
   startHealLoop: (rt: ProjectRuntime, agent: string, alert: string, since: number) => void;

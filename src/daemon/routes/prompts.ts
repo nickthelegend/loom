@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import { clearRecent, deletePrompt, listPrompts, savePrompt, updatePrompt } from "../../core/prompts.js";
 import { bearerToken } from "../auth.js";
 import type { RouteContext } from './context.js';
@@ -16,6 +16,12 @@ export function registerPromptsRoutes(app: Express, ctx: Pick<RouteContext, "aut
   });
 
   // ---- prompt manager (core/prompts.ts) --------------------------------
+  // Both shelves are machine-wide, and Recent holds the full text of prompts
+  // sent in every project: a token limited to some projects reaches neither.
+  app.use("/api/prompts", (req, res, next) => {
+    if (!(req as Request & { projectScope?: string[] | null }).projectScope) return void next();
+    res.status(403).json({ error: "the prompt library needs an owner or unscoped token" });
+  });
   app.get("/api/prompts", (req, res) => {
     res.json(listPrompts(String(req.query.q ?? "")));
   });
