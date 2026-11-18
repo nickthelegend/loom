@@ -2,6 +2,7 @@ import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
 import { branchBriefing } from "../../core/chat-branches.js";
 import { readProjectState } from "../../core/registry.js";
 import { AgentBase } from "../../adapters/base.js";
+import { waitingForSlot } from "../../adapters/index.js";
 import { BatonManager, NotHolderError } from "../../core/baton.js";
 import path from "node:path";
 import { triage } from "../../core/review-triage.js";
@@ -837,7 +838,8 @@ export class RuntimeTurns {
       for (const [id, chat] of this.turnChat) {
         if ((chat ?? "main") !== opts.chat) continue;
         const a = this.host.agent(id);
-        if (isAdapter(a) && a.busy()) {
+        // a turn still waiting for a daemon slot is this chat's turn too (#431)
+        if (isAdapter(a) && (a.busy() || waitingForSlot(a))) {
           if ((opts.source ?? "user") === "user") this.host.routes.onManualInterrupt();
           await a.interrupt();
           return { interrupted: id };
@@ -863,7 +865,7 @@ export class RuntimeTurns {
       this.host.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
       this.host.log.append({ kind: "status", agentId: holder, payload: { state: "queue_paused", waiting: this.host.queue.length } });
     }
-    if (isAdapter(agent) && agent.busy()) {
+    if (isAdapter(agent) && (agent.busy() || waitingForSlot(agent))) {
       await agent.interrupt();
       return { interrupted: holder };
     }

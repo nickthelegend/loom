@@ -7,7 +7,7 @@ import { resolveModel, enforceModelCap } from "../core/model-routing.js";
 
 import { readProjectConfig } from "../core/registry.js";
 import { resolveAgentAccount } from "../core/accounts.js";
-import { turnGate } from "../core/turn-gate.js";
+import { GateCancelled, turnGate } from "../core/turn-gate.js";
 import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../types.js";
 import { AntigravityCliAdapter } from "./antigravity-cli.js";
 import { AntigravityBridge } from "./bridges/antigravity.js";
@@ -128,12 +128,24 @@ export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = f
  */
 function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent {
   if (!isAdapter(agent)) return agent;
+  const gate = process.env.LOOM_TURN_GATE !== "off";
   const send = agent.send.bind(agent);
   const busy = agent.busy.bind(agent);
   let preparing = false;
   agent.busy = () => preparing || busy();
-  const say = (why: string) => (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
-    .emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
+  const emit = (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void }).emit.bind(agent);
+  const say = (why: string) => emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
+  // A turn waiting here hasn't reached the adapter, so the adapter isn't busy and
+  // its own interrupt has nothing to stop. Stop has to reach the wait instead.
+  const interrupt = agent.interrupt.bind(agent);
+  let waiting: AbortController | null = null;
+  agent.interrupt = async () => {
+    if (waiting) {
+      waiting.abort();
+      return;
+    }
+    return interrupt();
+  };
   agent.send = async (input: SendInput) => {
     if (preparing || busy()) throw new Error(`agent "${cfg.id}" is busy`);
     const selected = input.model ?? (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
@@ -141,15 +153,26 @@ function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent 
     input = { ...input, ...(model ? { model } : {}) };
     preparing = true;
     let release = () => {};
+    const ctl = new AbortController();
+    waiting = ctl;
+    if (gate) slotWaiters.add(agent);
     try {
-      if (process.env.LOOM_TURN_GATE !== "off") release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+      if (gate) release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say, ctl.signal);
       const cap = enforceModelCap(model);
       if (cap) await cap;
-    } catch (error) {
+    } catch (err) {
       release();
-      throw error;
+      if (err instanceof GateCancelled) {
+        emit({ kind: "status", payload: { state: "interrupted" } });
+        return;
+      }
+      throw err;
     } finally {
       preparing = false;
+      if (waiting === ctl) {
+        waiting = null;
+        slotWaiters.delete(agent);
+      }
     }
     // The concrete adapter owns busy state from here, including completion
     // events that can synchronously trigger the next turn.
@@ -157,6 +180,14 @@ function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent 
     finally { release(); }
   };
   return agent;
+}
+
+/** Adapters whose turn is waiting at the gate — not busy yet, but stoppable. */
+const slotWaiters = new WeakSet<object>();
+
+/** Is this agent's turn waiting for a daemon slot? Stop treats it as running. */
+export function waitingForSlot(agent: unknown): boolean {
+  return typeof agent === "object" && agent !== null && slotWaiters.has(agent);
 }
 
 export function knownAgentKinds(): string[] {

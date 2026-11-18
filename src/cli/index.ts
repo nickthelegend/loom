@@ -1213,6 +1213,48 @@ function kv(list: string[] | undefined, sep: RegExp): Record<string, string> {
 const collect = (v: string, prev: string[] = []) => [...prev, v];
 
 program
+  .command("bookmarks")
+  .description("list bookmarked messages across the current project")
+  .option("--json", "print JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { bookmarks } = await client.bookmarks(project.id);
+    if (opts.json) return void console.log(JSON.stringify(bookmarks, null, 2));
+    for (const b of bookmarks) console.log(`${b.title} (${b.chat}) #${b.event.id}\n${String(b.event.payload.text ?? "")}\n`);
+    if (!bookmarks.length) console.log("No bookmarks in this project.");
+  });
+
+program
+  .command("templates [action] [name] [text]")
+  .description("prompt templates: list | save <name> <text> | use <name> --var key=value | rm <name>")
+  .option("--var <key=value>", "fill a template variable (repeatable)", collect, [])
+  .option("--json", "list as JSON")
+  .action(async (action: string = "list", name: string | undefined, text: string | undefined, opts: { var: string[]; json?: boolean }) => {
+    const client = await ensureDaemon();
+    if (action === "list") {
+      const { templates } = await client.templates();
+      if (opts.json) return void console.log(JSON.stringify(templates, null, 2));
+      for (const t of templates) console.log(`${t.title}  ${t.variables.map(v => `{{${v}}}`).join(" ")}`);
+      return;
+    }
+    if (!name) throw new Error("provide a template name");
+    if (action === "save") {
+      if (!text) throw new Error("provide template text");
+      await client.saveTemplate(name, text);
+    } else if (action === "rm") await client.deleteTemplate(name);
+    else if (action === "use") {
+      const values: Record<string, string> = Object.create(null) as Record<string, string>;
+      for (const pair of opts.var) {
+        const at = pair.indexOf("=");
+        if (at < 1) throw new Error("--var expects key=value");
+        values[pair.slice(0, at)] = pair.slice(at + 1);
+      }
+      console.log((await client.renderTemplate(name, values)).text);
+    } else throw new Error("expected list, save, use, or rm");
+  });
+
+program
   .command("prompts [action] [args...]")
   .description("saved prompts, shared with the app: list [query] | save <text> | show <id> | send <id> | pin <id> | unpin <id> | rename <id> <title> | rm <id>")
   .option("-t, --title <title>", "save: a title (else the first words)")

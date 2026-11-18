@@ -226,6 +226,7 @@ export function createThread(view) {
         var first = !state.project || !state.project.agents;
         state.project = j.project;
         view.syncStars();
+        view.chatComposer.refresh();
         // the empty thread drew before the project arrived ("Ready in this
         // project", no agent) — draw it again now that it knows both
         drawStatus();
@@ -381,7 +382,7 @@ export function createThread(view) {
       });
       if (meters) { drawChips(); view.updateModelLabel(); }
       drawEmpty();
-      if (added) { view.markDays(); markSeen(); if (state.railView === "outline") view.drawRail(); }
+      if (added) { view.chatComposer.paintExpanded(); view.markDays(); markSeen(); if (state.railView === "outline") view.drawRail(); }
       if (added) stickOrFlag(wasNear);
       // A day-long live session piles thousands of nodes into one page. Once
       // it's that big and you're reading the newest part, start again from the
@@ -719,6 +720,9 @@ export function createThread(view) {
     var historyRequest = 0;
     function loadHistory(){
       var request = ++historyRequest;
+      var readBefore;
+      try { readBefore = JSON.parse(localStorage.getItem("loomSeen") || "{}")[view.pid + ":" + view.chatId]; } catch (e) {}
+
       var feed = document.getElementById("feed");
       if (feed) feed.innerHTML = '<div class="loader"></div>';
       state.lastId = 0; state.firstId = 0;
@@ -727,7 +731,17 @@ export function createThread(view) {
       view.historyLoaded = false; pendingStream = [];
       view.syncStars();
       if (state.loadGitStat && (!state.gitStat || state.gitStat.pid !== view.pid)) setTimeout(function(){ if (!pageGone() && state.loadGitStat) state.loadGitStat(); }, 300);
-      return api("/api/projects/" + view.pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(view.chatId))
+      var history = [], liveSnapshot;
+      function page(before){
+        return api("/api/projects/" + view.pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(view.chatId) + (before ? "&before=" + before : "")).then(function(j){
+          if (request !== historyRequest || state.pid !== view.pid || state.chat !== view.chatId) return { events: [] };
+          if (!before) liveSnapshot = j.live;
+          history = (j.events || []).concat(history);
+          if (readBefore !== undefined && j.events.length === PAGE && j.events[0].id > readBefore) return page(j.events[0].id);
+          return { events: history, live: liveSnapshot };
+        });
+      }
+      return page(0)
         .then(function(j){
           if (request !== historyRequest || state.pid !== view.pid || state.chat !== view.chatId) return;
           var evs = j.events || [];
@@ -741,6 +755,15 @@ export function createThread(view) {
           if (go && go.pid === view.pid && go.chat === view.chatId) { state.pendingGo = null; if (go.id) setTimeout(function(){ if (!pageGone()) view.jumpToMessage(go.id); }, 60); }
           if (state.project) reconcileLive(state.project);
           toBottom();
+          view.chatComposer.refresh();
+          var unread = readBefore === undefined ? null : evs.find(function(e){ return e.id > readBefore && e.kind === "message" && e.agentId && !e.payload.reasoning; });
+          if (unread && !(go && go.id)) {
+            var target = document.querySelector('#feed .msg[data-id="' + unread.id + '"]');
+            if (target) {
+              target.insertAdjacentHTML('beforebegin', '<div class="unread-divider" role="separator">Unread</div>');
+              target.previousElementSibling.scrollIntoView({ block: 'start' });
+            }
+          }
           // versions of a message (#375): the ‹ n/m › pagers, once the thread is on screen
           if (state.loadBranches) state.loadBranches();
         })

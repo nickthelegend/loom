@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -34,7 +34,28 @@ export function registerFilesRoutes(app: Express): void {
     try {
       if (!contains(base, fs.realpathSync(target))) return null;
     } catch {
-      // doesn't exist — the lexical check above is the whole answer
+      // Doesn't exist (yet). The lexical check isn't the whole answer: a write
+      // follows links, so a parent folder linked out of the project, or a
+      // dangling link in the final place, would land the file outside it. The
+      // nearest ancestor that does exist must resolve inside, and nothing on
+      // the way down from it may be a link.
+      let at = target;
+      for (;;) {
+        let st: fs.Stats | null = null;
+        try { st = fs.lstatSync(at); } catch { /* missing: go up */ }
+        if (st?.isSymbolicLink()) return null; // a dangling link
+        if (st) {
+          try {
+            if (!contains(base, fs.realpathSync(at))) return null;
+          } catch {
+            return null;
+          }
+          break;
+        }
+        const up = path.dirname(at);
+        if (up === at) return null;
+        at = up;
+      }
     }
     return target;
   };
@@ -70,13 +91,20 @@ export function registerFilesRoutes(app: Express): void {
       if (st.isDirectory()) return void res.status(400).json({ error: "is a directory" });
       const MAX = 400_000;
       const truncated = st.size > MAX;
-      const stream = fs.createReadStream(file, { start: 0, end: Math.min(st.size, MAX) - 1, encoding: "utf8" });
+      const rel = () => path.relative(projectPath(String(req.params.id), ".")!, file);
+      // nothing to read: a stream over [0, -1] throws, here, outside Express's reach
+      if (st.size === 0) return void res.json({ path: rel(), content: "", truncated: false, size: 0 });
+      let stream: fs.ReadStream;
+      try {
+        stream = fs.createReadStream(file, { start: 0, end: Math.min(st.size, MAX) - 1, encoding: "utf8" });
+      } catch (e) {
+        return void res.status(400).json({ error: (e as Error).message });
+      }
       let content = "";
       stream.on("data", (c) => (content += c));
       stream.on("error", (e) => res.status(400).json({ error: e.message }));
       stream.on("end", () => {
-        const base = projectPath(String(req.params.id), ".")!;
-        res.json({ path: path.relative(base, file), content, truncated, size: st.size });
+        res.json({ path: rel(), content, truncated, size: st.size });
       });
     });
   });
@@ -162,6 +190,13 @@ export function registerFilesRoutes(app: Express): void {
    * same way.
    */
   app.post("/api/projects/:id/preview/screenshot", (req, res) => {
+    // A browser on this machine fetches whatever URL it's given, from this
+    // machine — the daemon's own loopback routes included (/api/bootstrap hands
+    // a local caller the admin token). So a token limited to some projects
+    // never drives it; the owner and their own unscoped devices do.
+    if ((req as Request & { projectScope?: string[] | null }).projectScope) {
+      return void res.status(403).json({ error: "screenshots need an owner or unscoped token" });
+    }
     void (async () => {
       const dir = projectPath(String(req.params.id), ".");
       if (!dir) return void res.status(404).json({ error: "not found" });

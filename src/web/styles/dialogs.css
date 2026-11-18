@@ -1569,3 +1569,12 @@
   .dempty .trydemo{margin-top:4px}
   .mrlabel{display:block;margin:12px 0;font-size:12px;color:var(--muted-foreground)}
   .mrlabel textarea,.mrlabel input:not([type=checkbox]){display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:8px;border:1px solid var(--input);border-radius:var(--radius-sm);background:var(--secondary);color:var(--foreground);font:12px var(--font-mono)}
+
+.chat-totals{padding:6px 18px;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.chat-pins{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:4px;background:var(--background);border-bottom:1px solid var(--border)}
+.chat-pins:empty{display:none}
+.chat-pins .btn{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unread-divider{display:flex;align-items:center;gap:12px;color:var(--thread-ink);font-size:12px;margin:18px 0}
+.unread-divider:before,.unread-divider:after{content:"";height:1px;flex:1;background:var(--border)}
+.template-form{width:min(420px,90vw);padding:24px;background:var(--background);border:1px solid var(--border);border-radius:var(--radius)}
+.template-form .field{display:flex;flex-direction:column;gap:6px;margin:12px 0}
