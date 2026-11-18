@@ -28,6 +28,8 @@
  * one exception being an exhausted free pool, where trying the next model in
  * `fallbacks` is exactly what the person configured it for (#83).
  */
+import { resolveModel, enforceModelCap } from "../core/model-routing.js";
+
 
 import type { SendInput } from "../types.js";
 import {
@@ -141,7 +143,7 @@ export class ModelAdapter extends AdapterBase {
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "model", projectDir);
-    this.opts = splitQualifiedModel(options as ModelAdapterOptions);
+    this.opts = splitQualifiedModel({ ...options, ...(typeof options.model === "string" ? { model: resolveModel(options.model) } : {}) } as ModelAdapterOptions);
   }
 
   private provider(): ResolvedProvider | null {
@@ -150,8 +152,8 @@ export class ModelAdapter extends AdapterBase {
 
   /** The models to try, in order: the configured one, then its fallbacks. */
   private chain(): string[] {
-    const first = this.opts.model?.trim();
-    const rest = (this.opts.fallbacks ?? []).map((m) => m.trim()).filter(Boolean);
+    const first = this.opts.model ? resolveModel(this.opts.model.trim()) : undefined;
+    const rest = (this.opts.fallbacks ?? []).map((m) => resolveModel(m.trim())).filter(Boolean);
     return [...(first ? [first] : []), ...rest.filter((m) => m !== first)];
   }
 
@@ -305,7 +307,9 @@ export class ModelAdapter extends AdapterBase {
     const key = JSON.stringify([input.chat ?? "main", input.branch ?? "0"]);
     this.history = this.histories.get(key) ?? [];
     this.histories.set(key, this.history);
-    const p = this.provider();
+    if (input.model) input = { ...input, model: resolveModel(input.model) };
+    const override = splitQualifiedModel({ model: input.model, provider: undefined as string | undefined });
+    const p = override.provider ? resolveProvider(override.provider) : this.provider();
     if (!p) {
       throw new Error(
         `agent "${this.id}" names provider "${this.opts.provider ?? "openrouter"}", which isn't configured — \`loom providers\``,
@@ -347,7 +351,12 @@ export class ModelAdapter extends AdapterBase {
             payload: { state: "model_fallback", from: chain[i - 1], to: model, reason: lastError },
           });
         }
-        const result = await this.turn(p, model, started);
+        const selected = splitQualifiedModel({ model, provider: undefined as string | undefined });
+        const provider = resolveProvider(selected.provider ?? p.id);
+        if (!provider) throw new Error(`no provider for ${model}`);
+        await enforceModelCap(model);
+        await enforceModelCap(`${provider.id}/${selected.model}`);
+        const result = await this.turn(provider, selected.model!, started);
         if (result.ok) return;
         lastError = result.error;
         if (!result.retryable) break;

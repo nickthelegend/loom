@@ -4,6 +4,8 @@
  *
  * LOOM_HOME env var overrides the home directory (used heavily by tests).
  */
+import { validateAgentOptions } from "./model-routing-settings.js";
+
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -208,6 +210,7 @@ export function agentConfigWarnings(cfg: ProjectConfig): string[] {
 }
 
 export function writeProjectConfig(projectDir: string, cfg: ProjectConfig): void {
+  for (const a of cfg.agents) if (a.options !== undefined) validateAgentOptions(a.kind, a.options);
   const dir = projectLoomDir(projectDir), file = path.join(dir, "config.json");
   fs.mkdirSync(dir, { recursive: true });
   const temporary = path.join(dir, `.config-${crypto.randomUUID()}.tmp`);

@@ -279,6 +279,7 @@ export interface BrainConfig {
 import type { ServerConfig } from "./core/servers.js";
 
 export interface ProjectConfig {
+  defaultEffort?: "low" | "medium" | "high";
   /** Local titles by default; model opts into a bounded provider request. */
   chatTitles?: "local" | "model";
   name: string;

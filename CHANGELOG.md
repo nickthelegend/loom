@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preview planner output with `--plan-only` and explicit approval before workers start; retain the separate existing plan-file mode (#417).
 - Send signed run-completion webhooks using a private project secret, with delivery outcomes visible in web and phone run views (#417).
 
+- **Model aliases (#418).** Owner-managed names such as `fast`, `smart` and `cheap` work in model fields, chat picks, helper models and fleet specs; configure them in Settings → Models or `loom models:config`.
+- **Fallback controls (#418).** Extended the existing model-agent 402/429 fallback chain with validated web/phone editing, alias and provider-qualified candidates, and daily-cap enforcement; CLI agents retain their existing quota relay.
+- **Project reasoning defaults (#418).** Set low, medium or high effort in web/phone model settings or `loom models:effort`; explicit agent, chat and turn choices take precedence.
+- **Model health (#418).** Settings and `loom models --health` probe configured provider models with a bounded one-token request and retain latency and the last probe error.
+- **Composer estimates (#418).** Extended the existing rough token count with known context, the selected model's estimated input/output cost, and explicit unavailable-price handling on web and phone.
+- **Daily model caps (#418).** Owner-configured USD/token caps aggregate recorded usage across projects, warn at 80%, refuse subsequent turns at 100%, and reset at midnight UTC.
+- **Scoreboard CSV (#418).** Export recorded model standings with `loom scoreboard --csv`, the web download button, or phone sharing; quoted cells preserve data and neutralize spreadsheet formulas.
+- **Agent option validation (#418).** Validate argument arrays, typed options, sampling and effort before saving; web/phone editors and `loom agents:options` show actionable errors without replacing valid configuration.
+- **Weekly scoreboard digest (#418).** `loom digest --scoreboard`, the web scoreboard and phone model settings summarize seven days of results; owners can opt into a once-per-Monday UTC desktop notification that survives restarts.
+
 ### Fixed
 
 - **Explorer's "Open in terminal" ran shell syntax in folder names (#430).** The `cd` it typed double-quoted the path, so a folder named `$(…)` or with backticks ran as a command. It is now single-quoted for POSIX shells (`cd /d "…"` for cmd.exe).

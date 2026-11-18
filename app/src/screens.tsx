@@ -1,3 +1,4 @@
+import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -1988,6 +1989,7 @@ export function ProjectScreen(props: {
                 onSelect={setSelected}
               />
               <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} chat={chats.find((c) => c.id === chatId) ?? null} onChanged={() => { refreshProject(); reloadChats(); }} />
+              <ModelRoutingSheet creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>
@@ -2045,6 +2047,7 @@ export function ProjectScreen(props: {
                 </Text>
               ) : null;
             })()}
+            <ModelEstimateLine creds={creds} projectId={project.id} agentId={selectedAgent?.id} chat={chatId} text={text} model={chats.find(c => c.id === chatId)?.model || selectedAgent?.model} />
             <AttachBar items={attach.items} onRemove={attach.remove} />
             <View
               style={{

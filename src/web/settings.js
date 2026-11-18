@@ -1,4 +1,6 @@
 /** Browser settings module. See README.md for ownership and startup. */
+import { renderModelRouting } from './model-routing.js';
+
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,logout } from './connection.js';
@@ -38,6 +40,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     var SECTIONS = [
       { id: "setup", label: "Setup", icon: ICONS.tasks },
       { id: "diagnostics", label: "Diagnostics", icon: ICONS.console },
+      { id: "models", label: "Models", icon: ICONS.gear },
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
@@ -1091,6 +1094,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     function render(){
       gen++;
       if (cur === "diagnostics") renderDiag();
+      else if (cur === "models") renderModelRouting(pane, pid, sapi);
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();

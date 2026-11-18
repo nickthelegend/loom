@@ -1,3 +1,4 @@
+import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
 import { branchBriefing } from "../../core/chat-branches.js";
 import { readProjectState } from "../../core/registry.js";
 import { AgentBase } from "../../adapters/base.js";
@@ -436,6 +437,34 @@ export class RuntimeTurns {
       } catch (error) {
         throw new ContinuityError("invalid", error instanceof Error ? error.message : String(error));
       }
+    }
+    const chosen = agentId ?? this.host.chatBinding(opts.chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+    const cfg = this.host.config.agents.find(a => a.id === chosen);
+    const binding = this.host.chatBinding(opts.chat);
+    // Keep explicit/chat selections separate from adapter defaults: a captured
+    // null means use the agent default, even if the chat is edited while queued.
+    const selectedModel = opts.capturedModel !== undefined ? opts.capturedModel
+      : opts.model ?? (binding.agentId === chosen ? binding.model : undefined);
+    const inheritedModel = selectedModel ?? cfg?.options?.model;
+    if (opts.capturedModel === undefined && selectedModel) opts = { ...opts, model: resolveModel(selectedModel) };
+    if (opts.capturedModel) opts = { ...opts, capturedModel: resolveModel(opts.capturedModel) };
+    if (opts.effort === undefined && !(binding.agentId === chosen && binding.effort) && !cfg?.options?.effort && ["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg?.kind ?? ""))
+      opts = { ...opts, effort: this.host.config.defaultEffort };
+    const capModel = typeof inheritedModel === "string" ? resolveModel(inheritedModel) : undefined;
+    // Claim preparation synchronously, before an asynchronous cap read. Existing
+    // turns retain their ownership; a second send will join their queue below.
+    const preparingAgent = this.host.agent(chosen);
+    const ownsPreparation = !this.busySince.has(chosen);
+    if (ownsPreparation) this.busySince.set(chosen, Date.now());
+    try {
+      const cap = enforceModelCap(capModel);
+      if (cap) await cap;
+      const qualifiedCap = cfg?.kind === "model" && capModel
+        ? enforceModelCap(`${cfg.options?.provider ?? "openrouter"}/${capModel}`) : undefined;
+      if (qualifiedCap) await qualifiedCap;
+      if (!this.host.isCurrentAgent(preparingAgent)) throw new Error(`agent "${chosen}" is no longer active`);
+    } finally {
+      if (ownsPreparation) this.busySince.delete(chosen);
     }
     if (this.host.continuity) return this.sendContinuity(text, agentId, opts);
     const source = opts.source ?? "user";

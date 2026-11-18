@@ -751,6 +751,8 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  if (e.kind === "status" && p.state === "model_fallback") return <Text style={{ color: T.dim, fontSize: 12, padding: 8 }}>{String(p.from ?? "")} → {String(p.to ?? "")}{p.reason ? ` · ${String(p.reason)}` : ""}</Text>;
+  if (e.kind === "status" && p.state === "model_cap_warning") return <Text style={{ color: T.warn, fontSize: 12, padding: 8 }}>{String(p.text ?? "")}</Text>;
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
   if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;

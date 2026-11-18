@@ -24,7 +24,7 @@ export function openScoreboard(pid){
   scrim.innerHTML = '<div class="modal scoremodal" role="dialog" aria-label="Model scoreboard">' +
     '<div class="modalhead">Model scoreboard<button class="iconbtn" id="sbx" aria-label="close">' + ICONS.x + "</button></div>" +
     '<div class="modalbody">' +
-      '<div class="sbbar">' +
+      '<div class="sbbar"><button class="btn" id="sbcsv">Download CSV</button><button class="btn" id="sbdigest">Weekly digest</button>' +
         (pid ? '<div class="seg" id="sbscope"><button data-v="' + esc(pid) + '" class="on">This project</button><button data-v="all">All projects</button></div>' : "") +
         '<div class="seg" id="sbwin"><button data-v="7d">7 days</button><button data-v="30d" class="on">30 days</button><button data-v="all">All time</button></div>' +
         '<div class="seg" id="sbby"><button data-v="byKindModel" class="on">Agent + model</button><button data-v="byModel">Model</button></div>' +
@@ -51,6 +51,20 @@ export function openScoreboard(pid){
   seg("#sbscope", function(v){ scope = v; });
   seg("#sbwin", function(v){ win = v; });
   seg("#sbby", function(v){ by = v; });
+  scrim.querySelector("#sbcsv").onclick = function(){
+    api("/api/scoreboard?project=" + encodeURIComponent(scope) + "&window=" + win + "&format=csv-json&by=" + by).then(function(r){
+      var url = URL.createObjectURL(new Blob([r.csv], { type: "text/csv;charset=utf-8" }));
+      var a = document.createElement("a"); a.href = url; a.download = "loom-scoreboard.csv"; a.click();
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }).catch(function(e){ scrim.querySelector("#sbtable").textContent = e.message; });
+  };
+  scrim.querySelector("#sbdigest").onclick = function(){
+    var mine = ++gen;
+    api("/api/scoreboard?project=" + encodeURIComponent(scope) + "&digest=1").then(function(r){
+      if (closed || mine !== gen) return;
+      scrim.querySelector("#sbtable").innerHTML = '<pre class="snote">' + esc(r.text) + '</pre>';
+    }).catch(function(e){ if (!closed && mine === gen) scrim.querySelector("#sbtable").textContent = e.message; });
+  };
   var last = null, gen = 0;
   function draw(){
     var el = scrim.querySelector("#sbtable");

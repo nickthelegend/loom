@@ -1,3 +1,5 @@
+import { registerModelRoutingRoutes } from "./routes/model-routing.js";
+import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -178,6 +180,7 @@ export class LoomDaemon {
   private readonly presence = new ChatPresenceTracker<WebSocket>((snapshot) =>
     this.broadcastFrame({ ...snapshot }, snapshot.projectId));
   /** In-flight self-heal recheck timers, cleared on close. */
+  private scoreboardTimer?: ReturnType<typeof setInterval>;
   private healTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Terminal shells — a real pty when node-pty loaded, else plain pipes. */
   private terminals = new TerminalManager({
@@ -577,6 +580,10 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerModelRoutingRoutes(app, withRuntime);
+    void mondayScoreboard().catch(() => {});
+    this.scoreboardTimer = setInterval(() => void mondayScoreboard().catch(() => {}), 60_000);
+    this.scoreboardTimer.unref();
     app.get("/api/projects/:id/chats/:chat/presence", withRuntime(async (rt, req, res) => {
       const chat = String(req.params.chat);
       if (!rt.chats().some((c) => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
@@ -1269,6 +1276,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    clearInterval(this.scoreboardTimer);
     this.setupInstaller.close();
     this.presence.close();
     await this.closeProjects();
