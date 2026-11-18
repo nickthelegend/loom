@@ -6,6 +6,7 @@ import { outbox } from "./outbox";
 import { ChatSearch } from "./phone-search";
 import { lineQuestion, type PendingMessage, type DiffLocation } from "./phone-batch-model";
 import { ProjectSharing, TeammateMentions } from "./sharing";
+import { SafetyButton, withSecretRetry } from "./safety";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -987,9 +988,9 @@ export function ProjectScreen(props: {
     setCommitting(push ? "push" : "commit");
     try {
       await gitStage(creds, project.id, tree.files.map((f) => f.path).filter((p) => !p.startsWith(".loom/")));
-      const r = await gitCommit(creds, project.id, commitMsg.trim());
+      const r = await withSecretRetry("commit", override => gitCommit(creds, project.id, commitMsg.trim(), override));
       let note = `Committed ${r.sha} · ${r.files} file${r.files === 1 ? "" : "s"}`;
-      if (push) note += ` · pushed ${(await gitPush(creds, project.id)).branch}`;
+      if (push) note += ` · pushed ${(await withSecretRetry("push", override => gitPush(creds, project.id, override))).branch}`;
       setCommitMsg("");
       setErr(null);
       Alert.alert("Done", note);
@@ -2046,6 +2047,7 @@ export function ProjectScreen(props: {
               />
               <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} chat={chats.find((c) => c.id === chatId) ?? null} onChanged={() => { refreshProject(); reloadChats(); }} />
               <ModelRoutingSheet creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
+              <SafetyButton creds={creds} projectId={project.id} onChanged={refreshProject} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>

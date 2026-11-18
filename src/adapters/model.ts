@@ -31,6 +31,8 @@
 import { resolveModel, enforceModelCap } from "../core/model-routing.js";
 
 
+import { autoPolicyFor } from "../core/auto-policy.js";
+import { safetyDecision } from "../core/safety.js";
 import type { SendInput } from "../types.js";
 import {
   MAX_HOPS,
@@ -243,6 +245,15 @@ export class ModelAdapter extends AdapterBase {
    * signed into, and this is a model you picked off a list an hour ago.
    */
   private async runTool(call: ToolCall): Promise<ToolResult> {
+    const checkSafety = (): ToolResult | null => {
+      const safety = autoPolicyFor(this.opts.loomProject)?.safety;
+      const d = safety ? safetyDecision(call.name, call.args, this.projectDir, safety) : {};
+      if (!d.deny) return null;
+      this.emit({ kind: "status", payload: { state: "safety_denied", tool: call.name, reason: d.deny } });
+      return { id: call.id, name: call.name, content: d.deny, summary: `${call.name} denied`, ok: false };
+    };
+    const refused = checkSafety();
+    if (refused) return refused;
     if (!isWriteTool(call.name)) return runReadTool(this.projectDir, call);
 
     if (this.opts.readOnly) return { id: call.id, name: call.name, content: "Side chats are read-only.", summary: `${call.name} denied`, ok: false };
@@ -271,6 +282,9 @@ export class ModelAdapter extends AdapterBase {
       }
     }
 
+    // A path or policy can change while the human is considering the request.
+    const changed = checkSafety();
+    if (changed) return changed;
     if (call.name === "write_file") {
       const result = applyWrite(this.projectDir, call);
       // The same event every other adapter emits when it edits: the turn diff

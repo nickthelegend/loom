@@ -1067,18 +1067,49 @@ program
   });
 
 program
+  .command("safety")
+  .description("show or set this project's safety policy (JSON file or preset)")
+  .option("--preset <name>", "strict, normal or trusting")
+  .option("--file <path>", "policy JSON: allow, deny, protectedPaths, shellDeny, approvalTimeoutMin")
+  .action(async (opts: { preset?: string; file?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const body = opts.file ? JSON.parse(fs.readFileSync(opts.file, "utf8")) : opts.preset ? { preset: opts.preset } : undefined;
+    console.log(JSON.stringify(await client.safety(project.id, body), null, 2));
+  });
+
+program
+  .command("git:commit <message>")
+  .description("commit staged changes after scanning for secrets")
+  .option("--override-secrets", "explicitly allow detected secrets for this operation")
+  .action(async (message: string, opts: { overrideSecrets?: boolean }) => {
+    const client = await ensureDaemon(); const project = await currentProject(client);
+    console.log(JSON.stringify(await client.safeGit(project.id, "commit", { message, overrideSecrets: !!opts.overrideSecrets })));
+  });
+
+program
+  .command("git:push")
+  .description("push local commits after scanning their diffs for secrets")
+  .option("--override-secrets", "explicitly allow detected secrets for this operation")
+  .action(async (opts: { overrideSecrets?: boolean }) => {
+    const client = await ensureDaemon(); const project = await currentProject(client);
+    console.log(JSON.stringify(await client.safeGit(project.id, "push", { overrideSecrets: !!opts.overrideSecrets })));
+  });
+
+program
   .command("audit")
   .option("--csv", "export the complete audit trail for this period as CSV")
+  .option("--risky", "only risky tool calls, approvals, safety denials and secret overrides")
   .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
   .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")
   .option("--json", "print as JSON")
-  .action(async (opts: { since: string; json?: boolean; csv?: boolean }) => {
+  .action(async (opts: { since: string; json?: boolean; csv?: boolean; risky?: boolean }) => {
     const m = /^(\d+)\s*(h|d)$/i.exec(opts.since.trim());
     if (!m) fail("--since is like 24h or 7d");
     const since = Date.now() - Number(m[1]) * (m[2]!.toLowerCase() === "h" ? 3_600_000 : 86_400_000);
     const client = await ensureDaemon();
     if (opts.csv) return void process.stdout.write((await client.auditCsv(since)).csv);
-    const { entries } = await client.audit(since);
+    const { entries } = await client.audit(since, opts.risky);
     if (opts.json) return void console.log(JSON.stringify(entries));
     if (!entries.length) return void console.log(pc.dim(`nothing to report since ${new Date(since).toLocaleString()}`));
     for (const e of entries) {
@@ -2304,6 +2335,8 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
     await new Promise((r) => setTimeout(r, 3000));
     run = (await steady(() => client.orchestraRun(projectId, runId))).run;
   }
+  const blockedSecrets = run.tasks.flatMap(task => task.secrets ?? []);
+  if (blockedSecrets.length) return { ok: false, runId, status: run.status, secrets: blockedSecrets, error: "secrets in the run's changes — not applied" };
   if (run.status !== "completed") return { ok: false, runId, status: run.status, error: run.status === "waiting_human" ? `it's waiting on you: ${run.question ?? "a question"}` : (run.error ?? run.status) };
   const { execFileSync } = await import("node:child_process");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -4160,12 +4193,14 @@ program
   .option("--effort <level>", "reasoning effort for this message only, where supported")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
   .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 75 interrupted (the daemon restarted), 124 timed out")
-  .option("--json", "stream NDJSON events and the outcome; implies --wait")
+  .option("--json", "wait, then print the outcome as one JSON object")
+  .option("--stream", "wait, streaming NDJSON: accepted, live deltas, events, then the outcome")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
   .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
   .option("--handoff", "with --agent: take the baton from whoever holds it, without asking")
-  .action(async (words: string[], opts: { agent?: string; model?: string; effort?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
+  .action(async (words: string[], opts: { agent?: string; model?: string; effort?: string; wait?: boolean; json?: boolean; stream?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
     const client = await ensureDaemon();
+    if (opts.stream || opts.json) opts.wait = true;
     const project = await currentProject(client);
     // a long session whose prompt cache has gone cold is re-read in full: say so before spending it (#280)
     const target = opts.agent ?? project.holder ?? undefined;
@@ -4176,21 +4211,21 @@ program
         console.error(pc.yellow(`⚠ ${target}'s session here is ${Math.round(weight.tokens / 1000)}k tokens, last used ${ago} ago — its cache has likely expired, so this turn re-reads all of it` +
           `${weight.estUsd !== undefined ? ` (~${fmtUsd(weight.estUsd)} est.)` : ""}. --fresh starts a new session instead.`));
         // a person at a terminal is asked, --wait or not; a script only gets the warning (#300)
-        if (process.stdin.isTTY && process.stdout.isTTY && !opts.json) {
+        if (process.stdin.isTTY && process.stdout.isTTY && !opts.json && !opts.stream) {
           const go = await confirm(pc.yellow("send it to the existing session anyway?"));
           if (!go) return void console.log(pc.dim(`not sent — loom send --fresh${opts.agent ? ` -a ${opts.agent}` : ""} "…"`));
         }
       }
     }
     // where the log is now, so the wait reads only what this send causes (#254)
-    const since = opts.wait || opts.json ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
+    const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
     // a question needs a person at a terminal — not a script, and never --json output
-    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json;
-    const live = opts.json ? await captureDeltas(client, project.id) : undefined;
+    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json && !opts.stream;
+    const live = opts.stream ? await captureDeltas(client, project.id) : undefined;
     try {
       const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff), { model: opts.model, effort: opts.effort, requestId: randomUUID() });
       if (!result) return;
-      if (opts.json) {
+      if (opts.stream) {
         writeJson({ type: "accepted", project: project.id, ...result });
         live?.select([{ ...result, chat: "main" }]);
         process.exitCode = await streamTurns(client, project.id, since, [{ ...result, chat: "main" }], Math.max(1, Number(opts.timeout) || 1800) * 1000);
@@ -4221,10 +4256,12 @@ program
         // EX_TEMPFAIL: not the agent's failure, and worth trying again
         process.exitCode = 75;
         const again = `loom send -a ${result.agentId} --wait "continue where you left off"`;
+        if (opts.json) return void console.log(JSON.stringify({ status: "interrupted", agent: result.agentId, reason: "the Loom daemon restarted or stopped during the turn", resume: again }));
         return void console.error(pc.yellow(`⚠ the Loom daemon restarted or stopped while ${result.agentId} was working — the turn was interrupted. ` +
           `What it did so far is still in the working tree. To carry on: ${again}`));
       }
       process.exitCode = exitCodeFor(outcome);
+      if (opts.json) return void console.log(JSON.stringify(outcome ?? { status: "timeout", agent: result.agentId }));
       if (!outcome) return void console.error(pc.yellow(`timed out after ${opts.timeout}s — ${result.agentId} is still working (loom log --follow)`));
       if (outcome.reply) console.log(outcome.reply);
       const tail = [outcome.durationMs ? `${(outcome.durationMs / 1000).toFixed(1)}s` : "", outcome.costUsd ? `$${outcome.costUsd.toFixed(4)}` : ""].filter(Boolean).join(" · ");

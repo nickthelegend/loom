@@ -7,6 +7,8 @@
  */
 
 import { ConversationStore } from "../core/conversations.js";
+import { redactText } from "../core/redact.js";
+import { dangerOf } from "../core/shield.js";
 import { EventLog } from "../core/eventlog.js";
 import { listProjects, projectLoomDir } from "../core/registry.js";
 import { searchChats } from "../core/search.js";
@@ -59,33 +61,41 @@ export interface AuditEntry { at: number; project: string; projectName: string; 
  * What people and automations did, newest first: approvals answered (and by whom), messages from
  * teammates in a shared chat, from Slack / Discord, and from triggers, and every baton handoff.
  */
-export async function auditTrail(since: number, live: Map<string, ProjectRuntime>, limit = 500): Promise<AuditEntry[]> {
+export async function auditTrail(since: number, live: Map<string, ProjectRuntime>, limit = 500, risky = false): Promise<AuditEntry[]> {
   const out: AuditEntry[] = [];
   for (const info of listProjects()) {
     const base = { project: info.id, projectName: info.name };
     await withLog(info, live, (log) => {
-      for (const e of log.list({ since: 0, ...(Number.isFinite(limit) ? { limit: 20_000 } : {}) }) as LoomEvent[]) {
+      for (const e of log.list({ since: 0, allBranches: true, ...(Number.isFinite(limit) ? { limit: 20_000 } : {}) }) as LoomEvent[]) {
         if (e.ts < since) continue;
         const p = (e.payload ?? {}) as Record<string, unknown>;
         const chat = e.chat ? { chat: e.chat } : {};
         if (e.kind === "approval" && p.phase === "decided") {
           out.push({ ...base, ...chat, at: e.ts, what: `${p.behavior === "allow" ? "allowed" : "denied"} ${String(p.tool ?? "a tool")}${p.scope === "session" ? " for the session" : ""}`,
             who: typeof p.by === "string" ? p.by : String(p.message ?? "").startsWith("No answer") ? "timed out" : "owner", detail: `asked by ${e.agentId ?? "an agent"}` });
-        } else if (e.kind === "message" && !e.agentId && typeof p.text === "string") {
+        } else if (e.kind === "tool_call") {
+          const tool = String(p.tool ?? p.name ?? "tool");
+          const input = (p.input ?? p.args ?? {}) as Record<string, unknown>;
+          const command = String(input.command ?? p.command ?? "");
+          const reason = dangerOf(command, info.dir)?.what ?? (/bash|shell|exec|run_command|write|edit|patch|mcp__/i.test(tool) ? "tool can change state or access external services" : null);
+          if (reason) out.push({ ...base, ...chat, at: e.ts, what: `risky tool: ${tool}`, who: e.agentId ?? "agent", detail: redactText(`${reason}${command ? ": " + command : ""}`) });
+        } else if (e.kind === "status" && (["safety_denied", "secret_override"].includes(String(p.state)) || (p.state === "notice" && String(p.message).startsWith("Safety denied ")))) {
+          out.push({ ...base, ...chat, at: e.ts, what: p.state === "notice" ? "safety_denied" : String(p.state), who: e.agentId ?? "owner", detail: redactText(String(p.reason ?? p.message ?? p.operation ?? p.tool ?? "")) });
+        } else if (!risky && e.kind === "message" && !e.agentId && typeof p.text === "string") {
           const text = p.text;
           const via = /\(from (.+?) on (Slack|Discord)\)\s*$/.exec(text);
           const trig = /\(started by the trigger "(.+?)", (\w+)\)\s*$/.exec(text);
           if (typeof p.by === "string") out.push({ ...base, ...chat, at: e.ts, what: "sent a message in a shared chat", who: p.by, detail: text.slice(0, 160) });
           else if (via) out.push({ ...base, ...chat, at: e.ts, what: `sent a message from ${via[2]}`, who: via[1]!, detail: text.replace(via[0], "").trim().slice(0, 160) });
           else if (trig) out.push({ ...base, ...chat, at: e.ts, what: `trigger fired (${trig[2]})`, who: `trigger "${trig[1]}"`, detail: text.replace(trig[0], "").trim().slice(0, 160) });
-        } else if (e.kind === "handoff" && typeof p.to === "string") {
+        } else if (!risky && e.kind === "handoff" && typeof p.to === "string") {
           out.push({ ...base, at: e.ts, what: `baton → ${p.to}`, who: p.from ? String(p.from) : "owner" });
         }
       }
     });
     // triggers that didn't run (skipped, failed) are in their own history, not the thread
     for (const r of readTriggers(info.dir).runs) {
-      if (r.at < since || r.ok) continue;
+      if (risky || r.at < since || r.ok) continue;
       out.push({ ...base, at: r.at, what: "trigger didn't run", who: `trigger ${r.trigger}`, detail: r.note });
     }
   }

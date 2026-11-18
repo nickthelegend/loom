@@ -1,3 +1,4 @@
+import { SecretScanError, withSecretOverride } from "../../core/git-safety.js";
 import path from "node:path";
 import fs from "node:fs";
 import type { Express } from 'express';
@@ -26,8 +27,15 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
   ) =>
     withRuntime(async (rt, req, res) => {
       try {
-        res.json(await fn(rt.info.dir, (req.body ?? {}) as Record<string, unknown>));
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const auth = req as typeof req & { guest?: unknown; projectScope?: string[] | null };
+        if (body.overrideSecrets !== undefined && typeof body.overrideSecrets !== "boolean") return void res.status(400).json({ error: "overrideSecrets must be boolean" });
+        if (body.overrideSecrets && (auth.guest || auth.projectScope)) return void res.status(403).json({ error: "Secret overrides require an owner or unscoped device." });
+        const result = await withSecretOverride(body.overrideSecrets === true, () => fn(rt.info.dir, body));
+        if (body.overrideSecrets) rt.log.append({ kind: "status", payload: { state: "secret_override", operation: req.path } });
+        res.json(result);
       } catch (err) {
+        if (err instanceof SecretScanError) return void res.status(409).json({ error: err.message, code: "secrets_detected", findings: err.findings });
         // git's own words, not ours: "nothing to commit, working tree clean"
         // beats anything we'd invent about an exit code.
         const message = err instanceof Error ? err.message : String(err);

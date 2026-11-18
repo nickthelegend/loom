@@ -563,8 +563,16 @@ export class DaemonClient {
   approvalRoles(id: string): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/approval-roles`); }
   setApprovalRoles(id: string, mode: string, approvers: string[]): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/approval-roles`, { mode, approvers }); }
 
-  audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
-    return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
+  safety(id: string, policy?: unknown): Promise<{ policy: import("../core/safety.js").SafetyPolicy }> {
+    return this.request(policy ? "PUT" : "GET", `/api/projects/${encodeURIComponent(id)}/safety`, policy as Record<string, unknown> | undefined);
+  }
+
+  safeGit(id: string, operation: "commit" | "push", body: { message?: string; overrideSecrets?: boolean }): Promise<unknown> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/${operation}`, body);
+  }
+
+  audit(since?: number, risky = false): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
+    return this.request("GET", `/api/audit?since=${since ?? 0}&risky=${risky}`);
   }
   resources(): Promise<import("../core/resources.js").Resources> { return this.request("GET", "/api/resources"); }
   chatInstructions(id: string, chat: string): Promise<{ chat: string; instructions: string }> {

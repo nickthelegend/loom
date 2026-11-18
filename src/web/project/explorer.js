@@ -1,4 +1,5 @@
 import { gitReviewHtml, bindGitReview } from "./git-review.js";
+import { safeGit } from '../safety.js';
 import { brandMark,wireRoleEditors } from '../agents.js';
 import { api } from '../connection.js';
 import { visibleFiles } from '../diff.js';
@@ -485,7 +486,7 @@ export function createExplorer(view) {
           if (all.length) pre = api("/api/projects/" + view.pid + "/git/stage", { method: "POST", body: JSON.stringify({ paths: all }) });
         }
         pre.then(function(){
-          return api("/api/projects/" + view.pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) });
+          return safeGit(view.pid, "commit", { message: msg });
         }).then(function(r){
           // the rail may have redrawn while it committed: clear the box that's there now
           scmDraft = ""; scmCaret = null;
@@ -495,7 +496,7 @@ export function createExplorer(view) {
           toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
           if (alsoPush) {
             toast("pushing\u2026");
-            return api("/api/projects/" + view.pid + "/git/push", { method: "POST", body: "{}" })
+            return safeGit(view.pid, "push")
               .then(function(pr){ toast("pushed " + pr.branch); });
           }
         }).then(function(){ refreshGit(); view.refreshTree(false); })
@@ -530,7 +531,7 @@ export function createExplorer(view) {
       if (pushBtn) pushBtn.onclick = function(){
         pushBtn.disabled = true;
         toast("pushing\u2026");
-        api("/api/projects/" + view.pid + "/git/push", { method: "POST", body: "{}" })
+        safeGit(view.pid, "push")
           .then(function(r){ toast("pushed " + r.branch); refreshGit(); })
           .catch(function(e){ toast(e.message); })
           .then(function(){ pushBtn.disabled = false; });

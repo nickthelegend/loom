@@ -1576,6 +1576,14 @@
 .notification-entry time{display:block;color:var(--muted-foreground);font-size:11px;margin-bottom:4px}
 .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 .scrim > .modal, .scrim > .palette{zoom:var(--tz,1)}
+  .safety-modal{max-width:560px;max-height:90vh;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+  .safety-modal h2,.safety-modal p{margin:0}
+  .safety-modal p{font-size:12px;line-height:1.5;color:var(--muted-foreground)}
+  .safety-modal label{display:flex;flex-direction:column;gap:5px;font-size:12px}
+  .safety-modal textarea,.safety-modal input,.safety-modal select{padding:8px;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:6px;font:inherit}
+  .safety-actions{display:flex;gap:8px;justify-content:flex-end}
+  .safety-modal pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+  .cpermission-status{font-size:11px;color:var(--muted-foreground);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-totals{padding:6px 18px;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .chat-pins{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:4px;background:var(--background);border-bottom:1px solid var(--border)}
 .chat-pins:empty{display:none}
