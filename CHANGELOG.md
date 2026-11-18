@@ -151,6 +151,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Revoke team invites (#424).** List and revoke active invites on web, phone or CLI; the hub invalidates copied links too. Team owners may revoke any invite and members their own.
 - **Project presence dots (#424).** Extends existing chat presence to web and phone project lists, including live teammates on shared repos, with names and counts that disappear when people leave.
 
+- **GitHub `/loom` issue comments (#425).** Webhook triggers can start a fresh chat for each signed command from a repository collaborator, with persisted delivery deduplication.
+- **Linear completion on PR merge (#425).** Linked intake issues move to the team's Done state after their PR merges; failed transitions retry from the PR ledger.
+- **Slack Orchestra commands (#425).** `/loom <goal>` starts an Orchestra goal through the existing Socket Mode bridge and its user/channel allow-lists.
+- **Webhook template preview (#425).** Existing payload interpolation now has issue/CI presets and a side-effect-free preview in the API, CLI, web and phone.
+- **Jira intake (#425).** Assigned open issues arrive through paginated REST intake, with credentials in providers, chat/Orchestra starts, PR backlinks and web/phone selectors.
+- **GitLab MR feedback (#425).** Attach merge requests for pipeline failures and trusted inline/discussion feedback using the existing chat feedback modes and deduplication.
+- **Discord Orchestra threads (#425).** Each run gets a persisted progress thread in a configured channel, with ordered updates and retry of failed delivery.
+- **Schedule calendar feeds (#425).** Export iCalendar or subscribe using a private, revocable URL; web, CLI and phone expose the next 100 occurrences per schedule.
+- **SMTP email digests (#425).** Schedule, preview and send the existing activity digest through TLS or STARTTLS, with owner/phone settings and passwords kept on the daemon.
+
 - Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
 - Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
 - Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.

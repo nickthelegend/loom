@@ -581,6 +581,11 @@ export class DaemonClient {
   setChatInstructions(id: string, chat: string, instructions: string): Promise<{ chat: string; instructions: string }> {
     return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`, { instructions });
   }
+  integrationEmail(body?: Record<string, unknown>): Promise<Record<string, unknown>> { return this.request(body ? "PUT" : "GET", "/api/integrations/email", body); }
+  emailDigest(send = false): Promise<{ text?: string; sent?: boolean }> { return this.request(send ? "POST" : "GET", `/api/integrations/email/${send ? "send" : "preview"}`); }
+  calendarLink(id: string, rotate = false): Promise<{ path: string }> { return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/calendar-link`, { rotate }); }
+  triggerCalendar(id: string): Promise<{ calendar: string }> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/triggers/calendar?format=json`); }
+  previewTrigger(id: string, body: Record<string, unknown>): Promise<{ prompt: string }> { return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/preview`, body); }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }

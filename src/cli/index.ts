@@ -851,16 +851,18 @@ program
   .description("list assigned issues, or start each in its own chat or orchestra goal")
   .option("--github", "use GitHub through gh login (default)")
   .option("--linear", "use Linear through LINEAR_API_KEY")
+  .option("--jira", "use Jira through the jira provider")
   .option("--label <label>", "only issues with this label")
   .option("--start", "queue work for issues not previously started")
   .option("--orchestra", "start orchestra goals instead of agent turns")
   .option("--agent <id>", "agent or orchestrator for the work")
   .option("--json", "print issues and their chat/run links as JSON")
-  .action(async (opts: { github?: boolean; linear?: boolean; label?: string; start?: boolean; orchestra?: boolean; agent?: string; json?: boolean }) => {
-    if (opts.github && opts.linear) fail("choose --github or --linear");
+  .action(async (opts: { github?: boolean; linear?: boolean; jira?: boolean; label?: string; start?: boolean; orchestra?: boolean; agent?: string; json?: boolean }) => {
+    if (opts.github && opts.linear && !opts.jira) fail("choose --github or --linear");
+    if ([opts.github, opts.linear, opts.jira].filter(Boolean).length > 1) fail("choose --github, --linear or --jira");
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    const source = opts.linear ? "linear" : "github";
+    const source = opts.jira ? "jira" : opts.linear ? "linear" : "github";
     let { issues } = await client.intake(project.id, source, opts.label);
     if (opts.start) ({ issues } = await client.startIntake(project.id, {
       source, ids: issues.map(i => i.id), mode: opts.orchestra ? "orchestra" : "chat", ...(opts.agent ? { agent: opts.agent } : {}),
@@ -885,7 +887,7 @@ program
 
 program
   .command("prs:watch <pr>")
-  .description("attach a PR number or URL to a chat for CI and review feedback")
+  .description("attach a PR number or GitHub/GitLab URL to a chat for CI and review feedback")
   .option("--chat <chat>", "chat id or title", "main")
   .action(async (pr: string, opts: { chat: string }) => {
     const client = await ensureDaemon();
@@ -3782,6 +3784,7 @@ program
   .command("bridge [platform]")
   .description("your agents in Slack or Discord: mention the bot, the answer comes back in the thread. Runs in the daemon with your own bot (Slack Socket Mode / Discord gateway — no public URL). No platform: show both")
   .option("--bot-token <token>", "the bot token (Slack xoxb-…, Discord bot token)")
+  .option("--orchestra-channel <id>", "Discord: channel for one progress thread per Orchestra run")
   .option("--app-token <token>", "Slack: the app-level token (xapp-…, connections:write) Socket Mode uses")
   .option("--user <ids>", "who it listens to — comma-separated user ids (required: it hears nobody otherwise)")
   .option("--approvers <ids>", "who may Allow / Deny — comma-separated user ids (default: --user; empty: nobody)")
@@ -3790,7 +3793,7 @@ program
   .option("--agent <id>", "who answers (default: whoever holds the baton)")
   .option("--off", "turn it off (keeps the settings)")
   .option("--remove", "forget it, tokens included")
-  .action(async (platform: string | undefined, opts: { botToken?: string; appToken?: string; user?: string; approvers?: string; channel?: string; project?: string; agent?: string; off?: boolean; remove?: boolean }) => {
+  .action(async (platform: string | undefined, opts: { botToken?: string; appToken?: string; orchestraChannel?: string; user?: string; approvers?: string; channel?: string; project?: string; agent?: string; off?: boolean; remove?: boolean }) => {
     const client = await ensureDaemon();
     if (!platform) {
       const b = await client.bridges();
@@ -3807,6 +3810,7 @@ program
     if (opts.remove) { await client.removeBridge(platform).catch((e: Error) => fail(e.message)); return void console.log(`${pc.green("✓")} ${platform} bridge removed`); }
     const out = await client.setBridge(platform, {
       enabled: !opts.off,
+      ...(opts.orchestraChannel !== undefined ? { orchestraChannel: opts.orchestraChannel } : {}),
       ...(opts.botToken ? { botToken: opts.botToken } : {}), ...(opts.appToken ? { appToken: opts.appToken } : {}),
       ...(opts.approvers !== undefined ? { approvers: opts.approvers } : {}),
       ...(opts.user !== undefined ? { users: opts.user } : {}), ...(opts.channel !== undefined ? { channels: opts.channel } : {}),
@@ -3839,6 +3843,37 @@ program
   });
 
 program
+  .command("triggers:calendar")
+  .description("export the schedule forecast as iCalendar to stdout")
+  .option("--subscribe", "print a private subscription URL")
+  .option("--rotate", "replace the subscription secret")
+  .action(async (opts: { subscribe?: boolean; rotate?: boolean }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    if (opts.subscribe || opts.rotate) return void console.log(client.baseUrl + (await client.calendarLink(project.id, opts.rotate)).path);
+    process.stdout.write((await client.triggerCalendar(project.id)).calendar);
+  });
+program
+  .command("triggers:preview <prompt>")
+  .requiredOption("--payload <file>", "sample JSON payload")
+  .option("--event <event>", "webhook event")
+  .action(async (prompt: string, opts: { payload: string; event?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    console.log((await client.previewTrigger(project.id, { prompt, payload: JSON.parse(fs.readFileSync(opts.payload, "utf8")), event: opts.event ?? "" })).prompt);
+  });
+program
+  .command("email")
+  .description("SMTP digest settings, preview or send")
+  .option("--settings <file>", "read SMTP settings JSON (password is never printed)")
+  .option("--preview", "preview the digest")
+  .option("--send", "send the digest now")
+  .action(async (opts: { settings?: string; preview?: boolean; send?: boolean }) => {
+    const client = await ensureDaemon();
+    if (opts.settings) console.log(JSON.stringify(await client.integrationEmail(JSON.parse(fs.readFileSync(opts.settings, "utf8")))));
+    else if (opts.preview || opts.send) console.log(JSON.stringify(await client.emailDigest(Boolean(opts.send))));
+    else console.log(JSON.stringify(await client.integrationEmail()));
+  });
+
+program
   .command("triggers:add <prompt>")
   .description('add a trigger: --every 30m, --cron "0 9 * * 1-5" (local time; @daily, @hourly work), or --webhook (prints its URL and secret once). A webhook\'s prompt can use {{body}}, {{body.some.path}} and {{event}}')
   .option("--every <interval>", "run every 15m / 2h / 1d")
@@ -3846,13 +3881,14 @@ program
   .option("--webhook", "run when a POST arrives, signed with its secret (GitHub's X-Hub-Signature-256 works as is)")
   .option("--name <name>", "what to call it")
   .option("--agent <id>", "who answers (default: whoever the project routes to)")
+  .option("--github-command", "webhook: trusted /loom issue comments start new chats")
   .option("--min-interval <seconds>", "webhook: ignore deliveries closer together than this")
-  .action(async (prompt: string, opts: { every?: string; cron?: string; webhook?: boolean; name?: string; agent?: string; minInterval?: string }) => {
+  .action(async (prompt: string, opts: { every?: string; cron?: string; webhook?: boolean; githubCommand?: boolean; name?: string; agent?: string; minInterval?: string }) => {
     if ([opts.every, opts.cron, opts.webhook].filter(Boolean).length !== 1) fail("say when: one of --every, --cron or --webhook");
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const out = await client.addTrigger(project.id, {
-      kind: opts.webhook ? "webhook" : "schedule", prompt,
+      kind: opts.webhook ? "webhook" : "schedule", prompt, ...(opts.githubCommand ? { githubCommand: true } : {}),
       ...(opts.every ? { every: opts.every } : {}), ...(opts.cron ? { cron: opts.cron } : {}),
       ...(opts.name ? { name: opts.name } : {}), ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.minInterval ? { minIntervalSec: Number(opts.minInterval) } : {}),

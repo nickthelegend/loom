@@ -6,6 +6,9 @@ import { BackupScheduler } from "../core/backup-schedule.js";
 import { rotateDaemonLog } from "../core/ops.js";
 import { redactValue, redactText } from "../core/redact.js";
 import { safetyDecision } from "../core/safety.js";
+import { EmailDigest } from "./email-digest.js";
+import { registerEmailRoutes } from "./routes/email.js";
+import { DiscordRuns } from "./discord-runs.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -172,6 +175,8 @@ const TOOL_WRITES = [
 ];
 
 export class LoomDaemon {
+  private discordRuns = new DiscordRuns();
+  private emailDigest = new EmailDigest(id => this.runtime(id));
   private setupInstaller: SetupInstaller;
   private setupOptions: DaemonOptions["setup"];
   private app = express();
@@ -651,6 +656,7 @@ export class LoomDaemon {
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
+    registerEmailRoutes(app, this.emailDigest);
     registerBridgeRoutes(app, this.bridges);
     // every session, every project (a scoped token: its own) — and the audit trail, owner only
     app.get("/api/search", (req, res) => {
@@ -819,6 +825,7 @@ export class LoomDaemon {
       );
     }
     this.maybePush(projectId, event);
+    void this.discordRuns.deliver(projectId, event).catch(() => logbook.warn("discord", "Orchestra update pending; will retry"));
   }
 
   /**
@@ -985,6 +992,8 @@ export class LoomDaemon {
     this.pruneTimer.unref();
     this.watchReleases();
     this.triggers.start();
+    this.emailDigest.start();
+    this.discordRuns.start();
     // Resume PR watches even when no client has opened the project since restart.
     for (const project of listProjects()) {
       try {
@@ -1356,6 +1365,8 @@ export class LoomDaemon {
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.setupInstaller.close();
     this.presence.close();
+    await this.emailDigest.close();
+    await this.discordRuns.close();
     await this.closeProjects();
     this.triggers.stop();
     await this.bridges.stopAll().catch(() => { });

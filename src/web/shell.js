@@ -852,7 +852,13 @@ import { openTriggers } from './triggers-ui.js';
           var row = document.querySelector('.crow[data-chat="' + cid + '"]');
           var r = (row || document.body).getBoundingClientRect();
           openMenu(Math.round(r.left + 24), Math.round(r.bottom), [
-            { head: "When this chat's PR needs work" },
+            { head: "When this chat's PR or GitLab MR needs work" },
+            { label: "Attach PR / GitLab MR…", icon: ICONS.pr, run: function(){
+              askText("Pull request or GitLab merge request URL", { placeholder: "https://gitlab.com/group/project/-/merge_requests/1", ok: "Attach" }).then(function(pr){
+                if (!pr) return;
+                return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/prs", { method: "POST", body: JSON.stringify({ pr: pr }) }).then(function(){ toast("Feedback attached to this chat"); });
+              }).catch(function(e){ toast(e.message); });
+            } },
             { label: "Send CI failures back", icon: (c.prFeedback || "ci") === "ci" ? ICONS.check : ICONS.pr, hint: "default", run: function(){ setPrFeedback(pid, cid, "ci"); } },
             { label: "CI failures and reviews", icon: c.prFeedback === "ci+reviews" ? ICONS.check : ICONS.pr, hint: "from people with write access", run: function(){ setPrFeedback(pid, cid, "ci+reviews"); } },
             { label: "Off", icon: c.prFeedback === "off" ? ICONS.check : ICONS.x, run: function(){ setPrFeedback(pid, cid, "off"); } },
