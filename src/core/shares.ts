@@ -17,6 +17,7 @@ export interface Share {
   hash: string;
   projectId: string;
   chat: string;
+  runId?: string;
   title: string;
   createdAt: number;
   expiresAt: number;
@@ -35,11 +36,11 @@ function save(shares: Share[]): void {
 }
 
 /** A new link for one chat, good for `hours` (1 h to 30 days). The token is returned once. */
-export function createShare(input: { projectId: string; chat: string; title: string; hours?: number }, now = Date.now()): { share: Share; token: string } {
+export function createShare(input: { projectId: string; chat: string; title: string; runId?: string; hours?: number }, now = Date.now()): { share: Share; token: string } {
   const hours = Math.min(MAX_SHARE_HOURS, Math.max(1, Math.round(input.hours ?? 24)));
   const token = randomBytes(24).toString("base64url");
   const share: Share = { id: randomBytes(4).toString("hex"), hash: sha(token), projectId: input.projectId, chat: input.chat,
-    title: input.title, createdAt: now, expiresAt: now + hours * 3_600_000 };
+    ...(input.runId ? { runId: input.runId } : {}), title: input.title, createdAt: now, expiresAt: now + hours * 3_600_000 };
   save([...load().filter((s) => s.expiresAt > now), share]);
   return { share, token };
 }

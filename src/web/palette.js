@@ -1,7 +1,7 @@
 /** Browser palette module. See README.md for ownership and startup. */
-import { openImportChats } from './import-chats.js';
+import { shortcutLabel } from './shortcuts.js';
 import { agentLabel,brandMark } from './agents.js';
-import { COMMANDS,devOnly,runCommand } from './commands.js';
+import { COMMANDS,devOnly,runCommand,recentCommands } from './commands.js';
 import { devMode } from './mode.js';
 import { api } from './connection.js';
 import { esc } from './format.js';
@@ -27,7 +27,7 @@ import { openScoreboard } from './project/scoreboard.js';
     scrim.className = "scrim pscrim";
     scrim.innerHTML = '<div class="palette" role="dialog" aria-label="Search everything">' +
       '<div class="phead">' + ICONS.search +
-        '<input id="pq" placeholder="Search files, code, agents, worktrees, commands\u2026" autocomplete="off" spellcheck="false" aria-label="search everything">' +
+        '<input id="pq" placeholder="Search all chats, files, code, commands\u2026" autocomplete="off" spellcheck="false" aria-label="search everything">' +
         '<span class="pkbd">esc</span></div>' +
       '<div class="pbody" id="pbody"></div>' +
       '<div class="pfoot"><span><b>\u2191\u2193</b> navigate</span><span><b>\u21b5</b> open</span><span><b>esc</b> close</span></div>' +
@@ -37,7 +37,7 @@ import { openScoreboard } from './project/scoreboard.js';
     var body = document.getElementById("pbody");
     var items = [], sel = 0, reqId = 0, curQ = "", acc = {}, wt = null, to = null;
 
-    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey, true); }
+    function close(){ clearTimeout(to); reqId++; scrim.remove(); document.removeEventListener("keydown", onKey, true); }
     function onKey(e){
       if (e.key === "Escape") { e.preventDefault(); close(); return; }
       if (e.key === "ArrowDown") { e.preventDefault(); move(1); return; }
@@ -68,7 +68,7 @@ import { openScoreboard } from './project/scoreboard.js';
     function buildCommands(){
       var dev = devMode();
       var C = COMMANDS.filter(function(c){ return (!c.needsProject || pid) && (dev || !devOnly(c.id)); }).map(function(c){
-        return { icon: c.icon, label: c.label, sub: c.keys || "", run: function(){ runCommand(c.id); } };
+        return { commandId: c.id, icon: c.icon, label: c.label, sub: shortcutLabel(c), run: function(){ runCommand(c.id); } };
       });
       if (pid && state.showRail && dev) {
         C.push({ icon: ICONS.files, label: "Explorer", sub: "panel", run: function(){ state.showRail("explorer"); } });
@@ -76,7 +76,6 @@ import { openScoreboard } from './project/scoreboard.js';
         C.push({ icon: ICONS.branch, label: "Source Control", sub: "panel", run: function(){ state.showRail("scm"); } });
         if (state.openSubagents) C.push({ icon: ICONS.agents, label: "Subagents", sub: "dock", run: function(){ state.openSubagents(); } });
       }
-      if (pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } });
       if (pid) editorItems(pid, null, ICONS.code, 4).forEach(function(it){ C.push({ icon: it.icon, label: it.label, sub: "this project", run: it.run }); });
       C.push({ icon: ICONS.star, label: "Model scoreboard", sub: "which model wins, at what cost", run: function(){ openScoreboard(pid || null); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
@@ -104,7 +103,9 @@ import { openScoreboard } from './project/scoreboard.js';
       var q = curQ;
       items = [];
       var h = "";
-      h += section("Commands", CMDS.filter(function(c){ return fuzzy(c.label + " " + (c.sub || ""), q); }).slice(0, q ? 8 : 24));
+      var recent = recentCommands().map(function(id){ return CMDS.find(function(c){ return c.commandId === id; }); }).filter(Boolean);
+      if (!q) h += section("Recent commands", recent);
+      h += section("Commands", CMDS.filter(function(c){ return q || recent.indexOf(c) < 0; }).filter(function(c){ return fuzzy(c.label + " " + (c.sub || ""), q); }).slice(0, q ? 8 : 24));
       var ags = (state.project && state.project.agents) || [];
       if (state.selectAgent) h += section("Agents", ags.filter(function(a){ return fuzzy(a.id + " " + (a.role || ""), q); }).map(function(a){
         return { markKind: a.kind, label: agentLabel(a.kind, a.id), sub: (a.id !== agentLabel(a.kind, a.id) ? a.id + " \u00b7 " : "") + (a.tier === "bridge" ? "bridge" : (a.role || "agent")) + " \u00b7 talk to", run: function(){ state.selectAgent(a.id); } };
@@ -125,21 +126,21 @@ import { openScoreboard } from './project/scoreboard.js';
                    html: '<span class="ppath">' + esc(hit.path) + ":" + hit.line + "</span> " + esc((hit.text || "").trim().slice(0, 90)),
                    run: function(){ state.openFile(hit.path); } };
         }));
-        if (state.setChat && acc.chats && acc.chats.length) h += section("Conversations", acc.chats.map(function(c){
-          var chatName = ((state.project && state.project.chats) || []).filter(function(x){ return x.id === c.chat; }).map(function(x){ return x.title; })[0] || (c.chat === "main" ? "Main" : "a chat");
-          var eid = c.eventId || c.id;
-          return { icon: ICONS.chat, label: (c.snippet || "").trim().slice(0, 72) || chatName, sub: chatName,
-                   run: function(){
-                     // a permalink lands on the message itself, not just the chat
-                     if (eid) location.hash = "#p/" + encodeURIComponent(pid) + "/c/" + encodeURIComponent(c.chat) + "/m/" + eid;
-                     else state.setChat(pid, c.chat);
-                   } };
-        }));
-        var pending = acc.files === undefined || acc.code === undefined || acc.chats === undefined;
+        var pending = acc.files === undefined || acc.code === undefined;
         if (pending) h += '<div class="pmore">searching the project\u2026</div>';
       }
+      if (q) {
+        if (acc.chats) h += section("Chats across projects", acc.chats.map(function(c){
+          return { icon: ICONS.chat, label: c.snippet || c.chatTitle, sub: c.projectName + " · " + c.chatTitle, run: function(){
+            location.hash = '#p/' + encodeURIComponent(c.project) + '/c/' + encodeURIComponent(c.chat) + '/m/' + c.eventId;
+          } };
+        }));
+        if (acc.searchError) h += '<div class="pmore" role="status">' + esc(acc.searchError) + '</div>';
+        else if (acc.chats === undefined) h += '<div class="pmore">Searching all chats…</div>';
+        if (acc.truncated) h += '<div class="pmore">More matches available — narrow your search.</div>';
+      }
       if (!items.length && !q) h += '<div class="pmore">type to search \u2014 files, code, agents, worktrees, commands</div>';
-      var still = q && pid && (acc.files === undefined || acc.code === undefined || acc.chats === undefined);
+      var still = q && (acc.chats === undefined || (pid && (acc.files === undefined || acc.code === undefined)));
       if (!items.length && q && !still) h += '<div class="pmore">Nothing matches \u201c' + esc(q) + '\u201d.</div>';
       body.innerHTML = h;
       if (sel >= items.length) sel = items.length ? items.length - 1 : 0;
@@ -162,12 +163,12 @@ import { openScoreboard } from './project/scoreboard.js';
     function runAsync(){
       var my = reqId, q = curQ;
       var land = function(key, val){ if (my === reqId) { acc[key] = val; draw(); } };
-      api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q))
+      if (pid) api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q))
         .then(function(j){ land("files", (j.matches || []).slice(0, 6)); }).catch(function(){ land("files", []); });
-      api("/api/projects/" + pid + "/grep?q=" + encodeURIComponent(q))
+      if (pid) api("/api/projects/" + pid + "/grep?q=" + encodeURIComponent(q))
         .then(function(j){ land("code", (j.hits || []).slice(0, 6)); }).catch(function(){ land("code", []); });
-      api("/api/projects/" + pid + "/chats/search?q=" + encodeURIComponent(q))
-        .then(function(j){ land("chats", (j.hits || []).slice(0, 5)); }).catch(function(){ land("chats", []); });
+      api("/api/search?q=" + encodeURIComponent(q))
+        .then(function(j){ land("truncated", j.truncated); land("chats", j.hits || []); }).catch(function(e){ land("searchError", e.message); land("chats", []); });
     }
 
     inp.oninput = function(){
@@ -175,7 +176,7 @@ import { openScoreboard } from './project/scoreboard.js';
       acc = {}; reqId++;            // invalidate any in-flight async for the old query
       clearTimeout(to);
       draw();                       // instant: commands + agents + worktrees, filtered
-      if (curQ && pid) to = setTimeout(runAsync, 170);
+      if (curQ) to = setTimeout(runAsync, 170);
     };
     // worktrees once, up front — few, and useful in the default (empty) menu
     if (pid) api("/api/projects/" + pid + "/worktrees").then(function(j){ wt = j.worktrees || []; draw(); }).catch(function(){});

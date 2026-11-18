@@ -81,7 +81,7 @@ describe("MCP transports", () => {
     child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
     expect((await stdio("ping")).result).toEqual({});
     const list = (await stdio("tools/list")).result.tools;
-    expect(list.map((t: any) => t.name)).toEqual(["loom_status", "loom_projects", "loom_agents", "loom_add_agents", "loom_chats", "loom_read_chat", "loom_send", "loom_steer", "loom_orchestra_start", "loom_orchestra_status", "loom_compare", "loom_brain_search", "loom_remember", "loom_report", "loom_board"]);
+    expect(list.map((t: any) => t.name)).toEqual(["loom_scoreboard", "loom_fleets", "loom_try", "loom_memory_list", "loom_status", "loom_projects", "loom_agents", "loom_add_agents", "loom_chats", "loom_read_chat", "loom_send", "loom_steer", "loom_orchestra_start", "loom_orchestra_status", "loom_compare", "loom_brain_search", "loom_remember", "loom_report", "loom_board"]);
     expect(list.every((t: any) => t.inputSchema.type === "object" && t.inputSchema.additionalProperties === false)).toBe(true);
     expect(list.find((t: any) => t.name === "loom_send").annotations.destructiveHint).toBe(true);
     expect(list.find((t: any) => t.name === "loom_remember").annotations.destructiveHint).toBe(false);

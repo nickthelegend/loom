@@ -1,3 +1,4 @@
+import { openSafety } from '../safety.js';
 import { useTemplate } from "./chat-composer.js";
 import { devMode } from '../mode.js';
 import { forecastChip,usageMeter } from '../usage.js';
@@ -25,6 +26,7 @@ export function createComposer(view) {
     /** The last send's requests, so the next one goes after them. Never rejects. */
     var lastSend = Promise.resolve();
     var pendingSubmission;
+    var estimateTimer, estimateGeneration = 0;
 
 
     /**
@@ -202,13 +204,18 @@ export function createComposer(view) {
       box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
       // send lights up only when there's something to send
       var cf = document.getElementById("cform"); if (cf) cf.classList.toggle("hastext", !!box.value.trim());
-      // a long prompt says roughly how long (about four characters a token)
-      var ct = document.getElementById("ctok");
-      if (ct) {
-        var n = Math.round(box.value.length / 4);
-        ct.textContent = n >= 250 ? "~" + (n >= 1000 ? (n / 1000).toFixed(1) + "k" : n) + " tokens" : "";
-        ct.title = n >= 250 ? "a rough count: about four characters a token" : "";
-      }
+      var ct = document.getElementById("ctok"), mine = ++estimateGeneration;
+      clearTimeout(estimateTimer);
+      if (!ct) return;
+      ct.textContent = box.value.trim() ? "Estimating…" : "";
+      if (!box.value.trim()) return;
+      estimateTimer = setTimeout(function(){
+        api("/api/projects/" + view.pid + "/estimate", { method: "POST", body: JSON.stringify({ text: box.value, agentId: state.selected || undefined, chat: view.chatId || "main" }) }).then(function(e){
+          if (mine !== estimateGeneration || !ct.isConnected) return;
+          ct.textContent = "~" + e.inputTokens + " input tokens · " + (e.usd == null ? "price unavailable" : "~$" + e.usd.toFixed(4)) + (e.usage && e.usage.stopped ? " · Daily cap reached" : e.usage && e.usage.warning ? " · 80% of daily cap used" : "");
+          ct.title = "Approximate input including known context; assumes " + e.outputTokens + " output tokens. Actual usage may differ.";
+        }).catch(function(e){ if (mine === estimateGeneration && ct.isConnected) ct.textContent = e.message; });
+      }, 250);
     }
 
 
@@ -434,14 +441,21 @@ export function createComposer(view) {
 
     function openFileMenu(q, at){
       view.menuState = { kind: "file", at: at, sel: 0, items: [] };
-      api("/api/projects/" + view.pid + "/find?q=" + encodeURIComponent(q))
-        .then(function(j){
+      var request = view.menuState;
+      Promise.all([api("/api/projects/" + view.pid + "/find?q=" + encodeURIComponent(q)),
+        api("/api/projects/" + view.pid + "/teammates").catch(function(){ return { teammates: [] }; })])
+        .then(function(results){
+          var j = results[0];
+          if (view.menuState !== request) return;
           if (!view.menuState || view.menuState.kind !== "file") return;
           var items = (j.matches || []).slice(0, 40).map(function(pth){
             var base = pth.split("/").pop();
             return { label: base, sub: pth, value: "@" + pth, icon: ICONS.file };
           });
-          renderMenu(items, j.recent ? "recent files" : "files");
+          var people = results[1].teammates.filter(function(p){ return p.github.toLowerCase().indexOf(q.toLowerCase()) >= 0; }).slice(0, 10).map(function(p){
+            return { label: "@" + p.github, sub: "Notify teammate · " + p.name, value: "@" + p.github, icon: ICONS.team };
+          });
+          renderMenu(people.concat(items), people.length ? "teammates and files" : j.recent ? "recent files" : "files");
         })
         .catch(function(){ closeMenu(); });
     }
@@ -947,6 +961,8 @@ export function createComposer(view) {
       });
       var osend = document.getElementById("orchsend");
       if (osend) osend.onclick = view.sendOrchestra;
+      var safety = document.getElementById("safety-open");
+      if (safety) safety.onclick = function(){ openSafety(view.pid); };
       var pc = document.getElementById("cperm");
       if (pc) pc.onclick = function(){
         if (view.menuState && view.menuState.kind === "permmenu") { closeMenu(); return; }
@@ -991,7 +1007,7 @@ export function createComposer(view) {
           { label: "Copy chat as Markdown", icon: ICONS.copy, run: function(){ state.copyChatMarkdown(); } },
           { label: "Bookmarked in this chat", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
           { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ view.exportThread(); } },
-          { label: "Export as replay", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
+          { label: "Export as HTML", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
           { sep: true },
           { label: "Rewind…", icon: ICONS.rewind, hint: "put the files back", run: function(){ view.openRewindMenu(); } },
           { sep: true },
@@ -1126,6 +1142,7 @@ export function createComposer(view) {
     // The one selector that says who runs the turn: AUTO (the router) or a chosen
     // agent. In AUTO the model is the router's call, so the model pill steps aside.
     function updateModelLabel(){
+      autosizeBox();
       var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
@@ -1169,16 +1186,23 @@ export function createComposer(view) {
     /** The chip beside the agent picker: the chosen agent's mode, in its state colour. */
     function drawPermChip(cur){
       var pc = document.getElementById("cperm"); if (!pc) return;
-      // Nothing to set for the router (AUTO picks per hop), a bridge (it runs
-      // in its own window, under its own rules), or in Orchestrate, whose
-      // cast wears its modes on the chips instead.
-      if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") { pc.style.display = "none"; return; }
+      var indicator = document.getElementById("cpermission-status");
+      // When routing picks the agent later, say whose permissions apply instead
+      // of presenting one mode as if it governed the entire team.
+      if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") {
+        var label = state.cmode === "orch" ? "Team · per-agent permissions" : state.auto ? "Auto routing · per-agent permissions" : cur && cur.tier === "bridge" ? "External agent · unmanaged permissions" : "No agent selected";
+        pc.style.display = "none";
+        if (indicator) { indicator.textContent = label; indicator.title = label; }
+        return;
+      }
       var mode = permOf(cur), cell = permProfile(cur.kind).modes[mode] || {};
+      var detail = cur.permissionIndicator || (mode === "bypass" ? "Bypass · no approvals" : (PERM_SHORT[mode] || mode) + " · tool permissions");
+      if (indicator) { indicator.textContent = detail.includes(" · ") ? detail.split(" · ").slice(1).join(" · ") : detail; indicator.title = detail; }
       pc.style.display = "";
-      pc.className = "cperm devonly " + mode;
+      pc.className = "cperm " + mode;
       pc.setAttribute("data-mode", mode);
-      pc.title = "permissions \u00b7 " + (cell.label || PERM_NAMES[mode]) + " \u2014 click to change";
-      pc.setAttribute("aria-label", "permissions: " + (PERM_NAMES[mode] || mode));
+      pc.title = (cur.permissionIndicator || "permissions") + " \u00b7 " + (cell.label || PERM_NAMES[mode]) + " \u2014 click to change";
+      pc.setAttribute("aria-label", "permissions: " + (cur.permissionIndicator || PERM_NAMES[mode] || mode));
       pc.innerHTML = ICONS.shield + '<span class="cpl">' + esc(PERM_SHORT[mode] || mode) + '</span><span class="cchev">' + ICONS.chevron + "</span>";
     }
 
@@ -1267,7 +1291,7 @@ export function createComposer(view) {
       if (state.cmode === "orch") return view.planState
         ? "Describe the goal \u2014 the orchestrator writes PLAN.md and a spec per task, changing no code\u2026"
         : "Describe the goal \u2014 the orchestrator splits it into tasks and runs them in parallel\u2026";
-      return view.planState ? "What should be planned? The agent writes it to plans/ and changes no code\u2026" : "Message\u2026  @ for files, / for actions";
+      return view.planState ? "What should be planned? The agent writes it to plans/ and changes no code\u2026" : "Message\u2026  @ for teammates or files, / for actions";
     }
 
     function loadPrompts(){

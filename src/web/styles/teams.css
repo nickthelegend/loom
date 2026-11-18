@@ -423,3 +423,9 @@
   .tauto .tal.ok{color:var(--foreground)}
   .tauto .tal small{color:var(--muted-foreground)}
   .tauto .tact{margin-top:8px}
+  .sharing-body{display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .sharing-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0}
+  .sharing-row>span:first-child{flex:1;overflow-wrap:anywhere}
+  .project-presence{display:inline-flex;align-items:center;gap:4px;color:var(--muted-foreground);font-size:11px;margin-left:6px}
+  .project-presence>span{width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .tfe[hidden]{display:none}

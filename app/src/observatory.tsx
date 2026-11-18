@@ -1,3 +1,5 @@
+import { R4Insights } from "./r4-insights";
+import { diffSummary } from "./git-review-model";
 /**
  * The Observatory, natively.
  *
@@ -271,6 +273,7 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
         ) : (
           <ReplayView snapshots={snapshots} decisions={decisions} spans={spans} />
         )}
+        {view === "metrics" ? <R4Insights creds={creds} projectId={project.id} /> : null}
       </ScrollView>
 
       <TriageSheet
@@ -535,6 +538,7 @@ function MetricsView(props: {
                     <Text style={{ color: T.text, fontSize: 13, flex: 1 }} numberOfLines={1}>{a.agentId}</Text>
                     <Text style={{ color: T.dim, fontSize: 11.5, fontFamily: T.mono }}>{a.turns} · {Math.round(a.successRate * 100)}%</Text>
                     <Text style={{ color: tint, fontSize: 13, fontWeight: "700", minWidth: 44, textAlign: "right" }}>{checked ? `${t!.verified}/${checked}` : "—"}</Text>
+                    {a.diff ? <Text style={{ color: T.dim, fontSize: 11 }}>{diffSummary(a.diff)}</Text> : null}
                     {extra ? <Text style={{ color: T.faint, fontSize: 11 }}>{extra}</Text> : null}
                   </View>
                 );

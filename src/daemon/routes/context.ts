@@ -9,6 +9,7 @@ import type { TerminalManager } from '../terminals.js';
 
 /** Capabilities supplied by the daemon; route groups receive only their subset. */
 export interface RouteContext {
+  projectPresence: (id: string) => import("../../core/presence.js").PresencePerson[];
   terminals: TerminalManager;
   auth: AuthManager;
   askHuman: (req: { project: string; agent: string; tool: string; input: unknown; summary?: string; }) => Promise<ApprovalDecision>;
@@ -34,6 +35,6 @@ export interface RouteContext {
   startHealLoop: (rt: ProjectRuntime, agent: string, alert: string, since: number) => void;
   broadcastTerm: (projectId: string, frame: Record<string, unknown>) => void;
   broadcastProjects: (frame: Record<string, unknown>) => void;
-  approvals: Map<string, { id: string; projectId: string; agent: string; tool: string; input: unknown; sessionOption?: boolean; chat?: string; createdAt: number; settle: (d: ApprovalDecision, by?: string) => void; }>;
+  approvals: Map<string, { id: string; projectId: string; agent: string; tool: string; input: unknown; sessionOption?: boolean; chat?: string; createdAt: number; expiresAt?: number; settle: (d: ApprovalDecision, by?: string) => void; }>;
 }
 export type WithRuntime = (handler: (rt: ProjectRuntime, req: Request, res: Response) => Promise<void>) => RequestHandler;

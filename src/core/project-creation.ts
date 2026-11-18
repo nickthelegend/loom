@@ -7,7 +7,7 @@ import { isWithdrawnKind, knownAgentKinds } from "../adapters/index.js";
 import type { AgentConfig, ProjectConfig, ProjectInfo } from "../types.js";
 
 export interface ProjectAgentInput { kind: string; model?: string; count?: number }
-export interface NewProjectInput { name: string; agents?: ProjectAgentInput[]; git?: boolean }
+export interface NewProjectInput { name: string; agents?: ProjectAgentInput[]; git?: boolean; template?: string }
 export interface CloneProjectInput { url: string; name?: string }
 export interface CreatedProject { project: ProjectInfo; config: ProjectConfig }
 export interface ProjectCloneJob {
@@ -127,6 +127,6 @@ export async function initializeProject(dir: string, name: string, git: boolean)
     const configured = await projectGit(["config", "--get", key!], dir).catch(() => "");
     if (!configured) identity.push("-c", `${key}=${fallback}`);
   }
-  await projectGit(["add", "--", "README.md", ".gitignore"], dir);
+  await projectGit(["add", "--", "."], dir);
   await projectGit([...identity, "-c", "commit.gpgsign=false", "commit", "-m", "Initial commit"], dir);
 }

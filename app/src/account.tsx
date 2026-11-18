@@ -1,3 +1,5 @@
+import { Operations } from "./ops";
+import { loadHaptics, setHaptics } from "./phone-preferences";
 /**
  * Account & privacy — the profile sheet behind the avatar on the board.
  *
@@ -6,6 +8,8 @@
  * what is sent, because "anonymous analytics" alone is a claim, not a fact.
  */
 
+import { ACCENTS, type Accent } from "./shell-model";
+import { accent, pickAccent } from "./theme";
 import type { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "react-native";
@@ -102,7 +106,11 @@ export function AccountSheet(props: {
   /** Pair one more computer. */
   onAddMachine?: () => void;
   themePref: ThemePref;
+  biometricLock: boolean;
+  onBiometricLock: (on: boolean) => Promise<void>;
 }) {
+  const [haptics, setHapticsOn] = useState(true);
+  useEffect(() => { void loadHaptics().then(setHapticsOn); }, [props.visible]);
   const profile = profileOf(props.user);
   const team = useTeamSummary(props.creds, props.visible);
   const route = useConnRoute();
@@ -200,6 +208,16 @@ export function AccountSheet(props: {
         <MachinesSection visible={props.visible} onSwitch={props.onSwitchMachine} onAdd={props.onAddMachine} />
       )}
 
+      <Panel>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: T.text }}>Haptic feedback</Text>
+          <Switch accessibilityLabel="Haptic feedback" value={haptics} onValueChange={on => void setHaptics(on).then(() => setHapticsOn(on)).catch(e => setErr(String(e)))} />
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={{ color: T.text }}>Biometric lock on app open</Text>
+          <Switch accessibilityLabel="Biometric lock on app open" value={props.biometricLock} onValueChange={on => void props.onBiometricLock(on).catch(e => setErr(String(e)))} />
+        </View>
+      </Panel>
       {/* appearance — the desktop's three choices */}
       <View style={{ gap: 6 }}>
         <SectionLabel text="Appearance" />
@@ -226,6 +244,18 @@ export function AccountSheet(props: {
           </View>
         </Panel>
       </View>
+
+      <Panel>
+        <SectionLabel text="Accent colour · this device" />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {(Object.keys(ACCENTS) as Accent[]).map(a => <TouchableOpacity key={a} accessibilityRole="radio" accessibilityLabel={a}
+            accessibilityState={{ selected: accent === a }} onPress={() => pickAccent(a)}
+            style={{ padding: 10, borderRadius: radii.key, borderWidth: 1, borderColor: accent === a ? T.thread : T.line }}>
+            <Text style={{ color: T.text }}>{a}</Text>
+          </TouchableOpacity>)}
+        </View>
+        <Text style={{ color: T.dim, fontSize: 12, marginTop: 8 }}>Text follows your phone’s font size. Motion follows its accessibility setting.</Text>
+      </Panel>
 
       {/* privacy — only a build that can send the stats (Supabase configured) asks about them */}
       {supabaseConfigured && (
@@ -347,6 +377,7 @@ export function AccountSheet(props: {
       )}
 
       {/* about: Loom is open source and runs on your computer; this app is its remote */}
+      {props.creds && <Operations creds={props.creds} />}
       <View style={{ gap: 6 }}>
         <SectionLabel text="About" />
         <Panel>
@@ -368,6 +399,8 @@ export function AccountSheet(props: {
               </Text>
             </TouchableOpacity>
           )}
+          {upd?.changelog?.entries.map(entry => <View key={entry.version} style={{ gap: 4 }}><Text style={{ color: T.text, fontWeight: "600" }}>Changes in {entry.version}</Text><Text selectable style={{ color: T.dim, fontSize: 12 }}>{entry.notes}</Text></View>)}
+          {upd?.behindRelease && upd.changelog?.available === false && <Text style={{ color: T.dim }}>Changelog unavailable — open the release notes above.</Text>}
           <AboutRow label="Install Loom on a computer" hint="loompad.tech · macOS, Linux and Windows apps, or npm" onPress={() => openLink(INSTALL_URL)} />
           <AboutRow label="Source code on GitHub" hint="Loom is open source — star it, file an issue, send a fix" onPress={() => openLink(REPO_URL)} />
           {canRate && <AboutRow label="Rate Loom" hint="On Google Play — it helps other people find it" onPress={rateLoom} />}

@@ -3,6 +3,7 @@
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 // BrowserView / webview-guard approach: Nuphos (Apache-2.0, © 2026 Zeabur Inc.).
 
+import { readShortcuts } from "./shortcuts.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,7 @@ app.setName("Loom Desktop");
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
 const BG = "#0a0a0a";
 let win = null;
+let appOrigin = null;
 let pet = null;
 
 // Guard guests at creation, before their first navigation can begin.
@@ -142,6 +144,7 @@ async function createWindow() {
   await win.loadURL(startingPage(BG)).catch(() => {});
   try {
     const { url } = await prepareAppUrl();
+    appOrigin = new URL(url).origin;
     await win.loadURL(url);
   } catch (err) {
     await win.loadURL(failedPage(BG, err, { packaged: app.isPackaged, logPath: daemonLogPath() }));
@@ -154,10 +157,22 @@ async function createWindow() {
  * runs the same code the buttons do — the menu is a second door, not a second
  * implementation. Editing and windows use the OS's own roles.
  */
+let shortcutOverrides = {};
+ipcMain.handle("loom:shortcuts", (event, bindings) => {
+  const next = readShortcuts(bindings, event.senderFrame?.url, appOrigin);
+  if (!next) return false;
+  shortcutOverrides = next;
+  buildMenu();
+  return true;
+});
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const send = (action) => () => menuAction(action);
-  const item = (label, action, accelerator) => ({ label, click: send(action), ...(accelerator ? { accelerator } : {}) });
+  const item = (label, action, accelerator) => {
+    accelerator = Object.hasOwn(shortcutOverrides, action) ? shortcutOverrides[action] : accelerator;
+    return { label, click: send(action), ...(accelerator ? { accelerator } : {}) };
+  };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(isMac

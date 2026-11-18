@@ -1,3 +1,4 @@
+import { bindDiffQuestions } from "../diff-question.js";
 import { api } from '../connection.js';
 import { diffBody,diffToggle,isLoomInternal,renderDiffFiles,renderDiffLines,splitPatch } from '../diff.js';
 import { esc,mdToHtml } from '../format.js';
@@ -54,6 +55,7 @@ export function createChanges(view) {
 
     function bindReviewClicks(){
       var pane = document.getElementById("pane-changes");
+      bindDiffQuestions(pane, closeDock);
       if (!pane || pane.dataset.reviewBound) return;
       pane.dataset.reviewBound = "1";
       pane.addEventListener("click", function(ev){

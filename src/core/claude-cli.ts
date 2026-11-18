@@ -5,6 +5,7 @@
  * claude-code adapter with sessions and streaming).
  */
 
+import { resolveModel } from "./model-routing.js";
 import { spawn } from "./process.js";
 import { agentEnv } from "../adapters/base.js";
 
@@ -24,7 +25,7 @@ export function claudeText(prompt: string, opts: ClaudeCliOptions = {}): Promise
         "--output-format",
         "json",
         "--model",
-        opts.model ?? "haiku",
+        resolveModel(opts.model ?? "haiku"),
         "--no-session-persistence",
       ],
       { stdio: ["ignore", "pipe", "ignore"], env: agentEnv() },

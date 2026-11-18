@@ -6,13 +6,15 @@
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
 
+import { hapticsEnabled } from "./phone-preferences";
+
 const on = Platform.OS === "ios" || Platform.OS === "android";
 
 export const haptic = {
   tap(): void {
-    if (on) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    if (on && hapticsEnabled()) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   },
   success(): void {
-    if (on) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (on && hapticsEnabled()) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   },
 };

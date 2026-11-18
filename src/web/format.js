@@ -405,4 +405,24 @@ import { toast } from './notifications.js';
     if (s < 86400) return Math.round(s / 3600) + "h ago";
     return Math.round(s / 86400) + "d ago";
   }
-export { drawMermaid,esc,highlight,hue,mdInline,mdToHtml,money,pageGone,rel,tokens };
+  /**
+   * `cd` into a directory, typed into a real shell. The path is data, never
+   * syntax: POSIX shells get it single-quoted (inside double quotes `$(…)` and
+   * backticks still run — a folder named `$(rm -rf ~)` was a command), and
+   * cmd.exe, the Windows terminal's shell, gets `cd /d "…"` (a Windows path
+   * can't hold a double quote).
+   */
+  function cdCommand(dir){
+    var d = String(dir);
+    if (/^[A-Za-z]:[\\/]/.test(d) || /^\\\\/.test(d)) return 'cd /d "' + d + '"';
+    return "cd '" + d.replace(/'/g, "'\\''") + "'";
+  }
+  /**
+   * An agent picture fit to put in a src: the whole value a small PNG/JPEG/WebP
+   * data URL (as the daemon allows), else null. Checking only the prefix let a
+   * config-written `data:image/png;base64,x" onerror="…` close the attribute.
+   */
+  function avatarSrc(v){
+    return typeof v === "string" && v.length <= 120000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : null;
+  }
+export { avatarSrc,cdCommand,drawMermaid,esc,highlight,hue,mdInline,mdToHtml,money,pageGone,rel,tokens };
