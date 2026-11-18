@@ -144,7 +144,8 @@ describe("Orchestra 2.1 batch", () => {
   });
 
   it("keeps streamed workers active rather than marking them stalled", async () => {
-    const run = await start({ goal: "stream:30 " + "working ".repeat(100), stallMinutes: 0.005 });
+    // 1.8s without progress counts as stalled; output arrives every 30ms (a slow Windows runner can pause well over 0.3s)
+    const run = await start({ goal: "stream:30 " + "working ".repeat(100), stallMinutes: 0.03 });
     await waitUntil(async () => (await get(run)).status === "completed");
     expect((await get(run)).timeline!.some(e => e.phase === "task_stalled")).toBe(false);
   });
