@@ -20,7 +20,7 @@ import crypto from "node:crypto";
 
 import { githubWebhookFeed } from "./github-events.js";
 import type { Sealed } from "./team-crypto.js";
-import { overlap, zoneOf, type LeaseScope } from "./team-leases.js";
+import { heldZone, overlap, type LeaseScope } from "./team-leases.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -582,11 +582,8 @@ export class MemoryHub {
       .map((l) => ({ lease: l, paths: overlap(scope, l) }))
       .filter((o) => o.paths.length > 0);
     // D31: in a hard zone, any rival lease inside the same zone refuses the claim.
-    const zone = zoneOf(scope, hardZones);
-    if (zone) {
-      const holder = rivals.find((l) => zoneOf(l, [zone]) === zone);
-      if (holder) return { overlaps, blockedBy: { lease: holder, zone } };
-    }
+    const held = heldZone(scope, hardZones, rivals);
+    if (held) return { overlaps, blockedBy: { lease: held.holder, zone: held.zone } };
     return { overlaps };
   }
 
@@ -723,7 +720,8 @@ export class MemoryHub {
       sealed: m.sealed,
       state: "live",
       ...(m.supersedes ? { supersedes: m.supersedes } : {}),
-      confirmedBy: own?.confirmedBy ?? [github],
+      // confirmations were for the words they confirmed: new words start over
+      confirmedBy: own && own.hmac === m.hmac ? own.confirmedBy : [github],
       createdAt: own?.createdAt ?? this.now(),
       updatedAt: this.now(),
     };
@@ -742,6 +740,8 @@ export class MemoryHub {
 
   updateTeamMemory(userId: string, teamId: string, id: string, patch: { hmac: string; sealed: Sealed }): TeamMemory {
     const m = this.ownMemory(userId, teamId, id);
+    // teammates confirmed the old text, not this one (D41)
+    if (m.hmac !== patch.hmac) m.confirmedBy = [m.author];
     m.hmac = patch.hmac;
     m.sealed = patch.sealed;
     m.updatedAt = this.now();

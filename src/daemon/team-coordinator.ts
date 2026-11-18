@@ -20,7 +20,7 @@ import { isTerminal, type Admission, type OrchestraCoordinator, type OrchestraRu
 import { openFromTeam, sealForTeam, type TeamKey } from "../core/team-crypto.js";
 import type { FeedEvent, FeedIn, HubClient, Job, Lease, Presence } from "../core/team-hub.js";
 import { spentToday } from "../core/team-landing.js";
-import { covered, overlap, repoRelative, scopeOf, zoneOf } from "../core/team-leases.js";
+import { covered, heldZone, overlap, repoRelative, scopeOf } from "../core/team-leases.js";
 import { agentAllowed, isProtected, loadPolicy, type TeamPolicy } from "../core/team-policy.js";
 import type { ProjectRuntime } from "./runtime.js";
 
@@ -181,9 +181,10 @@ export class TeamCoordinator implements OrchestraCoordinator {
     // An adopted goal (D63) works on the owner's goal itself: its leases aren't a rival's.
     const own = new Set([run.id, ...(run.from?.ownerRunId ? [run.from.ownerRunId] : [])]);
     const rivals = (await hub.leases(share.teamId, share.repo)).filter((l) => !l.stale && !own.has(l.runId));
-    const zone = zoneOf(scope, policy.hardZones);
-    const zoneHolder = zone ? rivals.find((l) => zoneOf(l, [zone]) === zone) : undefined;
-    if (zone && zoneHolder) {
+    // every hard zone the scope touches, not just the first one listed (#431)
+    const held = heldZone(scope, policy.hardZones, rivals);
+    if (held) {
+      const { zone, holder: zoneHolder } = held;
       await this.post(share.teamId, `zone:${run.id}/${task.id}/${zone}`, {
         type: "zone_waiting",
         repo: share.repo,

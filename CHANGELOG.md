@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model tools stay inside the project through symlinks (#431).** `read_file`, `search`, `write_file` and the write preview now resolve every existing path component (and refuse dangling links) before checking containment and the `.git`/`.loom` exclusions, so a link like `leak -> /elsewhere` can no longer read or write outside the project.
+- **Model agents run only the tools they were offered (#431).** A tool call the provider returns is executed only if that hop advertised it: `tools: false` runs nothing, `write: false` never writes even under `bypass`, and a model that keeps calling tools past the hop limit is stopped instead of looping.
+- **Stop cancels a turn waiting for a daemon slot (#431).** A turn queued behind the turn gate counts as running for Stop; stopping it leaves the gate without taking a slot, and the prompt never runs.
+- **Stopping an ACP agent settles its pending requests (#431).** `stop()` rejects outstanding JSON-RPC requests, and a request made with no process refuses at once, so a send waiting on `initialize` or `session/prompt` no longer hangs forever holding its turn slot.
+- **Memory updates learned from outside content are untrusted (#431).** An extractor UPDATE from a turn that read web, issue or PR content now marks the memory untrusted (an existing untrusted flag is never cleared), so it is no longer published to the team as trusted.
+- **Brain export/import keeps privacy, trust and expiry (#431).** Exports carry `private`, `untrusted` and `expiresAt` and leave expired memories out unless asked; imports keep those flags (a malformed flag errs private/untrusted) and skip entries that have already expired.
+- **Making a shared memory private keeps it for its author, and clearing private shares it again (#431).** A withdrawn team memory stays in the author's own briefing pool, and once it is shareable again it is re-published instead of staying withdrawn forever.
+- **An edited team memory starts its confirmations over (#431).** When an author's edit or re-publish changes a memory's content, teammates who confirmed the old text no longer count as confirming the new text — on the reference hub and the hosted hub (`supabase/migrations/0014_zones_and_confirmations.sql`).
+- **Lease checks cover every hard zone a claim touches (#431).** The coordinator, the reference hub and the hosted hub's `claim_lease`/`extend_lease` (migration 0014) now refuse a claim when any of its hard zones is held, not only the first one listed.
+- **Skill install and removal can't escape through a symlinked `skills` directory (#431).** Installing, authoring and removing a project skill now resolve the real destination and refuse anything outside the real project root, so `skills -> /elsewhere` can't redirect a copy or a forced recursive delete.
+- **Onboarding retries never delete a directory they didn't create (#431).** Each clone attempt goes into a staging directory the job creates; only that is cleaned up on failure, and a finished clone moves to the destination without replacing anything there (it lands at `name-2` if the destination filled up meanwhile).
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,
