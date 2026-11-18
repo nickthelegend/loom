@@ -2,7 +2,7 @@
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,logout } from './connection.js';
-import { esc,rel } from './format.js';
+import { avatarSrc,esc,rel } from './format.js';
 import { ICONS,LOADER } from './icons.js';
 import { askConfirm,askText,chime,devicePref,setDevicePref,toast } from './notifications.js';
 import { state } from './state.js';
@@ -1145,7 +1145,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
             ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button>" +
           '<button type="button" class="btn xs ghost psinstr" data-avatar="' + esc(a.id) + '" title="' + (a.avatar ? "change its picture" : "give this agent a picture") + '">' +
-            (a.avatar ? '<img class="psav" src="' + a.avatar + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
+            (avatarSrc(a.avatar) ? '<img class="psav" src="' + esc(avatarSrc(a.avatar)) + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
           (a.avatar ? '<button type="button" class="btn xs ghost" data-avatarx="' + esc(a.id) + '" title="remove its picture" aria-label="remove picture">' + ICONS.x + "</button>" : "") +
           (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
             esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +

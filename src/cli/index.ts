@@ -37,7 +37,8 @@ import type { LoomEvent, ProjectStatus } from "../types.js";
   }
 }
 import type { QueueItem } from "../core/prompt-queue.js";
-import { exitCodeFor, turnOutcome, type TurnOutcome } from "../core/turn-wait.js";
+import { followRoute } from "./route-follow.js";
+import { exitCodeFor, sentTurnOutcome, type SentTurn, type TurnOutcome } from "../core/turn-wait.js";
 import {
   DaemonClient,
   DaemonError,
@@ -3885,7 +3886,7 @@ async function sendWithHandoffConfirm(
   fresh = false,
   handoff = false,
   selection: { model?: string; effort?: string } = {},
-): Promise<{ agentId: string } | null> {
+): Promise<SentTurn | null> {
   try {
     return await client.send(projectId, text, agentId, { fresh, ...selection });
   } catch (err) {
@@ -3969,7 +3970,7 @@ program
       try {
         const { events } = await client.events(project.id, cursor, 500);
         if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
-        outcome = turnOutcome(seen, result.agentId, since);
+        outcome = sentTurnOutcome(seen, result, since);
         if (!outcome && daemonPid && Date.now() - lastPidCheck > 5000) {
           lastPidCheck = Date.now();
           if ((await client.version()).pid !== daemonPid) interrupted = true;
@@ -4647,17 +4648,14 @@ program
         return;
       }
 
-      console.log(pc.dim("following — Ctrl-C detaches, the route keeps running\n"));
-      const lastSeen = { id: 0 };
-      await new Promise<void>((resolve) => {
-        client.subscribe((pid, e) => {
-          if (pid !== project.id || e.id <= lastSeen.id) return;
-          lastSeen.id = e.id;
-          printEvent(e);
-          if (e.kind === "route_completed" || e.kind === "route_failed") resolve();
-        }, project.id);
+      if (!["completed", "failed", "aborted"].includes(route.status)) console.log(pc.dim("following — Ctrl-C detaches, the route keeps running\n"));
+      let sawEnd = false;
+      const finalState = await followRoute(client, project.id, route, (e) => {
+        printEvent(e);
+        if (e.kind === "route_completed" || e.kind === "route_failed") sawEnd = true;
       });
-      const { route: finalState } = await client.routeState(project.id);
+      // it ended before we were listening (its first step couldn't start): say why
+      if (!sawEnd && finalState && finalState.status !== "completed" && finalState.reason) console.error(pc.red(`✗ route ${finalState.status}: ${finalState.reason}`));
       process.exit(finalState?.status === "completed" ? 0 : 1);
     },
   );

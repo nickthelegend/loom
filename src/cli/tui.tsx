@@ -60,7 +60,8 @@ interface AppProps {
   initial: ProjectStatus;
 }
 
-function App({ client, initial }: AppProps) {
+/** Exported for tests, which render it with a stub client. */
+export function App({ client, initial }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -325,7 +326,8 @@ function App({ client, initial }: AppProps) {
         setNotice(err instanceof Error ? err.message : String(err));
       }
     },
-    [client, project.id, push, exit],
+    // /prompt sends to the agent selected now, with the holder and name as they are now
+    [client, project.id, project.name, project.holder, selected, push, exit],
   );
 
   const onSubmit = useCallback(async () => {

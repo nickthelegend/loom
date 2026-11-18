@@ -1,7 +1,7 @@
 /** Browser transcript module. See README.md for ownership and startup. */
 import { AGENT_LABELS,agentGlyph,agentLabel,brandMark,hasBrand,kindOf,labelOf } from './agents.js';
 import { approvalCard } from './approvals.js';
-import { esc,hue,mdToHtml,money,tokens } from './format.js';
+import { avatarSrc,esc,hue,mdToHtml,money,tokens } from './format.js';
 import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
 import { state } from './state.js';
@@ -187,7 +187,7 @@ import { shortModel } from './permissions.js';
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
     // a picture you gave this agent wins over its brand mark
     var mine = state.project && (state.project.agents || []).filter(function(a){ return a.id === s && a.avatar; })[0];
-    if (mine && /^data:image\/(png|jpeg|webp);base64,/.test(mine.avatar)) return '<span class="av pic"><img src="' + mine.avatar + '" alt=""></span>';
+    if (mine && avatarSrc(mine.avatar)) return '<span class="av pic"><img src="' + esc(avatarSrc(mine.avatar)) + '" alt=""></span>';
     if (s.indexOf("ask:") === 0) k = "model";
     if (hasBrand(k)) return '<span class="av">' + brandMark(k) + "</span>";
     var h = hue(s);

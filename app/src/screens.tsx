@@ -35,7 +35,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage, getTeamRunners, moveChat, getBranches, createBranch, activateBranch, type BranchListing } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
-import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
+import { applyEvent, applyStream, mergeMissed, reconcileLive, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
@@ -1098,8 +1098,32 @@ export function ProjectScreen(props: {
         setHistoryErr(e instanceof Error ? e.message : String(e));
         retryHistory = setTimeout(() => setHistoryTry((n) => n + 1), 4000);
       });
+    // Every (re)connection opens with a hello, and replays nothing: what landed while the
+    // feed was down is fetched here — the events since the newest one shown, and the
+    // replies being typed now (a stale half-reply would otherwise sit there).
+    const catchUp = () => {
+      void getEvents(creds, project.id, chatId, 1000, lastId.current)
+        .then(({ events: missed }) => {
+          if (!live || !missed.length) return;
+          const mine = missed.filter((e) => !e.chat || e.chat === chatId);
+          lastId.current = Math.max(lastId.current, ...mine.map((e) => e.id));
+          setEvents((prev) => mergeMissed(prev, missed, chatId));
+          for (const e of mine) setLive((m) => applyEvent(m, e));
+        })
+        .catch(() => {});
+      void getEvents(creds, project.id, chatId, 1)
+        .then(({ live: typing }) => {
+          if (live) setLive((m) => reconcileLive(m, typing, chatId));
+        })
+        .catch(() => {});
+    };
     const close = openLiveStream(creds, project.id, (raw) => {
       const frame = raw as { type?: string; event?: LoomEvent; chat?: string } & Partial<StreamFrame>;
+      if (frame?.type === "hello") {
+        // the first page hasn't landed yet: it will cover this
+        if (threadFresh.current) catchUp();
+        return;
+      }
       if (frame?.type === "stream") {
         if ((frame.chat || "main") === chatId && frame.agentId && frame.text) {
           const f = frame as StreamFrame;

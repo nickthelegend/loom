@@ -176,6 +176,16 @@ export function readProjectConfig(projectDir: string, opts: { strict?: boolean }
   return cfg;
 }
 
+/**
+ * An agent's picture, as anything may show it: a small PNG, JPEG or WebP data URL and nothing
+ * else. The avatar API always checked this; a hand-edited .loom/config.json didn't, and its value
+ * went into every client's HTML — `data:image/png;base64,x" onerror="…` ran in Loom's origin.
+ */
+export const AVATAR_MAX = 120_000;
+export function isAvatarDataUrl(v: unknown): v is string {
+  return typeof v === "string" && v.length <= AVATAR_MAX && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
+}
+
 const AGENT_KEYS = new Set(["id", "kind", "role", "account", "options", "memoryFiles", "enabled", "instructions", "avatar", "permissions"]);
 /** Keys an adapter reads from options — someone writing one on the agent itself meant it there. */
 const OPTION_KEYS = new Set(["model", "bin", "extraArgs", "baseUrl", "configDir", "env", "effort", "sandbox", "timeoutMs", "startTimeoutMs", "permissionMode", "mode", "args"]);
