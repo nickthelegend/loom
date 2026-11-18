@@ -390,6 +390,13 @@ export class ModelAdapter extends AdapterBase {
         }
       }
       if (!step.calls.length) break;
+      // Past the hop budget no tools were offered, so whatever it asked for
+      // now isn't run: what it said is the answer. Without this a model that
+      // ignores the missing tool list keeps the loop going forever.
+      if (hop >= MAX_HOPS) break;
+      // Only what this hop actually offered may run. The tool list on the wire
+      // is advice to the model; this is the rule.
+      const offered = new Set(this.tools().map((t) => t.function.name));
 
       // What it asked for, and what it got — in the thread, like any agent's
       // tool use, because work nobody can see is work nobody can check.
@@ -403,7 +410,17 @@ export class ModelAdapter extends AdapterBase {
         })),
       });
       for (const call of step.calls) {
-        const result = await this.runTool(call);
+        const result: ToolResult = offered.has(call.name)
+          ? await this.runTool(call)
+          : this.opts.readOnly && isWriteTool(call.name)
+            ? { id: call.id, name: call.name, content: "Side chats are read-only.", summary: `${call.name} denied`, ok: false }
+            : {
+                id: call.id,
+                name: call.name,
+                content: `Error: there is no tool called "${call.name}" here.`,
+                summary: `${call.name} — not offered to this agent`,
+                ok: false,
+              };
         this.emit({
           kind: "tool_call",
           payload: { name: call.name, args: call.args, summary: result.summary, ok: result.ok },

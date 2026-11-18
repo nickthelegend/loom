@@ -4,7 +4,7 @@
  */
 
 import { resolveAgentAccount } from "../core/accounts.js";
-import { turnGate } from "../core/turn-gate.js";
+import { GateCancelled, turnGate } from "../core/turn-gate.js";
 import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../types.js";
 import { AntigravityCliAdapter } from "./antigravity-cli.js";
 import { AntigravityBridge } from "./bridges/antigravity.js";
@@ -123,8 +123,35 @@ function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent 
   const send = agent.send.bind(agent);
   const say = (why: string) => (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
     .emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
+  // A turn waiting here hasn't reached the adapter, so the adapter isn't busy and
+  // its own interrupt has nothing to stop. Stop has to reach the wait instead.
+  const interrupt = agent.interrupt.bind(agent);
+  let waiting: AbortController | null = null;
+  agent.interrupt = async () => {
+    if (waiting) {
+      waiting.abort();
+      return;
+    }
+    return interrupt();
+  };
   agent.send = async (input: SendInput) => {
-    const release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+    const ctl = new AbortController();
+    waiting = ctl;
+    slotWaiters.add(agent);
+    let release: () => void;
+    try {
+      release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say, ctl.signal);
+    } catch (err) {
+      if (!(err instanceof GateCancelled)) throw err;
+      (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
+        .emit({ kind: "status", payload: { state: "interrupted" } });
+      return;
+    } finally {
+      if (waiting === ctl) {
+        waiting = null;
+        slotWaiters.delete(agent);
+      }
+    }
     try {
       return await send(input);
     } finally {
@@ -132,6 +159,14 @@ function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent 
     }
   };
   return agent;
+}
+
+/** Adapters whose turn is waiting at the gate — not busy yet, but stoppable. */
+const slotWaiters = new WeakSet<object>();
+
+/** Is this agent's turn waiting for a daemon slot? Stop treats it as running. */
+export function waitingForSlot(agent: unknown): boolean {
+  return typeof agent === "object" && agent !== null && slotWaiters.has(agent);
 }
 
 export function knownAgentKinds(): string[] {
