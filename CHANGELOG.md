@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Alert webhooks after phone access is on (#428).** Without `LOOM_WEBHOOK_SECRET`, `/api/webhooks/alerts` now requires the request's own socket to be loopback (with a loopback Host and no relay marker), not just the daemon's primary bind address. Before, a LAN or tailnet listener added by phone access, or a relayed request, could quarantine agents and move the baton unauthenticated.
+- **Screenshots from scoped tokens (#428).** `POST /api/projects/:id/preview/screenshot` is refused to project-scoped tokens. The daemon's browser runs on this machine, so it could load `/api/bootstrap` and photograph the admin token.
+- **Provider changes from scoped tokens (#428).** Creating, updating and removing providers (`POST`/`DELETE /api/providers/:id`) needs an owner or unscoped token. Before, a scoped token could point a provider at its own host and collect the stored key on the next model refresh.
+- **Revoked and expired sockets (#428).** Revoking a device now closes its open WebSockets. A Share-live guest's socket closes when its link expires and gets no frames after that. Terminal input re-checks the credential, and the heartbeat re-checks every socket.
+- **Push notifications across project scopes (#428).** Push recipients are now filtered by the event's project, and for a guest by its chat, so a device paired for one project no longer receives another project's questions, replies or approvals.
+- **Console logs across project scopes (#428).** `GET /api/logs` returns a scoped token only its own projects' records, with nothing daemon-wide. `DELETE /api/logs` needs an owner or unscoped token.
+- **Prompt history across project scopes (#428).** The machine-wide prompt library and Recent history (`/api/prompts*`) are refused to project-scoped tokens, so they can no longer read or clear prompts sent in other projects.
+- **Attachment writes through symlinks (#428).** A new file's nearest existing ancestor must now resolve inside the project, and dangling links are refused. Before, a `.loom/attachments` linked outside the project, or a dangling link at the destination, wrote the file outside it.
+- **Duplicate project runtimes (#428).** Concurrent first requests for a project now share one opening runtime. Before, each opened its own, and only the last one was ever closed.
+- **Empty files in the explorer (#428).** `GET /api/projects/:id/file` on a zero-byte file answers with empty content. Before, it threw outside Express and the request hung.
+- **Shutdown with phones connected (#428).** `close()` now terminates sockets on phone-access listeners and closes their connections, so an update's restart is no longer held open by a connected phone. The update restart also has a 15-second deadline.
+- **IPv6 listeners (#428).** WebSocket connections on a daemon bound to `::1` or `::` no longer fail with an invalid-URL error before authentication.
+- **Directory previews (#428).** The `/preview/<token>/` link minted for a folder now serves its `index.html` and no longer falls through to the bearer wall.
+- **Loom Cloud with `--tailnet` (#428).** The relay now forwards HTTP and stream requests to the address the daemon actually listens on, not a hard-coded 127.0.0.1.
+
 ### Added
 
 - Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
