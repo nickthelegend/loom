@@ -181,7 +181,7 @@ describe("#425 machine settings", () => {
     expect((await api("GET", "/api/integrations/email", undefined, scoped)).status).toBe(403);
     const saved = await (await api("PUT", "/api/integrations/email", settings, phone)).json();
     expect(saved.hasPassword).toBe(true); expect(saved.password).toBeUndefined();
-    expect(fs.statSync(process.env.LOOM_HOME + "/email-digest.json").mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(process.env.LOOM_HOME + "/email-digest.json").mode & 0o777).toBe(0o600); // POSIX modes only
     expect((await api("PUT", "/api/integrations/email", { to: "bad\r\nBcc:evil" }, phone)).status).toBe(400);
     rt.log.append({ kind: "error", chat: "main", payload: { message: "test failure" } });
     expect((await (await api("GET", "/api/integrations/email/preview", undefined, phone)).json()).text).toContain("test failure");

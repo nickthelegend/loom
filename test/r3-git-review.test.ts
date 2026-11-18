@@ -84,19 +84,21 @@ describe("#420 Git and review", () => {
 
   it("restores exactly one literal file, deletes a new one, and keeps an undo", async () => {
     const dir = repo();
-    fs.writeFileSync(path.join(dir, "a*.txt"), "literal\n");
+    // a name that is also a git pathspec glob matching its neighbour; Windows forbids "*" in file names
+    const [glob, near] = process.platform === "win32" ? ["a[1].txt", "a1.txt"] : ["a*.txt", "a.txt"];
+    fs.writeFileSync(path.join(dir, glob), "literal\n");
     const cp = (await capture(dir, "before edit"))!;
-    fs.writeFileSync(path.join(dir, "a*.txt"), "changed literal\n");
-    fs.writeFileSync(path.join(dir, "a.txt"), "unrelated\n");
+    fs.writeFileSync(path.join(dir, glob), "changed literal\n");
+    fs.writeFileSync(path.join(dir, near), "unrelated\n");
     fs.writeFileSync(path.join(dir, "new.txt"), "new\n");
-    const restored = await restoreFile(dir, cp.id, "a*.txt");
-    expect(fs.readFileSync(path.join(dir, "a*.txt"), "utf8")).toBe("literal\n");
-    expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("unrelated\n");
-    await restoreFile(dir, restored.undo.id, "a*.txt");
-    expect(fs.readFileSync(path.join(dir, "a*.txt"), "utf8")).toBe("changed literal\n");
+    const restored = await restoreFile(dir, cp.id, glob);
+    expect(fs.readFileSync(path.join(dir, glob), "utf8")).toBe("literal\n");
+    expect(fs.readFileSync(path.join(dir, near), "utf8")).toBe("unrelated\n");
+    await restoreFile(dir, restored.undo.id, glob);
+    expect(fs.readFileSync(path.join(dir, glob), "utf8")).toBe("changed literal\n");
     expect((await restoreFile(dir, cp.id, "new.txt")).removed).toBe(true);
     expect(fs.existsSync(path.join(dir, "new.txt"))).toBe(false);
-    for (const file of ["../escape", ".git/config", ":(glob)*", path.join(dir, "a.txt")]) await expect(restoreFile(dir, cp.id, file)).rejects.toThrow();
+    for (const file of ["../escape", ".git/config", ":(glob)*", path.join(dir, near)]) await expect(restoreFile(dir, cp.id, file)).rejects.toThrow();
     const outside = tmpDir("r3-outside"); fs.writeFileSync(path.join(outside, "secret"), "safe");
     fs.symlinkSync(outside, path.join(dir, "link"), "dir");
     await expect(restoreFile(dir, cp.id, "link/secret")).rejects.toThrow(/symlink/);

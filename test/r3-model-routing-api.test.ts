@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { readDaemonConfig, readProjectConfig } from "../src/core/registry.js";
@@ -93,7 +94,7 @@ describe("r3 model routing API", () => {
     expect(await csv.text()).toContain("echo-a");
     const digest = await json(`/api/scoreboard?project=${pid}&digest=1`);
     expect(digest.board.window).toBe("7d"); expect(digest.text).toContain("echo-b");
-    const cli = async (...args: string[]) => (await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), new URL("../src/cli/index.ts", import.meta.url).pathname, ...args], { cwd: dir, env: process.env })).stdout;
+    const cli = async (...args: string[]) => (await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../src/cli/index.ts", import.meta.url)), ...args], { cwd: dir, env: process.env })).stdout;
     expect(await cli("scoreboard", "--csv")).toContain('"totalCostUsd"');
     expect(await cli("digest", "--scoreboard")).toContain("Weekly scoreboard");
     expect(await cli("models:config")).toContain('"fast"');

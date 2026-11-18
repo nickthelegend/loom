@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import http from "node:http";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -10,7 +11,8 @@ import { setProvider } from "../src/core/providers.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 const root = path.resolve(import.meta.dirname, "..");
-const cli = ["--import", path.join(root, "node_modules/tsx/dist/loader.mjs"), path.join(root, "src/cli/index.ts")];
+// --import takes a URL: a bare Windows path (D:\...) reads as a "d:" scheme
+const cli = ["--import", pathToFileURL(path.join(root, "node_modules/tsx/dist/loader.mjs")).href, path.join(root, "src/cli/index.ts")];
 let daemon: LoomDaemon, client: DaemonClient, dir: string, pid: string, token: string, scoped: string, guest: string;
 let provider: http.Server, providerId: string;
 const env = () => ({ ...process.env, NO_COLOR: "1", LOOM_AUTO_RESTART: "0" });
