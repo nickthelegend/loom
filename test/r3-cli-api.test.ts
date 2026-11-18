@@ -141,7 +141,7 @@ describe("2.1 API and CLI configuration", () => {
     const html = fs.readFileSync(file, "utf8");
     expect(html).toContain("<!doctype html>"); expect(html).toContain("hello from the stream");
     const mobile = await rest(`/api/projects/${pid}/chats/main/replay?format=json`).then(r => r.json()) as any;
-    expect(mobile.content).toBe(html); expect(mobile.filename).toMatch(/\.html$/);
+    const stamp = (t: string) => t.replace(/exported [^·<]+·/, "exported ·"); expect(stamp(mobile.content)).toBe(stamp(html)); expect(mobile.filename).toMatch(/\.html$/);
     expect((await run(["export", "--format", "invalid"])).code).toBe(1);
   });
   it("initializes a template through the CLI and makes a committed starter through the API", async () => {
