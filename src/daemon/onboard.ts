@@ -290,13 +290,20 @@ export class Onboarding {
     const until = Date.now() + waitMs;
     let lastErr = "";
     for (;;) {
+      // Clone into a directory this job made for itself, and only ever clean up
+      // that one. The destination was checked once, above, but a private repo
+      // can wait here for minutes — long enough for something else to land at
+      // `target`, which a failed clone used to delete along with its own mess.
+      const staging = fs.mkdtempSync(path.join(path.dirname(target), `.${path.basename(target)}.loom-clone-`));
       try {
-        await this.clone(repo, target);
-        this.repoCache.set(target, repo);
-        return done(`cloned into ${target}`, target);
+        await this.clone(repo, path.join(staging, "repo"));
+        const final = moveInto(path.join(staging, "repo"), target);
+        this.repoCache.set(final, repo);
+        return done(`cloned into ${final}`, final);
       } catch (err) {
         lastErr = (err as Error).message;
-        fs.rmSync(target, { recursive: true, force: true });
+      } finally {
+        fs.rmSync(staging, { recursive: true, force: true });
       }
       // A private repo: the inviter's Loom adds you when you join, and GitHub
       // asks you to accept. Accept it here, and keep trying while it lands.
@@ -341,6 +348,26 @@ export class Onboarding {
     const r = fs.existsSync(dir) ? await repoOf(dir).catch(() => null) : null;
     this.repoCache.set(dir, r);
     return r;
+  }
+}
+
+/**
+ * Move a finished clone to `target`, never over anything: an empty directory
+ * there is replaced, anything else means the next free `target-N`.
+ */
+function moveInto(from: string, target: string): string {
+  for (let n = 1; ; n++) {
+    const dest = n === 1 ? target : `${target}-${n}`;
+    // rmdir only removes an empty directory — exactly what may be replaced
+    try { fs.rmdirSync(dest); } catch { /* absent, or not empty: rename decides */ }
+    if (fs.existsSync(dest)) continue;
+    try {
+      fs.renameSync(from, dest);
+      return dest;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "ENOTEMPTY" && code !== "ENOTDIR" && code !== "EPERM") throw err;
+    }
   }
 }
 

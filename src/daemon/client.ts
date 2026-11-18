@@ -213,6 +213,26 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/rename`, input);
   }
 
+  bookmarks(id: string): Promise<{ bookmarks: Array<{ chat: string; title: string; event: LoomEvent }> }> {
+    return this.request("GET", `/api/projects/${id}/bookmarks`);
+  }
+
+  templates(): Promise<{ templates: Array<{ id: string; title: string; text: string; variables: string[] }> }> {
+    return this.request("GET", "/api/templates");
+  }
+
+  saveTemplate(name: string, text: string): Promise<unknown> {
+    return this.request("POST", "/api/templates", { name, text });
+  }
+
+  renderTemplate(name: string, values: Record<string, string>): Promise<{ text: string }> {
+    return this.request("POST", `/api/templates/${encodeURIComponent(name)}/render`, { values });
+  }
+
+  deleteTemplate(name: string): Promise<unknown> {
+    return this.request("DELETE", `/api/templates/${encodeURIComponent(name)}`);
+  }
+
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
   }

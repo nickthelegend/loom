@@ -4,7 +4,7 @@ import { bearerToken } from "../auth.js";
 import { PUSH_CATEGORIES, sendExpoPush } from "../push.js";
 import type { RouteContext } from './context.js';
 /** Register clients routes in the order established by LoomDaemon.routes(). */
-export function registerClientsRoutes(app: Express, ctx: Pick<RouteContext, "auth" | "pushTokens">): void {
+export function registerClientsRoutes(app: Express, ctx: Pick<RouteContext, "auth" | "pushTokens" | "revalidateSockets">): void {
 
   app.get("/api/pair/clients", (_req, res) => {
     res.json({ clients: ctx.auth.clients() });
@@ -16,6 +16,8 @@ export function registerClientsRoutes(app: Express, ctx: Pick<RouteContext, "aut
     }
     const revoked = ctx.auth.revoke(String(req.params.clientId));
     if (!revoked) return void res.status(404).json({ error: "unknown client" });
+    // its open sockets go with it: a credential checked only at connect would keep streaming
+    ctx.revalidateSockets();
     res.json({ revoked: true });
   });
 

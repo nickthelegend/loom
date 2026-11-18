@@ -211,6 +211,7 @@ export function writeProjectConfig(projectDir: string, cfg: ProjectConfig): void
 
 /** Mutable per-project state: baton holder + adapter session state. */
 export interface ProjectState {
+  chatComposer?: Record<string, import("./chat-composer.js").ChatComposer>;
   holder: string | null;
   holderSince?: number;
   agents: Record<string, Record<string, unknown>>;

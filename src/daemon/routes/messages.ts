@@ -1,3 +1,4 @@
+import { quoteMessage } from "../../core/chat-composer.js";
 import type { Express } from 'express';
 import { recordRecent } from "../../core/prompts.js";
 import type { WithRuntime } from './context.js';
@@ -80,7 +81,7 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
     withRuntime(async (rt, req, res) => {
       if (rt.continuity) {
         try { parseBounded(z.strictObject({ text: Text.min(1), agentId: Id.optional(), chat: Id.optional(),
-          model: z.string().optional(), effort: z.string().optional(),
+          replyTo: z.number().int().positive().optional(), model: z.string().optional(), effort: z.string().optional(),
           plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
         catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "invalid continuity request", code: "invalid" }); return; }
       }
@@ -99,9 +100,17 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
         effort?: string;
       };
       if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
+      let prompt = text;
+      if (body.replyTo !== undefined) {
+        const who = req as typeof req & { projectScope?: string[] | null };
+        if (guest || who.projectScope) return void res.status(403).json({ error: "quote replies are private to the owner and their devices" });
+        const quoted = rt.log.list({ chat: chat || "main", kinds: ["message"] }).find(e => e.id === body.replyTo);
+        if (!quoted) return void res.status(400).json({ error: "no such message in this chat" });
+        prompt = quoteMessage(quoted, rt.info.id, chat || "main") + text;
+      }
       let result;
       try {
-        result = await rt.sendMessage(text, agentId, {
+        result = await rt.sendMessage(prompt, agentId, {
           ...(chat ? { chat } : {}),
           ...(model !== undefined ? { model } : {}),
           ...(effort !== undefined ? { effort } : {}),
