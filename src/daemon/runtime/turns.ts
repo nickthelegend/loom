@@ -1,3 +1,4 @@
+import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
 import { branchBriefing } from "../../core/chat-branches.js";
 import { readProjectState } from "../../core/registry.js";
 import { AgentBase } from "../../adapters/base.js";
@@ -436,6 +437,16 @@ export class RuntimeTurns {
         throw new ContinuityError("invalid", error instanceof Error ? error.message : String(error));
       }
     }
+    const chosen = agentId ?? this.host.chatBinding(opts.chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+    const cfg = this.host.config.agents.find(a => a.id === chosen);
+    const binding = this.host.chatBinding(opts.chat);
+    const inheritedModel = opts.model ?? (binding.agentId === chosen ? binding.model : undefined) ?? cfg?.options?.model;
+    if (typeof inheritedModel === "string") opts = { ...opts, model: resolveModel(inheritedModel) };
+    if (opts.capturedModel) opts = { ...opts, capturedModel: resolveModel(opts.capturedModel) };
+    if (opts.effort === undefined && !(binding.agentId === chosen && binding.effort) && !cfg?.options?.effort && ["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg?.kind ?? ""))
+      opts = { ...opts, effort: this.host.config.defaultEffort };
+    await enforceModelCap(opts.capturedModel ?? opts.model);
+    if (cfg?.kind === "model" && (opts.capturedModel ?? opts.model)) await enforceModelCap(`${cfg.options?.provider ?? "openrouter"}/${opts.capturedModel ?? opts.model}`);
     if (this.host.continuity) return this.sendContinuity(text, agentId, opts);
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;

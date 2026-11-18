@@ -2,7 +2,10 @@
  * Adapter factory — the one place agent kinds are wired up.
  * Community adapters register here (or via the SDK entry point).
  */
+import { resolveModel, enforceModelCap } from "../core/model-routing.js";
 
+
+import { readProjectConfig } from "../core/registry.js";
 import { resolveAgentAccount } from "../core/accounts.js";
 import { turnGate } from "../core/turn-gate.js";
 import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../types.js";
@@ -96,13 +99,18 @@ export function isWithdrawnKind(kind: string): boolean {
 /** The project runtime pools process-bound models; standalone callers keep the concrete adapter. */
 export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = false): AnyAgent {
   cfg = resolveAgentAccount(cfg);
+  if (!cfg.options?.effort && ["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg.kind)) {
+    const effort = readProjectConfig(projectDir)?.defaultEffort;
+    if (effort) cfg = { ...cfg, options: { ...cfg.options, effort } };
+  }
   const factory = factories.get(cfg.kind);
   if (!factory) {
     throw new Error(
       `unknown agent kind "${cfg.kind}" (known: ${[...factories.keys()].join(", ")})`,
     );
   }
-  const agent = factory(cfg, projectDir);
+  const resolved = { ...cfg, options: { ...cfg.options, ...(typeof cfg.options?.model === "string" ? { model: resolveModel(cfg.options.model) } : {}) } };
+  const agent = factory(resolved, projectDir);
   if (poolModels && isAdapter(agent) && (!["claude-code", "codex", "model", "acp"].includes(cfg.kind) || (cfg.kind === "acp" && Boolean(cfg.options?.modelFlag)))) {
     return gated(new ModelPool(cfg, projectDir, agent, next => {
       const instance = factory(next, projectDir);
@@ -119,13 +127,17 @@ export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = f
  * of piling onto a machine that's already full. LOOM_TURN_GATE=off skips it (tests).
  */
 function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent {
-  if (!isAdapter(agent) || process.env.LOOM_TURN_GATE === "off") return agent;
+  if (!isAdapter(agent)) return agent;
   const send = agent.send.bind(agent);
   const say = (why: string) => (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
     .emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
   agent.send = async (input: SendInput) => {
-    const release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+    const selected = input.model ?? (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
+    const model = selected ? resolveModel(selected) : undefined;
+    input = { ...input, ...(model ? { model } : {}) };
+    const release = process.env.LOOM_TURN_GATE === "off" ? () => {} : await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
     try {
+      await enforceModelCap(model);
       return await send(input);
     } finally {
       release();

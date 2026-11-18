@@ -425,6 +425,7 @@ import { shortModel } from './permissions.js';
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
     }
     // a model agent moving to its next model (a busy or app-only free model), and a CLI stopping early: say so
+    if (e.kind === "status" && p.state === "model_cap_warning") return '<div class="sys">' + esc(p.text || "") + "</div>";
     if (e.kind === "status" && p.state === "model_fallback") {
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }

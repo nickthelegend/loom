@@ -1,3 +1,4 @@
+import { resolveModel, validateAgentOptions, enforceModelCap, modelUsage, readModelRouting } from "../core/model-routing.js";
 import { writeLoomMcpSession } from "../core/loom-tools.js";
 import { createHash } from "node:crypto";
 import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
@@ -12,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
-import { ModelAdapter } from "../adapters/model.js";
+import { ModelAdapter, splitQualifiedModel } from "../adapters/model.js";
 import { ADES, detectAdes } from "../core/ades.js";
 import { BatonManager } from "../core/baton.js";
 import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
@@ -761,6 +762,7 @@ export class ProjectRuntime {
         if (wanted.has(cfg.id)) throw new Error(`duplicate agent id "${cfg.id}"`);
         if (!knownAgentKinds().includes(cfg.kind)) throw new Error(`unknown agent kind "${cfg.kind}"`);
         if (cfg.instructions !== undefined && typeof cfg.instructions !== "string") throw new Error(`instructions for "${cfg.id}" must be text`);
+        if (cfg.options !== undefined) validateAgentOptions(cfg.kind, cfg.options);
         if (cfg.options !== undefined && (!cfg.options || typeof cfg.options !== "object" || Array.isArray(cfg.options)))
           throw new Error(`options for "${cfg.id}" must be an object`);
         wanted.set(cfg.id, cfg);
@@ -932,6 +934,7 @@ export class ProjectRuntime {
    * with no restart. Only the known keys are honoured; unknown ones are ignored.
    */
   patchConfig(patch: {
+    defaultEffort?: string;
     loomTools?: boolean;
     brain?: { extractor?: "auto" | "off"; model?: string; semantic?: boolean; continuity?: boolean };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
@@ -956,7 +959,9 @@ export class ProjectRuntime {
     }
     if (patch.git?.delivery !== undefined && !GIT_DELIVERIES.includes(patch.git.delivery as GitDelivery))
       throw new Error(`git.delivery must be one of ${GIT_DELIVERIES.join(", ")}`);
+    if (patch.defaultEffort !== undefined && !["", "low", "medium", "high"].includes(patch.defaultEffort)) throw new Error("defaultEffort must be low, medium, high or empty");
     const previousConfig = { ...this.config }, previousContinuity = this.continuity;
+    if (patch.defaultEffort !== undefined) this.config.defaultEffort = (patch.defaultEffort || undefined) as ProjectConfig["defaultEffort"];
     const changingContinuity = typeof patch.brain?.continuity === "boolean" && patch.brain.continuity !== Boolean(this.config.brain?.continuity);
     try {
       if (patch.loomTools !== undefined) this.config.loomTools = patch.loomTools;
@@ -1046,6 +1051,7 @@ export class ProjectRuntime {
    * a blank that hides what's actually running.
    */
   settings(): {
+    defaultEffort: string;
     loomTools: boolean;
     brain: { extractor: "auto" | "off"; model: string; semantic: boolean; continuity: boolean };
     projection: { mode: "template" | "llm"; model: string };
@@ -1061,6 +1067,7 @@ export class ProjectRuntime {
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
     return {
+      defaultEffort: this.config.defaultEffort ?? "",
       loomTools: Boolean(this.config.loomTools),
       brain: {
         continuity: Boolean(this.config.brain?.continuity),
@@ -1128,6 +1135,7 @@ export class ProjectRuntime {
     }
     const id = explicit && !opts.series ? explicit : this.nextInstanceId(explicit || kind);
     if (!id) throw new Error("an agent needs an id");
+    if (opts.options !== undefined) validateAgentOptions(kind, opts.options);
     // A `model` agent with no model is an agent that refuses every turn, so
     // the options that make it work are settable as it's added rather than in
     // a second step nobody is told about.
@@ -1362,6 +1370,27 @@ export class ProjectRuntime {
       void this.agentLifecycle.retire(agentId);
     }
     return { removed: agentId };
+  }
+
+  /** Validate the complete merged options before replacing a live adapter. */
+  setAgentOptions(agentId: string, patch: unknown): { id: string; saved: boolean } {
+    const cfg = this.config.agents.find(a => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("options must be an object");
+    for (const key of Object.keys(patch)) if (!["extraArgs", "fallbacks", "effort"].includes(key)) throw new Error(`option ${key} is not editable here`);
+    const options = { ...cfg.options, ...patch };
+    if (cfg.kind !== "model" && Array.isArray(options.fallbacks) && !options.fallbacks.length) delete options.fallbacks;
+    validateAgentOptions(cfg.kind, options);
+    if (options.effort && !["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg.kind)) throw new Error(`${cfg.kind} does not support reasoning effort`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && (live.busy() || this.turns.busySince.has(agentId))) throw new Error("agent is mid-turn; wait before saving options");
+    const previous = cfg.options;
+    cfg.options = options;
+    try { writeProjectConfig(this.info.dir, this.config); }
+    catch (error) { cfg.options = previous; throw error; }
+    if (live) void this.agentLifecycle.retire(agentId);
+    if (cfg.enabled !== false) this.spawnAgent(cfg);
+    return { id: agentId, saved: true };
   }
 
   /**
@@ -2145,6 +2174,7 @@ export class ProjectRuntime {
       return next || undefined;
     };
     model = selection(model, "model", 200);
+    if (model) model = resolveModel(model);
     effort = selection(effort, "effort", 40);
     if (effort && !["claude-code", "codex", "antigravity-cli", "echo"].includes(agent.kind))
       throw new Error(`"${agentId}" doesn't support reasoning effort`);
@@ -2180,6 +2210,11 @@ export class ProjectRuntime {
     picks: Array<{ model: string; provider?: string }>,
     opts: { title?: string; briefing?: boolean } = {},
   ): Promise<Array<{ chat: string; model: string; provider: string; agentId: string }>> {
+    picks = picks.map(pick => splitQualifiedModel({ ...pick, model: resolveModel(pick.model) }));
+    for (const pick of picks) {
+      await enforceModelCap(pick.model);
+      await enforceModelCap(`${pick.provider ?? "openrouter"}/${pick.model}`);
+    }
     if (!picks.length) throw new Error("name at least one model");
     if (picks.length > MAX_FANOUT) {
       throw new Error(`that's ${picks.length} models — ${MAX_FANOUT} at a time is the limit`);
@@ -2590,9 +2625,30 @@ export class ProjectRuntime {
 
   importMemories(): { imported: number; sources: string[] } { return this.briefings.importMemories(); }
 
+  private readonly modelCapNotices = new Set<string>();
+
+  private async warnModelCap(event: LoomEvent): Promise<void> {
+    if (event.kind !== "run_complete" && event.kind !== "error") return;
+    const p = event.payload;
+    if (typeof p.model !== "string") return;
+    const caps = readModelRouting().caps;
+    for (const model of [p.model, ...(typeof p.provider === "string" ? [`${p.provider}/${p.model}`] : [])]) {
+      if (!caps[resolveModel(model)]) continue;
+      const usage = await modelUsage(model);
+      if (!usage.warning) continue;
+      const key = `${usage.model}:${usage.resetsAt}:${usage.stopped ? 100 : 80}`;
+      if (this.modelCapNotices.has(key) || this.closed) continue;
+      this.modelCapNotices.add(key);
+      this.log.append({ kind: "status", agentId: event.agentId, chat: event.chat,
+        payload: { state: "model_cap_warning", model: usage.model, stopped: usage.stopped,
+          text: `${usage.model}: ${usage.stopped ? "daily cap reached; new turns are stopped" : "80% of daily cap used"}. Resets at ${new Date(usage.resetsAt).toISOString()}.` } });
+    }
+  }
+
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    void this.warnModelCap(event).catch(() => {});
     this.shield(event);
     this.noteSignIn(event);
     const loop = this.loops.observe(event);

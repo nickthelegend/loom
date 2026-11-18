@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 /**
  * loom — one CLI for all your coding agents.
  *
@@ -3736,12 +3737,39 @@ program
   });
 
 program
+  .command("models:effort <effort>")
+  .description("set this project's default reasoning effort: low, medium, high, or default")
+  .action(async (effort: string) => {
+    const client = await ensureDaemon();
+    await client.setProjectEffort((await currentProject(client)).id, effort === "default" ? "" : effort);
+    console.log(`project reasoning effort: ${effort}`);
+  });
+
+program
+  .command("agents:options <agentId> [json]")
+  .description("read or update extraArgs, fallbacks (model agents) and effort using a JSON object")
+  .action(async (agentId: string, json?: string) => {
+    const client = await ensureDaemon();
+    console.log(JSON.stringify(await client.agentOptions((await currentProject(client)).id, agentId, json === undefined ? undefined : JSON.parse(json)), null, 2));
+  });
+
+program
+  .command("models:config [file]")
+  .description("show model aliases, daily caps and Monday digest settings; optionally replace from a JSON file")
+  .action(async (file?: string) => {
+    const client = await ensureDaemon();
+    console.log(JSON.stringify(file ? await client.setModelRouting(JSON.parse(fs.readFileSync(file, "utf8"))) : await client.modelRouting(), null, 2));
+  });
+
+program
   .command("models [agentId]")
+  .option("--health", "probe configured models and show latency and last error")
   .description("with an agent: the models it reports. Without: what every configured provider has")
   .option("--provider <id>", "just this provider")
   .option("--refresh", "ask again instead of trusting the cache")
   .option("--free", "only the ones that cost nothing")
-  .action(async (agentId: string | undefined, opts: { provider?: string; refresh?: boolean; free?: boolean }) => {
+  .action(async (agentId: string | undefined, opts: { provider?: string; refresh?: boolean; free?: boolean; health?: boolean }) => {
+    if (opts.health) { console.table((await (await ensureDaemon()).modelHealth()).health); return; }
     // An agent named means "what can THIS agent run" — a CLI reports its own.
     if (agentId) {
       const client = await ensureDaemon();
@@ -4072,11 +4100,13 @@ program
 
 program
   .command("digest")
+  .option("--scoreboard", "show model results for the last seven days")
   .description("what happened in this project while you were away")
   .option("--since <hours>", "how far back to look, in hours", "12")
-  .action(async (opts: { since: string }) => {
+  .action(async (opts: { since: string; scoreboard?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    if (opts.scoreboard) { console.log(scoreboardDigest(await client.scoreboard(project.id, "7d"))); return; }
     const hours = Math.max(0.1, Number(opts.since) || 12);
     const d = await client.digest(project.id, Date.now() - hours * 3_600_000);
     if (!d.lines.length) {
@@ -4919,15 +4949,17 @@ program
 
 program
   .command("scoreboard")
+  .option("--csv", "export standings as CSV")
   .description("model results across turns, races and orchestra tasks")
   .option("--all", "include every project")
   .option("--window <window>", "7d, 30d or all", "30d")
   .option("--json", "print both kind@model and model-only standings as JSON")
-  .action(async (opts: { all?: boolean; window: string; json?: boolean }) => {
+  .action(async (opts: { all?: boolean; window: string; json?: boolean; csv?: boolean }) => {
     const window = scoreboardWindow(opts.window);
     const client = await ensureDaemon();
     const project = opts.all ? "all" : (await currentProject(client)).id;
     const board = await client.scoreboard(project, window);
+    if (opts.csv) return void process.stdout.write(scoreboardCsv(board));
     if (opts.json) return void console.log(JSON.stringify(board));
     if (!board.byKindModel.length) return void console.log("no model results in this window");
     const pct = (n: number | null) => n === null ? "—" : `${(n * 100).toFixed(1)}%`;

@@ -1567,3 +1567,5 @@
   .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
   .trycallout .btn{flex:none}
   .dempty .trydemo{margin-top:4px}
+  .mrlabel{display:block;margin:12px 0;font-size:12px;color:var(--muted-foreground)}
+  .mrlabel textarea,.mrlabel input:not([type=checkbox]){display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:8px;border:1px solid var(--input);border-radius:var(--radius-sm);background:var(--secondary);color:var(--foreground);font:12px var(--font-mono)}

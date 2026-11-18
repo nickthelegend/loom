@@ -24,6 +24,7 @@ export function createComposer(view) {
     /** The last send's requests, so the next one goes after them. Never rejects. */
     var lastSend = Promise.resolve();
     var pendingSubmission;
+    var estimateTimer, estimateGeneration = 0;
 
 
     /**
@@ -199,13 +200,18 @@ export function createComposer(view) {
       box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
       // send lights up only when there's something to send
       var cf = document.getElementById("cform"); if (cf) cf.classList.toggle("hastext", !!box.value.trim());
-      // a long prompt says roughly how long (about four characters a token)
-      var ct = document.getElementById("ctok");
-      if (ct) {
-        var n = Math.round(box.value.length / 4);
-        ct.textContent = n >= 250 ? "~" + (n >= 1000 ? (n / 1000).toFixed(1) + "k" : n) + " tokens" : "";
-        ct.title = n >= 250 ? "a rough count: about four characters a token" : "";
-      }
+      var ct = document.getElementById("ctok"), mine = ++estimateGeneration;
+      clearTimeout(estimateTimer);
+      if (!ct) return;
+      ct.textContent = box.value.trim() ? "Estimating…" : "";
+      if (!box.value.trim()) return;
+      estimateTimer = setTimeout(function(){
+        api("/api/projects/" + view.pid + "/estimate", { method: "POST", body: JSON.stringify({ text: box.value, agentId: state.selected || undefined, chat: view.chatId || "main" }) }).then(function(e){
+          if (mine !== estimateGeneration || !ct.isConnected) return;
+          ct.textContent = "~" + e.inputTokens + " input tokens · " + (e.usd == null ? "price unavailable" : "~$" + e.usd.toFixed(4)) + (e.usage && e.usage.stopped ? " · Daily cap reached" : e.usage && e.usage.warning ? " · 80% of daily cap used" : "");
+          ct.title = "Approximate input including known context; assumes " + e.outputTokens + " output tokens. Actual usage may differ.";
+        }).catch(function(e){ if (mine === estimateGeneration && ct.isConnected) ct.textContent = e.message; });
+      }, 250);
     }
 
 
@@ -1110,6 +1116,7 @@ export function createComposer(view) {
     // The one selector that says who runs the turn: AUTO (the router) or a chosen
     // agent. In AUTO the model is the router's call, so the model pill steps aside.
     function updateModelLabel(){
+      autosizeBox();
       var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
