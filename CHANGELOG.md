@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Retain refused queued prompts when resumed immediately after budgets or policy change (#429).
+- Enforce team agent allowlists for resolved Orchestra orchestrators before setup and every turn (#429).
+- Wait for Orchestra preparation and interrupted sends during abort, preventing workers from starting afterward (#429).
+- Refuse Orchestra Apply during an existing merge and only abort merges started by Apply (#429).
+- Preserve dirty Orchestra worktrees during cleanup and keep run directories when cleanup fails (#429).
+- Prepare isolated worktrees before starting agents added, enabled, or reloaded at runtime (#429).
+- Serialize Orchestra goal admission so simultaneous starts respect concurrent-goal limits (#429).
+- Clear failed goal transfers' moving state durably and resume source execution (#429).
+- Refuse chat moves while an associated Orchestra run can still write (#429).
+- Skip removed agents during chat Stop and late turn memory extraction (#429).
+- Hold the prompt queue when chat Stop interrupts either a turn or dispatch preparation (#429).
+- Retry the failed chat's prompt instead of an interleaved prompt from another chat (#429).
+- Resolve linked worktrees' actual Git directories for checkpoints and rewind previews (#429).
+- Attribute turn changes using content snapshots, including further edits to dirty and untracked files (#429).
+- Serialize trigger deliveries per project and trigger so concurrent first deliveries share admission and chat state (#429).
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

@@ -18,7 +18,7 @@ import { agentAllowed, type TeamPolicy } from "../../core/team-policy.js";
 import { type MergeOutcome } from "../../core/worktree-merge.js";
 import {
   diffSinceSnapshot,
-  porcelainStatus,
+  contentSnapshot,
   type TurnDiff
 } from "../../core/worktree.js";
 import type {
@@ -134,7 +134,7 @@ export class RuntimeTurns {
   // structured decisions once the turn completes. Reset after each run_complete.
   turnText = new Map<string, string>();
 
-  /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
+  /** Pre-turn content snapshots, for per-prompt diff attribution. */
   preTurnTree = new Map<string, string>();
 
   /** The checkpoint taken before each agent's current turn (#101). */
@@ -523,9 +523,17 @@ export class RuntimeTurns {
       chat,
       payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
     });
+    const preparation = new AbortController();
+    this.preparing.set(target, preparation);
+    const assertPrepared = () => {
+      if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent)) {
+        throw new Error(`dispatch preparation for "${target}" was cancelled or replaced`);
+      }
+    };
     let mcp: ReturnType<typeof writeLoomMcpSession> = null;
     try {
       await this.host.ensureStarted(target);
+      assertPrepared();
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
 
       const branchInput = this.branchInput(chat, target);
@@ -567,16 +575,18 @@ export class RuntimeTurns {
         });
       }
       // Snapshot the tree so this prompt's changes can be attributed to it.
-      this.preTurnTree.set(target, await porcelainStatus(this.host.agentDir(target)));
-      // …and a checkpoint you can actually go back to. The porcelain snapshot
-      // above only says *which* paths changed; this holds their content, so
-      // "undo what that turn did" is a click rather than a re-typing (#101).
+      this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
+      assertPrepared();
+      // The durable checkpoint also makes this turn rewindable after a restart.
       await this.checkpointBefore(target, text);
+      assertPrepared();
       // Fire-and-notify: the turn runs in the background; progress streams
       // into the log and completion lands as run_complete.
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
       void Promise.resolve()
         .then(() => {
+          assertPrepared();
+          this.preparing.delete(target);
           if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
           this.host.clearChatMoveBriefing(chat);
           return agent.send(input);
@@ -585,9 +595,13 @@ export class RuntimeTurns {
         // The config file exists for exactly this turn. Cleaned up whether the
         // turn succeeded, failed or was interrupted — a temp file per turn that
         // nothing removes is a slow leak of the project's server URLs.
-        .finally(() => mcp?.cleanup());
+        .finally(() => {
+          if (this.preparing.get(target) === preparation) this.preparing.delete(target);
+          mcp?.cleanup();
+        });
       return { agentId: target, ...(opts.requestId ? { requestId: opts.requestId } : {}) };
     } catch (error) {
+      if (this.preparing.get(target) === preparation) this.preparing.delete(target);
       mcp?.cleanup();
       this.host.dispatchFailed(agent, chat, error);
       throw error;
@@ -656,7 +670,7 @@ export class RuntimeTurns {
       assertPrepared();
       if (!this.host.isCurrentAgent(agent)) throw new Error("native target was replaced before dispatch");
       // Snapshot/checkpoint is complete before the frozen context is observed.
-      this.preTurnTree.set(target, await porcelainStatus(this.host.agentDir(target)));
+      this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
@@ -762,9 +776,8 @@ export class RuntimeTurns {
    */
   async retryTurn(toAgentId: string): Promise<{ agentId: string; retried: string }> {
     const events = this.host.log.list({ limit: 200 });
-    // The last error, and the last user message before it: that pairing is the
-    // failed turn. Route-authored messages count too — a route step that died
-    // is exactly what you retry somewhere else.
+    // Pair the last error with the prompt in its own chat and turn boundary.
+    // Route-authored messages count too — a failed route step can be retried elsewhere.
     let errorAt = -1;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i]!.kind === "error") { errorAt = i; break; }
@@ -774,6 +787,8 @@ export class RuntimeTurns {
     let prompt: string | undefined;
     for (let i = errorAt - 1; i >= 0; i--) {
       const e = events[i]!;
+      if ((e.chat ?? MAIN_CHAT) !== (err.chat ?? MAIN_CHAT)) continue;
+      if (e.kind === "status" && e.payload.state === "turn_started" && e.agentId === err.agentId) break;
       if (e.kind === "message" && !e.agentId) {
         prompt = String(e.payload.text ?? "");
         break;
@@ -804,11 +819,16 @@ export class RuntimeTurns {
   ): Promise<{ interrupted: string | null }> {
     // Stop in one chat stops that chat's turn — not whatever the baton holder
     // is doing in another thread.
+    if ((opts.source ?? "user") === "user" && this.host.queue.length && !this.host.queue.paused) {
+      this.host.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
+      const holder = this.host.validHolder();
+      this.host.log.append({ kind: "status", ...(holder ? { agentId: holder } : {}), ...(opts.chat ? { chat: opts.chat } : {}), payload: { state: "queue_paused", waiting: this.host.queue.length } });
+    }
     if (opts.chat) {
       for (const [id, chat] of this.turnChat) {
         if ((chat ?? "main") !== opts.chat) continue;
-        const a = this.host.agent(id);
-        if (isAdapter(a) && a.busy()) {
+        const a = this.host.agents.get(id);
+        if (a && isAdapter(a) && a.busy()) {
           if ((opts.source ?? "user") === "user") this.host.routes.onManualInterrupt();
           await a.interrupt();
           return { interrupted: id };
@@ -828,12 +848,6 @@ export class RuntimeTurns {
     const holder = this.host.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.host.agent(holder);
-    // Stop means stop: what's queued doesn't start after it — it waits,
-    // paused, for you to resume, edit or clear it.
-    if ((opts.source ?? "user") === "user" && this.host.queue.length && !this.host.queue.paused) {
-      this.host.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
-      this.host.log.append({ kind: "status", agentId: holder, payload: { state: "queue_paused", waiting: this.host.queue.length } });
-    }
     if (isAdapter(agent) && agent.busy()) {
       await agent.interrupt();
       return { interrupted: holder };
