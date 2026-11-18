@@ -3,17 +3,18 @@
 This batch extends the existing replay renderer, Orchestra progress events, model scoreboard,
 fleet storage, demo project creation and brain APIs. It adds entry points and missing UI rather
 than introducing parallel implementations. Command-name completions and `send --wait --json`
-already existed; their improvements are option-aware completions and streaming NDJSON.
+already existed; their improvements are option-aware completions and an NDJSON stream (`send --stream`; `send --json` still prints one object).
 
 ## Automation
 
 ```sh
-loom send --json "Review the changes"
+loom send --stream "Review the changes"
 loom ask --json --models provider/model-a,provider/model-b "Compare these approaches"
 loom watch --run RUN_ID --json
 ```
 
-`send --json` implies waiting. `ask --json` waits for every returned model chat. Both emit one
+`send --stream` implies waiting (`send --json` waits too, and prints only the final outcome as one
+object, as before). `ask --json` waits for every returned model chat. Both streams emit one
 JSON object per line on stdout, with human diagnostics on stderr:
 
 - `type: "accepted"`: the send receipt, or the `asked` array containing model/chat/agent ids.

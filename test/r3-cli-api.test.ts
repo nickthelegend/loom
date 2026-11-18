@@ -63,7 +63,7 @@ afterAll(async () => {
 
 describe("2.1 real CLI streams", () => {
   it("emits live deltas before completion, durable events and one outcome as clean NDJSON", async () => {
-    const child = spawn(process.execPath, [...cli, "send", "stream:70 hello from the stream", "--json"], { cwd: dir, env: env() });
+    const child = spawn(process.execPath, [...cli, "send", "stream:70 hello from the stream", "--stream"], { cwd: dir, env: env() });
     let out = "", err = "", ended = false;
     child.stdout.on("data", d => { out += d; }); child.stderr.on("data", d => { err += d; });
     const done = new Promise<number | null>(resolve => child.on("close", code => { ended = true; resolve(code); }));
@@ -79,15 +79,15 @@ describe("2.1 real CLI streams", () => {
     } finally { child.kill(); }
   });
   it("returns error and timeout exit codes without prose on stdout", async () => {
-    const failed = await run(["send", "fail:expected failure", "--json"]);
+    const failed = await run(["send", "fail:expected failure", "--stream"]);
     expect(failed.code).toBe(1); expect(lines(failed.out).at(-1)).toMatchObject({ type: "outcome", status: "error" });
-    const timed = await run(["send", "sleep:4000", "--json", "--timeout", "1"]);
+    const timed = await run(["send", "sleep:4000", "--stream", "--timeout", "1"]);
     expect(timed.code).toBe(124); expect(lines(timed.out).at(-1).status).toBe("timeout");
     await client.interrupt(pid);
   });
   it("keeps queued sends correlated to their own request", async () => {
     await client.send(pid, "sleep:1600 previous turn", "solo");
-    const result = await run(["send", "this queued request", "--json"]);
+    const result = await run(["send", "this queued request", "--stream"]);
     expect(result.code, result.err).toBe(0);
     expect(lines(result.out).at(-1).reply).toContain("this queued request");
     expect(lines(result.out).filter(e => e.type === "outcome")).toHaveLength(1);
@@ -95,7 +95,7 @@ describe("2.1 real CLI streams", () => {
   });
   it("terminates an interrupted agent stream and leaves work running when only the watcher is stopped", async () => {
     for (const stopAgent of [true, false]) {
-      const child = spawn(process.execPath, [...cli, "send", "sleep:5000 interrupt test", "--json"], { cwd: dir, env: env() });
+      const child = spawn(process.execPath, [...cli, "send", "sleep:5000 interrupt test", "--stream"], { cwd: dir, env: env() });
       let out = ""; child.stdout.on("data", d => { out += d; });
       const done = new Promise<number | null>(resolve => child.on("close", resolve));
       try {

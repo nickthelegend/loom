@@ -79,5 +79,5 @@ import { THEME_KEY,state } from './state.js';
 
   function isElectron(){ return document.documentElement.hasAttribute("data-electron"); }
 export { ACCENTS,appearancePref,applyAppearance,applyTheme,bindTheme,isElectron,setThemePref,THEME_BTN,themeNow,themePref };
-if (window.matchMedia) window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', applyAppearance);
+try { var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)'); if (reducedMotion && reducedMotion.addEventListener) reducedMotion.addEventListener('change', applyAppearance); } catch (e) {}
 window.addEventListener('storage', function(e){ if (e.key === THEME_KEY || (e.key || '').indexOf('loomPref:') === 0) applyTheme(); });
