@@ -476,6 +476,7 @@ export interface OrchestraHost {
    * millisecond of real work rather than a lookup.
    */
   briefingFor(query: string, agentId: string, files?: string[]): string | Promise<string>;
+  memoryForTurn?(query: string, agent: string, chat: string, turn: number): Promise<import("./brain.js").MemoryBriefing>;
   /** Throws when the resolved kind is forbidden, or the agent is over budget or quarantined. */
   gate(agentId: string, kind?: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
@@ -2782,7 +2783,7 @@ export class OrchestraEngine {
         : (followUp ??
           `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
             `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
-    this.host.append({
+    const prompt = this.host.append({
       kind: "message",
       chat: task.chat,
       payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
@@ -2800,11 +2801,14 @@ export class OrchestraEngine {
       : undefined;
     if (this.cancelled(run, task)) return false;
     this.host.gate(task.agent, task.kind);
+    const memory = await this.host.memoryForTurn?.(text, task.agent, task.chat, prompt.id);
+    const fullBriefing = [memory?.briefing, briefing].filter(Boolean).join("\n\n");
     const mcp = agent.capabilities.mcp && this.host.apiUrl?.() ? writeLoomMcpSession(this.host.mcps?.(), {
       project: this.host.projectId, api: this.host.apiUrl(), run: run.id, task: task.id,
     }) : null;
     try {
-      await this.track(key, () => agent!.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
+      memory?.record();
+      await this.track(key, () => agent!.send({ text, ...(fullBriefing ? { briefing: fullBriefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
         ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) }));
     } finally { mcp?.cleanup(); }
     if (isTerminal(run.status) || this.stopping.has(run.id) || (task.status as TaskStatus) === "cancelled") return false;

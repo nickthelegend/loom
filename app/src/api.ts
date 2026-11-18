@@ -1246,6 +1246,8 @@ export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
 /** One thing the project's agents remember (core/brain.ts). */
 export interface Memory {
+  pinned?: boolean; priority?: number; archived?: boolean; stale?: boolean;
+  scope?: { chat?: string; agent?: string; task?: string; crew?: string };
   id: string;
   kind: string;
   text: string;
@@ -1256,11 +1258,13 @@ export interface Memory {
   createdAt: number;
   updatedAt?: number;
 }
-export const getMemories = (c: Creds, id: string) =>
-  api<{ memories: Memory[] }>(c, `/api/projects/${id}/brain`);
-export const addMemory = (c: Creds, id: string, text: string, kind: string) =>
-  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind }) });
-export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string }) =>
+export const getMemories = async (c: Creds, id: string, query = "") => {
+  const result = await api<{ memories?: Memory[]; hits?: Array<{ memory: Memory }> }>(c, `/api/projects/${id}/brain${query}`);
+  return { memories: result.memories ?? result.hits?.map(h => h.memory) ?? [] };
+};
+export const addMemory = (c: Creds, id: string, text: string, kind: string, chat?: string) =>
+  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind, chat }) });
+export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string; pinned?: boolean; priority?: number; archived?: boolean; scope?: Memory["scope"] }) =>
   api<{ memory: Memory }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const forgetMemory = (c: Creds, id: string, mid: string, reason: string) =>
   api<{ forgot: boolean }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}?reason=${encodeURIComponent(reason)}`, { method: "DELETE" });

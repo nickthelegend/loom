@@ -639,7 +639,7 @@ export class LoomDaemon {
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
-    registerBrainRoutes(app, withRuntime);
+    registerBrainRoutes(app, withRuntime, this.auth);
     registerRoutingRoutes(app, withRuntime);
     registerTerminalsRoutes(app, ctx);
     registerBoardRoutes(app, ctx, withRuntime);

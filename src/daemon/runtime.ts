@@ -330,6 +330,7 @@ export class ProjectRuntime {
         this.afterAgentEvent(event);
         this.kickQueue();
       },
+      turnMemoryBrief: (...args) => this.briefings.turnMemoryBrief(...args),
       consumePendingBriefing: (...args) => this.consumePendingBriefing(...args),
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       agentInstructions: (id) => this.agentInstructions(id),
@@ -422,10 +423,10 @@ export class ProjectRuntime {
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
       assertChatWritable: (id) => this.assertChatWritable(id),
-      briefingFor: async (query, agentId, files) =>
+      memoryForTurn: (query, agent, chat, turn) => this.briefings.turnMemoryBrief(query, agent, chat, turn),
+      briefingFor: async (_query, _agentId, files) =>
         [
           this.activeSkillsBlock(),
-          await this.brainBriefFor({ query, agent: agentId, limit: 6 }),
           this.teamBrain?.context(files ?? []) ?? "",
         ]
           .filter(Boolean)
@@ -600,8 +601,9 @@ export class ProjectRuntime {
         this.brain.add({ kind: m.kind, text: m.text, scope: { crew: m.crewId }, confidence: 0.85, evidence: m.text,
           provenance: { agentId: m.agentId, eventId: m.eventId, ts: Date.now() } });
       },
-      briefingFor: async (query, agentId, crewId) =>
-        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, crew: crewId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+      memoryForTurn: (query, agent, chat, turn, crew) => this.briefings.turnMemoryBrief(query, agent, chat, turn, Boolean(this.continuity), crew),
+      briefingFor: async () =>
+        [this.activeSkillsBlock(), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       gate: (agentId) => {
@@ -2234,7 +2236,6 @@ export class ProjectRuntime {
     if (picks.length > MAX_FANOUT) {
       throw new Error(`that's ${picks.length} models — ${MAX_FANOUT} at a time is the limit`);
     }
-    const brief = opts.briefing === false ? "" : await this.brainBriefFor({ query: text, limit: 6 });
     const started: Array<{ chat: string; model: string; provider: string; agentId: string }> = [];
 
     for (const pick of picks) {
@@ -2244,7 +2245,7 @@ export class ProjectRuntime {
       const short = pick.model.split("/").pop() ?? pick.model;
       const chat = this.createChat(`${opts.title ?? "ask"} · ${short}`.slice(0, 60));
       const agentId = `ask:${pick.model}`;
-      this.log.append({
+      const prompt = this.log.append({
         kind: "message",
         chat: chat.id,
         payload: { text, author: "user", ask: { model: pick.model, provider } },
@@ -2261,8 +2262,10 @@ export class ProjectRuntime {
         offLive();
         offLog();
       };
+      const memory = opts.briefing === false ? undefined : await this.briefings.turnMemoryBrief(text, agentId, chat.id, prompt.id);
+      memory?.record();
       void agent
-        .send({ text, ...(brief ? { briefing: brief } : {}) })
+        .send({ text, ...(memory?.briefing ? { briefing: memory.briefing } : {}) })
         .catch((err) => {
           this.appendIfOpen({
             kind: "error",
@@ -2614,6 +2617,14 @@ export class ProjectRuntime {
         this.memoryUse = JSON.parse(fs.readFileSync(this.memoryUseFile(), "utf8")) as Record<string, { n: number; at: number }>;
       } catch {
         this.memoryUse = {};
+      }
+      // Dispatch records survive a crash before the usage sidecar's next flush.
+      for (const event of this.log.list({ kinds: ["status"] })) {
+        if (event.payload.state !== "memory_injection") continue;
+        for (const memory of (event.payload.memories as Array<{ id: string }> | undefined) ?? []) {
+          const prior = this.memoryUse[memory.id];
+          this.memoryUse[memory.id] = { n: Math.max(1, prior?.n ?? 0), at: Math.max(event.ts, prior?.at ?? 0) };
+        }
       }
     }
     return this.memoryUse;
@@ -3580,7 +3591,7 @@ export class ProjectRuntime {
       task,
       startedAt: Date.now(),
     });
-    this.log.append({
+    const prompt = this.log.append({
       kind: "subtask_started",
       agentId: opts.agentId,
       chat,
@@ -3589,7 +3600,8 @@ export class ProjectRuntime {
 
     await this.ensureStarted(opts.agentId);
     const mcp = child.capabilities.mcp ? writeLoomMcpSession(this.healthyMcps(), this.config.loomTools ? { project: this.info.id, api: this.apiUrl } : undefined) : null;
-    const brief = this.subtaskBriefing(parentAgentId, opts.agentId, task);
+    const memory = await this.briefings.turnMemoryBrief(task, opts.agentId, chat, prompt.id);
+    const brief = [this.subtaskBriefing(parentAgentId, opts.agentId, task), memory.briefing].filter(Boolean).join("\n\n");
     const input: SendInput = {
       text: task,
       chat,
@@ -3603,7 +3615,7 @@ export class ProjectRuntime {
     this.turns.turnChat.set(opts.agentId, chat);
     // an agent that's mid-turn finishes it first: a review sent to a busy reviewer used to fail at once (#310)
     void this.whenIdle(opts.agentId)
-      .then(() => { this.turns.turnChat.set(opts.agentId, chat); return child.send(input); })
+      .then(() => { this.turns.turnChat.set(opts.agentId, chat); memory.record(); return child.send(input); })
       .then(() => {
         this.subtasks.delete(id);
         // an adapter can report a failed turn as an error event and still resolve: that subtask
@@ -3771,7 +3783,7 @@ export class ProjectRuntime {
       await this.ensureStarted(to);
       return { from, ...(merge ? { merge } : {}) };
     }
-    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds);
+    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds, opts.chat);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
     await target.injectMemory(prepared.memory);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");

@@ -100,6 +100,7 @@ export interface RuntimeTurnsHost {
   ensureStarted: (agentId: string) => Promise<AnyAgent>;
   isCurrentAgent: (agent: AnyAgent) => boolean;
   dispatchFailed: (agent: AnyAgent, chat: string, error: unknown) => void;
+  turnMemoryBrief?: (query: string, agent: string, chat: string, turn: number, pinsOnly?: boolean) => Promise<import("../../core/brain.js").MemoryBriefing>;
   consumePendingBriefing: (agentId: string) => string | undefined;
   activeSkillsBlock: () => string;
   /** The agent's standing instructions block ("" when it has none). */
@@ -548,7 +549,7 @@ export class RuntimeTurns {
     this.turnModel.set(target, model ?? undefined);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
     this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started", ...(opts.requestId ? { requestId: opts.requestId } : {}) } });
-    this.host.log.append({
+    const promptEvent = this.host.log.append({
       kind: "message",
       chat,
       payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
@@ -574,8 +575,11 @@ export class RuntimeTurns {
       // A provider agent plans in its own plan mode; the plan it proposes is
       // saved under plans/ by the runtime. Other agents get Loom's briefing.
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
+      const memoryQuery = this.host.log.list({ chat, kinds: ["message"], activeLineages: true, limit: 8 })
+        .map(e => String(e.payload.text ?? "").slice(-2000)).join("\n");
+      const memoryBrief = await this.host.turnMemoryBrief?.(memoryQuery || text, target, chat, promptEvent.id);
       const briefing =
-        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, branchInput.briefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
+        [memoryBrief?.briefing, this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, branchInput.briefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
           .filter(Boolean)
           .join("\n")
           .trim() || undefined;
@@ -619,6 +623,7 @@ export class RuntimeTurns {
           this.preparing.delete(target);
           if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
           this.host.clearChatMoveBriefing(chat);
+          memoryBrief?.record();
           return agent.send(input);
         })
         .catch((error) => this.host.dispatchFailed(agent, chat, error))
@@ -704,7 +709,8 @@ export class RuntimeTurns {
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
-      const supplement = [this.host.chatMoveBriefing(chat), this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
+      const memoryBrief = await this.host.turnMemoryBrief?.(text, target, chat, captured.event.id, true);
+      const supplement = [memoryBrief?.briefing, this.host.chatMoveBriefing(chat), this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
       let prepared = await brain.prepare({ ...request, targetAddedTokens: opts.contextTarget ?? request.targetAddedTokens }, cfg.kind,
         this.host.agentDir(target), options, supplement);
       assertPrepared();
@@ -745,6 +751,7 @@ export class RuntimeTurns {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");
         this.host.clearChatMoveBriefing(chat);
+        memoryBrief?.record();
         return agent.send(input);
       }).then(() => {
         if (!this.host.closed) brain.settled(continuity.runId);

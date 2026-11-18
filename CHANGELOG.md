@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent option validation (#418).** Validate argument arrays, typed options, sampling and effort before saving; web/phone editors and `loom agents:options` show actionable errors without replacing valid configuration.
 - **Weekly scoreboard digest (#418).** `loom digest --scoreboard`, the web scoreboard and phone model settings summarize seven days of results; owners can opt into a once-per-Monday UTC desktop notification that survives restarts.
 
+- **Memory search filters (#419):** combine kind, learning agent and inclusive creation dates in the web/phone Memory views and `loom brain:search` flags.
+- **Markdown brain export (#419):** extend JSON export with `loom brain:export --md docs/BRAIN.md` and web/phone controls; repo writes require owner/admin, stay inside the repo and preserve existing files.
+- **Duplicate memory review (#419):** extend exact deduplication with near-duplicate suggestions and a reviewed merge that keeps both histories and archives the other memory.
+- **Pinned memories and priority (#419):** persist pins and priority, include every eligible pin even beyond the retrieval limit, and expose controls in the web, phone and CLI.
+- **Stale memory review (#419):** flag memories unused for 30 days, including never-used memories, and archive/restore them without losing history.
+- **Markdown memory import (#419):** extend JSON import with Markdown files, pasted Markdown and bounded public HTTP(S) URLs; preserve scopes on round trips and mark URL content untrusted.
+- **Chat-only memory controls (#419):** expose the existing chat scope in web/phone creation and editing and CLI creation; prevent cross-chat deduplication, retrieval and team-sharing leaks.
+- **Memory history revert (#419):** extend the event history with before/after values, changed fields, device attribution and audited reverts, available in web, phone and CLI.
+- **Per-turn memory explanations (#419):** save the actual memory text, scores and selection reasons at dispatch, view them in chat/Memory or `loom brain:why`, and include explicit pins in native continuity packets.
+
 ### Fixed
 
 - **Explorer's "Open in terminal" ran shell syntax in folder names (#430).** The `cd` it typed double-quoted the path, so a folder named `$(…)` or with backticks ran as a command. It is now single-quoted for POSIX shells (`cd /d "…"` for cmd.exe).
