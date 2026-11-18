@@ -1,3 +1,4 @@
+import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
@@ -37,6 +38,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     var pid = (location.hash.match(/^#p\/(.+)$/) || [])[1] || state.pid || null;
     var SECTIONS = [
       { id: "setup", label: "Setup", icon: ICONS.tasks },
+      { id: "ops", label: "Operations", icon: ICONS.console },
       { id: "diagnostics", label: "Diagnostics", icon: ICONS.console },
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
@@ -543,6 +545,11 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         } else if (u.root && behind > 0) {
           h += '<div class="snote">Your checkout is behind its remote, though the release matches. Pull and rebuild:</div>';
           h += '<code class="scmd">cd ' + esc(u.root) + " && git pull --ff-only && npm install && npm run build\nloom up --restart</code>";
+        }
+        if (u.changelog) {
+          h += '<div class="sgrouph">Changes since ' + esc(u.version) + '</div>';
+          (u.changelog.entries || []).forEach(function(entry){ h += '<div class="st">' + esc(entry.version) + '</div><pre class="scmd ops-output">' + esc(entry.notes) + '</pre>'; });
+          if (!u.changelog.available) h += '<div class="snote">Changelog unavailable. Try again or open the release notes.</div>';
         }
         h += '<div class="updlog" id="updlog" style="display:none"></div>';
         pane.innerHTML = h;
@@ -1091,6 +1098,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     function render(){
       gen++;
       if (cur === "diagnostics") renderDiag();
+      else if (cur === "ops") renderOps(pane, sapi, pid);
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();

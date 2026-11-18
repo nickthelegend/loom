@@ -43,7 +43,7 @@ import path from "node:path";
 import { createWorktree } from "./worktrees.js";
 import type { TeamPolicy } from "./team-policy.js";
 
-import { loomHome, findProject } from "./registry.js";
+import { loomHome, findProject, readProjectConfig } from "./registry.js";
 import { expandSavedFleets, parseAgentSpec } from "./fleets.js";
 import { bestFleet, readScoreboard } from "./scoreboard.js";
 import { blockedBy, type GoalScope } from "./goal-lanes.js";
@@ -1824,17 +1824,43 @@ export class OrchestraEngine {
    * on their branches; the checkouts are only disk (#295). Returns the runs swept.
    */
   async sweep(days = ORCHESTRA_KEEP_DAYS, now = Date.now()): Promise<string[]> {
-    const swept: string[] = [];
-    for (const run of [...this.runs.values()]) {
-      if (!isTerminal(run.status) || now - (run.updatedAt ?? 0) < days * 86_400_000) continue;
-      if (!run.dir || !fs.existsSync(run.dir)) continue;
-      await this.cleanup(run.id).catch(() => {});
-      // the run's folder goes too once its worktrees are out of it
-      const root = path.dirname(run.dir);
-      if (path.basename(root) === run.id) fs.rmSync(root, { recursive: true, force: true });
-      swept.push(run.id);
-    }
-    return swept;
+    const policy = readProjectConfig(this.host.projectDir)?.orchestra?.prune ?? { days, keep: 10000 };
+    return (await this.pruneWorktrees(policy, false, now)).removed;
+  }
+
+  /** Age and count select finished runs; dirty checkouts and locked trees stay. */
+  async pruneWorktrees(policy: { days: number; keep: number }, dryRun = true, now = Date.now()) {
+    if (!Number.isFinite(policy.days) || policy.days < 0 || policy.days > 36500 || !Number.isInteger(policy.keep) || policy.keep < 0 || policy.keep > 10000) throw new Error("invalid worktree policy");
+    const candidates: string[] = [], removed: string[] = [], skipped: Array<{ id: string; reason: string }> = [];
+    const finished = this.list().filter(r => isTerminal(r.status) && r.dir && fs.existsSync(r.dir))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    await this.gitLock.run(async () => {
+      for (const [index, run] of finished.entries()) {
+        if (index < policy.keep && now - run.updatedAt < policy.days * 86_400_000) continue;
+        if (!isTerminal(run.status) || run.moving) continue;
+        const dirs = [...new Set([run.dir, ...run.tasks.map(t => t.dir).filter((d): d is string => !!d)])].filter(d => fs.existsSync(d));
+        if (!dirs.length) continue;
+        try {
+          for (const dir of dirs) {
+            const dirty = await git(["status", "--porcelain", "--untracked-files=all"], dir);
+            if (dirty.trim()) throw new Error("uncommitted files; commit or clean them before pruning");
+            const lock = (await git(["rev-parse", "--git-path", "locked"], dir)).trim();
+            if (fs.existsSync(path.resolve(dir, lock))) throw new Error("worktree is locked");
+          }
+          if (!isTerminal(run.status) || run.moving) continue;
+          candidates.push(run.id);
+          if (!dryRun) {
+            // Git rechecks cleanliness at removal time; never force an automatic prune.
+            for (const dir of dirs) await git(["worktree", "remove", dir], this.host.projectDir);
+            const root = path.dirname(run.dir);
+            if (path.basename(root) === run.id && fs.existsSync(root) && !fs.readdirSync(root).length) fs.rmdirSync(root);
+            removed.push(run.id);
+            this.emit(run, "cleaned");
+          }
+        } catch (err) { skipped.push({ id: run.id, reason: err instanceof Error ? err.message : String(err) }); }
+      }
+    });
+    return { dryRun, candidates, removed, skipped };
   }
 
   /** Remove a finished run's worktrees (the branch stays for the record). */

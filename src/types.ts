@@ -302,7 +302,7 @@ export interface ProjectConfig {
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
   proof?: import("./daemon/proof.js").ProofConfig;
   /** Where orchestra worktrees go (default: ~/.loom/orchestra, or beside the project when it's on another disk). */
-  orchestra?: { worktreeDir?: string };
+  orchestra?: { worktreeDir?: string; prune?: { days: number; keep: number } };
   /** `loom review` and the council's reviews: how long one reviewer may take before it's left out (default 15 minutes). */
   review?: { timeoutMin?: number };
   /** Agent that receives messages when nobody holds the baton. */

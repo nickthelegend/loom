@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { listProjects, loomHome } from "./registry.js";
 
-const SKIP_HOME = new Set(["orchestra", "models"]);
+const SKIP_HOME = new Set(["orchestra", "crews", "proof", "models", "backups"]);
 
 export interface BackupResult {
   file: string;
@@ -45,17 +45,12 @@ function copyDir(src: string, dest: string, skipped: string[], skip?: (name: str
 }
 
 function snapshotDb(src: string, dest: string): void {
+  const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+  const db = new DatabaseSync(src, { readOnly: true });
   try {
-    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
-    const db = new DatabaseSync(src, { readOnly: true });
-    try {
-      db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
-    } finally {
-      db.close();
-    }
-  } catch {
-    fs.copyFileSync(src, dest); // no node:sqlite here: a plain copy beats nothing
-  }
+    // If the snapshot fails, keep the previous backup rather than archive an incomplete database.
+    db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+  } finally { db.close(); }
 }
 
 export function makeBackup(out?: string, now = new Date()): BackupResult {
@@ -81,6 +76,9 @@ export function makeBackup(out?: string, now = new Date()): BackupResult {
       JSON.stringify({ format: "loom-backup", version: 1, at: now.toISOString(), projects: index }, null, 2),
     );
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // The archive contains credentials, including while tar is still writing it.
+    fs.closeSync(fs.openSync(file, "w", 0o600));
+    fs.chmodSync(file, 0o600);
     const tar = spawnSync("tar", ["-czf", file, "-C", stage, "."], { encoding: "utf8" });
     if (tar.status !== 0) throw new Error(`tar failed: ${(tar.stderr || tar.error?.message || "").trim()}`);
     return { file, bytes: fs.statSync(file).size, projects, skipped };

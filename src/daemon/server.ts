@@ -1,3 +1,6 @@
+import { registerOpsRoutes } from "./routes/ops.js";
+import { BackupScheduler } from "../core/backup-schedule.js";
+import { rotateDaemonLog } from "../core/ops.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -26,6 +29,7 @@ import {
   listProjects,
   loomHome,
   readDaemonConfig,
+  readProjectConfig,
   registerProject,
   unregisterProject,
   writeDaemonConfig
@@ -577,6 +581,7 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerOpsRoutes(app, ctx, withRuntime, this.backups);
     app.get("/api/projects/:id/chats/:chat/presence", withRuntime(async (rt, req, res) => {
       const chat = String(req.params.chat);
       if (!rt.chats().some((c) => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
@@ -850,6 +855,11 @@ export class LoomDaemon {
   // Lifecycle
   // -------------------------------------------------------------------------
 
+  private backups = new BackupScheduler();
+  private opsTimer?: NodeJS.Timeout;
+  private pruneTimer?: NodeJS.Timeout;
+  private pruning?: Promise<void>;
+
   async listen(opts: { tailnet?: boolean } = {}): Promise<{ host: string; port: number }> {
     if (opts.tailnet) {
       this.host = await tailscaleIp();
@@ -902,6 +912,28 @@ export class LoomDaemon {
     }
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
+    this.backups.start(err => logbook.warn("backup", "scheduled backup failed", String(err)));
+    this.opsTimer = setInterval(() => {
+      try { rotateDaemonLog(); } catch (err) { logbook.warn("logs", "rotation failed", String(err)); }
+    }, 1000);
+    this.opsTimer.unref();
+    const prune = () => {
+      if (this.pruning) return;
+      this.pruning = (async () => {
+        for (const project of listProjects()) {
+          if (!this.runtimes.has(project.id) && !readProjectConfig(project.dir)?.orchestra?.prune) continue;
+          try {
+            const rt = await this.runtime(project.id);
+            await rt.orchestra.sweep();
+          } catch (err) { logbook.warn("orchestra", "automatic pruning failed", String(err), project.id); }
+        }
+      })().catch(err => { logbook.warn("orchestra", "automatic pruning failed", String(err)); }).finally(() => { this.pruning = undefined; });
+    };
+    const firstPrune = setTimeout(prune, 30_000);
+    firstPrune.unref();
+    this.healTimers.add(firstPrune);
+    this.pruneTimer = setInterval(prune, 3_600_000);
+    this.pruneTimer.unref();
     this.watchReleases();
     this.triggers.start();
     // Resume PR watches even when no client has opened the project since restart.
@@ -1269,6 +1301,9 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    await this.backups.close();
+    if (this.opsTimer) clearInterval(this.opsTimer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.setupInstaller.close();
     this.presence.close();
     await this.closeProjects();
@@ -1286,6 +1321,7 @@ export class LoomDaemon {
     for (const t of this.healTimers) clearTimeout(t);
     if (this.releaseTimer) clearInterval(this.releaseTimer);
     this.healTimers.clear();
+    await this.pruning;
     this.unstreamLogs?.();
     this.unstreamLogs = null;
     this.specRunner.closeAll();
