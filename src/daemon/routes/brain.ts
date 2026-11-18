@@ -1,3 +1,5 @@
+import { logbook } from "../../core/logbook.js";
+import { refreshSources } from "../../core/brain-r4/sources.js";
 import { brainMarkdown, parseBrainMarkdown, readMarkdownUrl, writeBrainMarkdown } from "../../core/brain-markdown.js";
 import type { Express } from 'express';
 import { findConflicts, findDuplicates } from "../../core/brain-index.js";
@@ -17,13 +19,14 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
   const scopeSchema = z.strictObject({ chat: z.string().min(1).max(200).optional(), agent: z.string().min(1).max(200).optional(),
     task: z.string().min(1).max(200).optional(), crew: z.string().min(1).max(200).optional() });
   const patchSchema = z.strictObject({ text: z.string().trim().min(1).max(100_000).optional(), kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(),
+    tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(), paths: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
     entities: z.array(z.string().max(200)).max(200).optional(), confidence: z.number().min(0).max(1).optional(),
     scope: scopeSchema.optional(), pinned: z.boolean().optional(), priority: z.number().int().min(-1000).max(1000).optional(),
     archived: z.boolean().optional(), private: z.boolean().optional(), untrusted: z.boolean().optional(),
     evidence: z.string().max(100_000).optional(), expiresAt: z.number().finite().nullable().optional() });
   const filters = (query: import("express").Request["query"]) => {
     const input = z.object({ kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(), author: z.string().optional(),
-      since: z.string().optional(), until: z.string().optional() }).parse(query);
+      tag: z.string().max(100).optional(), since: z.string().optional(), until: z.string().optional() }).parse(query);
     const date = (value: string | undefined, end: boolean) => {
       if (value === undefined) return undefined;
       const n = Date.parse(value + (/^\d{4}-\d{2}-\d{2}$/.test(value) ? end ? "T23:59:59.999Z" : "T00:00:00.000Z" : ""));
@@ -32,7 +35,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
     };
     const since = date(input.since, false), until = date(input.until, true);
     if (since !== undefined && until !== undefined && since > until) throw new Error("since must precede until");
-    return { kind: input.kind, author: input.author, since, until };
+    return { tag: input.tag, kind: input.kind, author: input.author, since, until };
   };
   // Keep concrete continuity routes before /brain/:mid. Diagnostics contain
   // stored evidence; provider acceptance is never labelled understanding.
@@ -159,6 +162,8 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
     withRuntime(async (rt, req, res) => {
       const q = req.query as Record<string, string | undefined>;
       try {
+        try { refreshSources(rt.brain, rt.info.dir); }
+        catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), rt.info.id); }
         const memories = rt.brain.list({
           ...filters({ ...req.query, author: req.query.author ?? req.query.agent }),
           includeArchived: q.includeArchived === "1",
@@ -167,7 +172,8 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
           ...(q.limit ? { limit: Math.max(1, Math.min(500, Number(q.limit) || 100)) } : {}),
         });
         const usage = rt.memoryUsage();
-        res.json({ memories: memories.map(m => ({ ...m, stale: staleMemory(m, usage[m.id]?.at), lastUsedAt: usage[m.id]?.at })), stats: rt.brain.stats() });
+        if (q.sort === "usage") memories.sort((a, b) => (usage[b.id]?.n ?? 0) - (usage[a.id]?.n ?? 0));
+        res.json({ memories: memories.map(m => ({ ...m, stale: staleMemory(m, usage[m.id]?.at), timesBriefed: usage[m.id]?.n ?? 0, lastUsedAt: usage[m.id]?.at })), stats: rt.brain.stats() });
       } catch (error) { failure(res, error); }
     }),
   );
@@ -194,7 +200,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
           explain: q.explain === "1",
         });
         const usage = rt.memoryUsage();
-        res.json({ hits: hits.map(h => ({ ...h, memory: { ...h.memory, stale: staleMemory(h.memory, usage[h.memory.id]?.at) } })), stats: rt.brain.stats() });
+        res.json({ hits: hits.map(h => ({ ...h, memory: { ...h.memory, timesBriefed: usage[h.memory.id]?.n ?? 0, lastUsedAt: usage[h.memory.id]?.at, stale: staleMemory(h.memory, usage[h.memory.id]?.at) } })), stats: rt.brain.stats() });
       } catch (error) { failure(res, error); }
     }),
   );
@@ -261,7 +267,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
   app.get(
     "/api/projects/:id/brain/export",
     withRuntime(async (rt, _req, res) => {
-      const doc = rt.brain.export(rt.info.name);
+      const doc = rt.brain.export(rt.info.name, { tag: typeof _req.query.tag === "string" ? _req.query.tag : undefined });
       if (_req.query.format === "md") { res.type("text/markdown").send(brainMarkdown(doc)); return; }
       res.json(doc);
     }),
@@ -281,7 +287,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
         if (doc?.format !== "loom-brain" || !Array.isArray(doc.memories)) throw new Error("not a loom brain export");
         if (doc.memories.length > 2000) throw new Error("import at most 2000 memories at a time");
         const row = patchSchema.omit({ scope: true, archived: true }).extend({
-          text: z.string().trim().min(1).max(100_000), kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]),
+          pack: z.string().min(1).max(100).optional(), text: z.string().trim().min(1).max(100_000), kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]),
           expiresAt: z.number().finite().optional(),
           chat: z.string().max(200).optional(), agent: z.string().max(200).optional(), crew: z.string().max(200).optional(), task: z.string().max(200).optional(),
         });
@@ -303,8 +309,8 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth
 
   app.post("/api/projects/:id/brain/export", withRuntime(async (rt, req, res) => {
     if (!(req as import("express").Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "repo export requires owner/admin" });
-    try { const input = z.strictObject({ md: z.string().min(1).max(1000) }).parse(req.body);
-      res.json({ file: writeBrainMarkdown(rt.info.dir, input.md, rt.brain.export(rt.info.name)) });
+    try { const input = z.strictObject({ md: z.string().min(1).max(1000), tag: z.string().max(100).optional() }).parse(req.body);
+      res.json({ file: writeBrainMarkdown(rt.info.dir, input.md, rt.brain.export(rt.info.name, { tag: input.tag })) });
     } catch (error) { failure(res, error); }
   }));
   app.get("/api/projects/:id/brain/duplicates", withRuntime(async (rt, _req, res) => {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerR4Brain } from "./r4-brain.js";
 /**
  * loom — one CLI for all your coding agents.
  *
@@ -1157,7 +1158,7 @@ program
   .option("--since <date>", "created on or after this ISO date")
   .option("--until <date>", "created on or before this ISO date")
   .option("--chat <id>", "include memories scoped to this chat")
-  .action(async (words: string[], opts: { explain?: boolean; kind?: string; agent?: string; since?: string; until?: string; chat?: string }) => {
+  .action(async (words: string[], opts: { explain?: boolean; kind?: string; agent?: string; since?: string; until?: string; chat?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const { hits } = await client.searchBrain(project.id, words.join(" "), {
@@ -1177,9 +1178,9 @@ program
   .description("remember a fact or decision, optionally for only one chat")
   .option("--kind <kind>", "memory kind", "fact")
   .option("--chat <id>", "only inject in this chat")
-  .action(async (words: string[], opts: { kind: string; chat?: string }) => {
+  .action(async (words: string[], opts: { kind: string; chat?: string; paths?: string }) => {
     const client = await ensureDaemon(), project = await currentProject(client);
-    const result = await client.remember(project.id, opts.kind as import("../core/brain.js").MemoryKind, words.join(" "), opts.chat);
+    const result = await client.remember(project.id, opts.kind as import("../core/brain.js").MemoryKind, words.join(" "), opts.chat, opts.paths?.split(",").map(s => s.trim()).filter(Boolean));
     console.log(`${result.memory.id} · ${result.created ? "learned" : "already known"}`);
   });
 
@@ -1188,9 +1189,9 @@ program
   .description("list learned memories, including pin, priority and stale status")
   .option("--stale", "only memories unused for 30 days")
   .option("--archived", "include archived memories")
-  .action(async (opts: { stale?: boolean; archived?: boolean }) => {
+  .action(async (opts: { stale?: boolean; archived?: boolean; tag?: string; sort?: string }) => {
     const client = await ensureDaemon(), project = await currentProject(client);
-    const { memories } = await client.listBrainMemories(project.id, opts.archived);
+    const { memories } = await client.listBrainMemories(project.id, opts.archived, opts.tag, opts.sort);
     for (const m of memories.filter(m => !opts.stale || m.stale)) console.log(`${m.id} ${m.kind} ${m.pinned ? "pinned " : ""}priority=${m.priority ?? 0}${m.stale ? " stale" : ""}${m.archived ? " archived" : ""} · ${m.text}`);
   });
 
@@ -1784,11 +1785,11 @@ program
   .command("brain:export [file]")
   .description("write this project's brain to a file (or stdout) so it can travel")
   .option("--md <file>", "write Markdown inside the repo (refuses an existing file)")
-  .action(async (file: string | undefined, opts: { md?: string }) => {
+  .action(async (file: string | undefined, opts: { md?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    if (opts.md) { const out = await client.exportBrainMarkdown(project.id, opts.md); console.log(`Brain exported → ${out.file}`); return; }
-    const doc = await client.exportBrain(project.id);
+    if (opts.md) { const out = await client.exportBrainMarkdown(project.id, opts.md, opts.tag); console.log(`Brain exported → ${out.file}`); return; }
+    const doc = await client.exportBrain(project.id, opts.tag);
     const json = JSON.stringify(doc, null, 2);
     if (file) {
       const fs = await import("node:fs");
@@ -5135,6 +5136,8 @@ program
       console.log(`_loom() { compadd -- ${names.join(" ")} completion; }\ncompdef _loom loom 2>/dev/null || { autoload -Uz compinit && compinit && compdef _loom loom; }`);
     } else fail(`unknown shell "${shell}" — zsh or bash`);
   });
+
+registerR4Brain(program, ensureDaemon, currentProject);
 
 program.parseAsync().catch((err) => {
   console.error(pc.red(`✗ ${err instanceof Error ? err.message : String(err)}`));

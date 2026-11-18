@@ -34,6 +34,7 @@
  *           rows silently eat the recall budget. Ours are gone before we rank.
  */
 
+import { pathMatches } from "./brain-r4/fields.js";
 import type { Brain, Memory, MemoryKind } from "./brain.js";
 import { isExpired, lemmatize, sameMemoryScope } from "./brain.js";
 
@@ -103,6 +104,8 @@ const KIND_BIAS: Record<MemoryKind, number> = {
 };
 
 export interface RetrieveOpts {
+  tag?: string;
+  enforcePaths?: boolean;
   includeArchived?: boolean;
   kind?: MemoryKind;
   author?: string;
@@ -135,6 +138,8 @@ export interface RetrieveOpts {
 }
 
 export interface ScoreDetail {
+  matchedPaths?: string[];
+  source?: Memory["source"];
   bm25: number;
   entity: number;
   /** Trigram-cosine channel, already weighted. Morphology and typos, not synonymy. */
@@ -377,6 +382,8 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
   // never consume the ranking budget. mem0 does this after its over-fetch and
   // silently loses recall to rows that were never eligible.
   const live = memories.filter((m) => {
+    if (opts.tag && !m.tags?.includes(opts.tag.trim().toLowerCase())) return false;
+    if (opts.enforcePaths && m.paths?.length && !pathMatches(m.paths, opts.query, opts.files).length) return false;
     if (m.archived && !opts.includeArchived) return false;
     if (opts.kind && m.kind !== opts.kind) return false;
     if (opts.author && m.provenance.agentId !== opts.author) return false;
@@ -473,6 +480,8 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
               kindBias: bias,
               recency: round(recency),
               matchedEntities: ent?.matched ?? [],
+              matchedPaths: pathMatches(memory.paths, opts.query, opts.files),
+              ...(memory.source ? { source: memory.source } : {}),
               final: round(final),
             },
           }
@@ -608,12 +617,12 @@ export function compileBrief(memories: Memory[]): string {
     else byKind.set(m.kind, [m]);
   }
   const lines: string[] = ["## What this project has learned (relevant to the work at hand)"];
-  if (pins.length) lines.push("", "### Pinned memories (in priority order)", ...pins.map(m => `- ${m.text}`));
+  if (pins.length) lines.push("", "### Pinned memories (in priority order)", ...pins.map(m => `- ${m.text}${m.source ? ` [${m.id}: ${m.source.file}:${m.source.line}]` : ""}`));
   for (const kind of order) {
     const ms = byKind.get(kind);
     if (!ms?.length) continue;
     lines.push("", `### ${KIND_LABEL[kind]}`);
-    for (const m of ms) lines.push(`- ${m.text}`);
+    for (const m of ms) lines.push(`- ${m.text}${m.source ? ` [${m.id}: ${m.source.file}:${m.source.line}]` : ""}`);
   }
   return lines.join("\n");
 }
