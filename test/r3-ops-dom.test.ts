@@ -111,11 +111,12 @@ describe("R3 web operations", () => {
     await waitUntil(() => m.get("#ops-result").textContent!.includes('Dry run: 0 runs'));
     expect(m.errors).toEqual([]);
   });
+  // versions far above and below whatever is installed, so a release bump never changes what counts as intervening
   it("renders all intervening release notes as escaped text", async () => {
     vi.stubGlobal("fetch", ((url: string | URL, init?: RequestInit) => {
       const u = String(url);
-      if (u.startsWith("https://api.github.com/")) return Promise.resolve(new Response(JSON.stringify({ tag_name: "v2.2.0", html_url: "https://github.com/nickthelegend/loom/releases/tag/v2.2.0" })));
-      if (u.startsWith("https://raw.githubusercontent.com/")) return Promise.resolve(new Response('## [2.2.0]\n<img src=x onerror="window.bad=1">\n## [2.1.0]\nIntermediate fix\n## [2.0.0]\nOld notes\n'));
+      if (u.startsWith("https://api.github.com/")) return Promise.resolve(new Response(JSON.stringify({ tag_name: "v99.2.0", html_url: "https://github.com/nickthelegend/loom/releases/tag/v99.2.0" })));
+      if (u.startsWith("https://raw.githubusercontent.com/")) return Promise.resolve(new Response('## [99.2.0]\n<img src=x onerror="window.bad=1">\n## [99.1.0]\nIntermediate fix\n## [1.0.0]\nOld notes\n'));
       return realFetch(url, init);
     }) as typeof fetch);
     const m = mount(); await open(m, "updates");
