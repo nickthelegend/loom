@@ -175,6 +175,7 @@ export interface CrewHost {
   createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   chatExists(id: string): boolean;
   briefingFor(query: string, agentId: string, crewId?: string): string | Promise<string>;
+  memoryForTurn?(query: string, agent: string, chat: string, turn: number, crew: string): Promise<import("./brain.js").MemoryBriefing>;
   native?(): ContinuityEngine | null;
   nativeOptions?(cfg: AgentConfig): Record<string, unknown>;
   nativeHealth?(id: string): Promise<{ available: boolean; error?: string }>;
@@ -1371,7 +1372,7 @@ export class CrewEngine {
       await this.briefing(cfg, tm, g, fresh, card),
       notes.length ? `Messages for you:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
-    this.host.append({ kind: "message", chat, payload: { text: prompt, author: "loom", crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, ...(card ? { card: card.id } : {}) } } });
+    const promptEvent = this.host.append({ kind: "message", chat, payload: { text: prompt, author: "loom", crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, ...(card ? { card: card.id } : {}) } } });
     this.turnText.set(key, "");
     this.turnError.delete(key);
     this.turnQuestion.delete(key);
@@ -1393,6 +1394,8 @@ export class CrewEngine {
     watchdog.unref?.();
     try {
       const brain = this.host.native?.();
+      const memory = await this.host.memoryForTurn?.(prompt, tm.agent, chat, promptEvent.id, cfg.id);
+      const fullBriefing = [memory?.briefing, briefing].filter(Boolean).join("\n\n");
       if (brain) {
         const health = await this.host.nativeHealth?.(tm.agent);
         if (health && !health.available) throw new ContinuityError("unsupported", health.error ?? "native harness unavailable");
@@ -1403,24 +1406,24 @@ export class CrewEngine {
         const options = effectiveOptions;
         if (Array.isArray(options.extraArgs) && options.extraArgs.length)
           throw new ContinuityError("unsupported", "arbitrary CLI arguments have unverified native session semantics; remove extraArgs");
-        let prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
+        let prepared = await brain.prepare(request, rosterCfg.kind, dir, options, fullBriefing);
         let continuity;
         for (let attempt = 0; ; attempt++) {
           if (terminal(g.status) || this.closed) return null;
           try { continuity = await brain.submit(prepared); break; }
           catch (error) {
             if (!(error instanceof ContinuityError) || error.code !== "stale" || attempt >= 2) throw error;
-            prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
+            prepared = await brain.prepare(request, rosterCfg.kind, dir, options, fullBriefing);
           }
         }
         nativeRun = continuity.runId;
         (st.sessions ??= {})[tm.id] = { bindingId: continuity.bindingId, epoch: continuity.sessionEpoch, nativeSessionId: continuity.nativeSessionId };
         this.save(st);
         if (terminal(g.status) || this.closed) throw new NativeDispatchRejected("crew stopped before native dispatch");
-        try { await agent.send({ text: prompt, chat, continuity, ...(request.model ? { model: request.model } : {}) }); }
+        try { memory?.record(); await agent.send({ text: prompt, chat, continuity, ...(request.model ? { model: request.model } : {}) }); }
         catch (error) { brain.settled(nativeRun, error); throw error; }
         brain.settled(nativeRun);
-      } else await agent.send({ text: prompt, briefing });
+      } else { memory?.record(); await agent.send({ text: prompt, briefing: fullBriefing }); }
     } catch (err) {
       // an agent that throws (it won't start, it can't resume) fails this turn, not the whole goal
       this.turnError.set(key, (err as Error).message.slice(0, 1000));

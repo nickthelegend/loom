@@ -86,6 +86,7 @@ function run(cmd: string, args: string[], cwd: string): Promise<string> {
 }
 
 export function shareable(m: Memory): boolean {
+  if (m.archived || m.scope.chat || m.scope.agent || m.scope.task) return false;
   return DURABLE.has(m.kind) && m.confidence >= CONFIDENCE_FLOOR && !m.untrusted && !m.private && !m.expiresAt && !m.scope.crew;
 }
 
@@ -438,13 +439,14 @@ export class TeamBrain {
     const out: TieredMemory[] = [];
     const seen = new Set<string>(); // ids and normalized texts already in the pool
     const take = (m: TieredMemory) => {
-      const k = "t:" + normText(m.text); // the normalization the HMAC merges on (D41)
+      const k = "t:" + normText(m.text) + JSON.stringify(m.scope); // the normalization the HMAC merges on (D41)
       if (seen.has(m.id) || seen.has(k)) return;
       seen.add(m.id);
       seen.add(k);
       out.push(m);
     };
     const now = Date.now();
+    for (const m of own.filter(m => m.pinned && !m.archived)) take({ ...m, tier: "own" });
     for (const c of this.canon) {
       take({ ...asMemory(c.id, { text: c.text, kind: c.kind }, now, now, "canon"), tier: "canon" });
     }
@@ -452,6 +454,8 @@ export class TeamBrain {
     // Confirmed first, so a twin of our own memory shows its confirmations.
     team.sort((a, b) => b.confirmedBy.length - a.confirmedBy.length);
     for (const t of team) {
+      const local = own.find(m => m.id === t.id);
+      if (local && !shareable(local)) continue;
       const s = this.open(t);
       if (!s) continue;
       const confirmed = t.confirmedBy.length >= 2;

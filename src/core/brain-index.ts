@@ -35,7 +35,7 @@
  */
 
 import type { Brain, Memory, MemoryKind } from "./brain.js";
-import { isExpired, lemmatize } from "./brain.js";
+import { isExpired, lemmatize, sameMemoryScope } from "./brain.js";
 
 /** BM25 constants. The literature's defaults; we have no corpus to tune on. */
 const K1 = 1.2;
@@ -103,6 +103,11 @@ const KIND_BIAS: Record<MemoryKind, number> = {
 };
 
 export interface RetrieveOpts {
+  includeArchived?: boolean;
+  kind?: MemoryKind;
+  author?: string;
+  since?: number;
+  until?: number;
   /** Crew memories are private to that crew until a human promotes them. */
   crew?: string;
   /** Free text — a task description, a prompt, a turn. */
@@ -370,10 +375,15 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
   // never consume the ranking budget. mem0 does this after its over-fetch and
   // silently loses recall to rows that were never eligible.
   const live = memories.filter((m) => {
+    if (m.archived && !opts.includeArchived) return false;
+    if (opts.kind && m.kind !== opts.kind) return false;
+    if (opts.author && m.provenance.agentId !== opts.author) return false;
+    if (opts.since !== undefined && m.createdAt < opts.since) return false;
+    if (opts.until !== undefined && m.createdAt > opts.until) return false;
     if (isExpired(m, now)) return false;
     if (opts.minConfidence !== undefined && m.confidence < opts.minConfidence) return false;
-    if (opts.agent && m.scope.agent && m.scope.agent !== opts.agent) return false;
-    if (opts.chat && m.scope.chat && m.scope.chat !== opts.chat) return false;
+    if (m.scope.agent && m.scope.agent !== opts.agent) return false;
+    if (m.scope.chat && m.scope.chat !== opts.chat) return false;
     if (m.scope.crew && m.scope.crew !== opts.crew) return false;
     return true;
   });
@@ -424,7 +434,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
   const maxScore = MAX_SCORE + (opts.dense?.byId.size ? DENSE_WEIGHT : 0);
 
   // The union. Any channel alone is enough to be a candidate.
-  const ids = new Set<string>([...bm.keys(), ...eh.keys(), ...fz.keys(), ...dn.keys()]);
+  const ids = new Set<string>([...bm.keys(), ...eh.keys(), ...fz.keys(), ...dn.keys(), ...live.filter(m => m.pinned).map(m => m.id)]);
   if (!ids.size) return [];
 
   // BM25 is unbounded, so normalise against the best hit in this query to get
@@ -468,8 +478,8 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     });
   }
 
-  hits.sort((a, b) => b.score - a.score || b.memory.updatedAt - a.memory.updatedAt);
-  return hits.slice(0, limit);
+  hits.sort((a, b) => Number(Boolean(b.memory.pinned)) - Number(Boolean(a.memory.pinned)) || (b.memory.priority ?? 0) - (a.memory.priority ?? 0) || b.score - a.score || b.memory.updatedAt - a.memory.updatedAt);
+  return [...hits.filter(h => h.memory.pinned), ...hits.filter(h => !h.memory.pinned).slice(0, Math.max(0, limit - hits.filter(h => h.memory.pinned).length))];
 }
 
 function round(n: number): number {
@@ -542,7 +552,7 @@ function topicText(text: string): string {
 }
 
 export function findConflicts(memories: Memory[]): Conflict[] {
-  const live = memories.filter((m) => !isExpired(m));
+  const live = memories.filter((m) => !m.archived && !isExpired(m));
   const out: Conflict[] = [];
   const vecs = new Map(live.map((m) => [m.id, trigramVector(topicText(m.text))]));
   for (let i = 0; i < live.length; i++) {
@@ -587,14 +597,16 @@ const KIND_LABEL: Record<MemoryKind, string> = {
  */
 export function compileBrief(memories: Memory[]): string {
   if (!memories.length) return "";
+  const pins = memories.filter(m => m.pinned).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   const order: MemoryKind[] = ["constraint", "failure", "decision", "convention", "fact", "task"];
   const byKind = new Map<MemoryKind, Memory[]>();
-  for (const m of memories) {
+  for (const m of memories.filter(m => !m.pinned)) {
     const arr = byKind.get(m.kind);
     if (arr) arr.push(m);
     else byKind.set(m.kind, [m]);
   }
   const lines: string[] = ["## What this project has learned (relevant to the work at hand)"];
+  if (pins.length) lines.push("", "### Pinned memories (in priority order)", ...pins.map(m => `- ${m.text}`));
   for (const kind of order) {
     const ms = byKind.get(kind);
     if (!ms?.length) continue;
@@ -602,4 +614,17 @@ export function compileBrief(memories: Memory[]): string {
     for (const m of ms) lines.push(`- ${m.text}`);
   }
   return lines.join("\n");
+}
+
+/** Similar wording is a review suggestion, never an automatic merge. */
+export function findDuplicates(memories: Memory[]): Array<{ a: Memory; b: Memory; similarity: number; suggestedText: string }> {
+  const live = memories.filter(m => !m.archived && !isExpired(m));
+  const out = [];
+  for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+    const a = live[i]!, b = live[j]!;
+    if (a.kind !== b.kind || !sameMemoryScope(a.scope, b.scope) || negationPair(a.text, b.text)) continue;
+    const similarity = cosine(trigramVector(a.text), trigramVector(b.text));
+    if (similarity >= 0.86) out.push({ a, b, similarity: round(similarity), suggestedText: a.text.length >= b.text.length ? a.text : b.text });
+  }
+  return out.sort((a, b) => b.similarity - a.similarity);
 }

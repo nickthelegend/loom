@@ -37,7 +37,7 @@ import {
   type DaemonConfig,
 } from "../core/registry.js";
 import type { SideView } from "../core/side-chats.js";
-import type { Memory } from "../core/brain.js";
+import type { Memory, MemoryKind, MemoryPatch, MemoryHistoryEntry } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 import { VERSION } from "../version.js";
@@ -155,8 +155,8 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
   }
 
-  remember(id: string, kind: "decision" | "constraint" | "convention", text: string): Promise<{ memory: Memory; created: boolean }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text });
+  remember(id: string, kind: MemoryKind, text: string, chat?: string): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}) });
   }
 
   report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
@@ -726,10 +726,10 @@ export class DaemonClient {
   searchBrain(
     id: string,
     q: string,
-    opts: { agent?: string; explain?: boolean; limit?: number } = {},
+    opts: { agent?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
   ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
     const params = new URLSearchParams({ q });
-    if (opts.agent) params.set("agent", opts.agent);
+    for (const key of ["agent", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
     if (opts.explain) params.set("explain", "1");
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);
@@ -804,6 +804,32 @@ export class DaemonClient {
   }
 
   /** The brain as a portable document — see Brain.export. */
+  updateBrainMemory(id: string, memoryId: string, patch: MemoryPatch): Promise<{ memory: Memory }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}`, patch as Record<string, unknown>);
+  }
+  brainHistory(id: string, memoryId: string): Promise<{ history: MemoryHistoryEntry[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}/history`);
+  }
+  revertBrainMemory(id: string, memoryId: string, eventId: number): Promise<{ memory: Memory }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}/revert`, { eventId });
+  }
+  brainDuplicates(id: string): Promise<{ duplicates: Array<{ a: Memory; b: Memory; similarity: number; suggestedText: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/duplicates`);
+  }
+  mergeBrainMemories(id: string, keep: string, other: string, text: string): Promise<{ memory: Memory }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/merge`, { keep, other, text });
+  }
+  brainInjections(id: string, turn?: string): Promise<{ injections: unknown[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/injections${turn ? `?turn=${encodeURIComponent(turn)}` : ""}`);
+  }
+  listBrainMemories(id: string, includeArchived = false): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}`);
+  }
+
+  exportBrainMarkdown(id: string, md: string): Promise<{ file: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md });
+  }
+
   exportBrain(id: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
   }

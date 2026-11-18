@@ -1,6 +1,6 @@
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../../core/brain-extract.js";
 import { compileBrief, retrieve, type Hit, type RetrieveOpts } from "../../core/brain-index.js";
-import { Brain, CONFIDENCE_FLOOR } from "../../core/brain.js";
+import { Brain, CONFIDENCE_FLOOR, type MemoryBriefing } from "../../core/brain.js";
 import type { RenderedProjection } from "../../core/distill.js";
 import { buildBriefing, buildProjection, type ProjectionInput } from "../../core/projection.js";
 import type { EventJournal } from "../../core/eventlog.js";
@@ -112,7 +112,7 @@ export class RuntimeBriefings {
         .filter(Boolean).join("\n\n---\n") });
     }
     if (this.lifetime.signal.aborted) throw new Error("context runtime is closed");
-    return { memory, briefing: [mergeNote, buildBriefing(input), brief].filter(Boolean).join("\n\n"),
+    return { memory, briefing: [mergeNote, buildBriefing(input)].filter(Boolean).join("\n\n"),
       mode: rendered.mode, elapsedMs, bridges };
   }
 
@@ -221,6 +221,23 @@ export class RuntimeBriefings {
     return retrieve(this.host.brain, dense ? { ...opts, dense } : opts);
   }
 
+  async turnMemoryBrief(query: string, agent: string, chat: string, turn: number, pinsOnly = false, crew?: string): Promise<MemoryBriefing> {
+    const opts: RetrieveOpts = { query, agent, chat, crew, limit: 6, minConfidence: CONFIDENCE_FLOOR, explain: true };
+    const dense = await this.denseFor(query);
+    if (dense) opts.dense = dense;
+    const pool = this.host.teamBrain?.pool(this.host.brain.all());
+    const selected = pool ? retrieveTiered(pool, opts) : retrieve(this.host.brain, opts);
+    const hits = pinsOnly ? selected.filter(h => h.memory.pinned) : selected;
+    const brief = pool ? compileTieredBrief(hits as ReturnType<typeof retrieveTiered>) : compileBrief(hits.map(h => h.memory));
+    return { briefing: brief, record: () => {
+      this.host.noteMemoriesUsed(hits.map(h => h.memory.id));
+      this.host.log.append({ kind: "status", agentId: agent, chat, payload: { state: "memory_injection", turn,
+        memories: hits.map(h => ({ id: h.memory.id, text: h.memory.text, kind: h.memory.kind, score: h.score,
+          pinned: Boolean(h.memory.pinned), priority: h.memory.priority ?? 0,
+          detail: "detail" in h ? h.detail : undefined, reason: h.memory.pinned ? "pinned" : "relevance", scope: h.memory.scope })), briefing: brief } });
+    } };
+  }
+
   /** Vectors for one query, or null when the channel isn't available. */
   async denseFor(query: string): Promise<RetrieveOpts["dense"] | null> {
     const index = this.semantic;
@@ -296,9 +313,6 @@ export class RuntimeBriefings {
     ];
     const skills = this.host.activeSkillsBlock();
     if (skills) parts.push(skills);
-    // Retrieval scoped to the child's own task rather than the parent's thread.
-    const brief = this.brainBrief({ query: task, agent: childId, limit: 6 });
-    if (brief) parts.push(brief);
     return parts.filter(Boolean).join("\n\n");
   }
 
