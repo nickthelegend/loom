@@ -74,6 +74,7 @@ export function ApprovalCard(props: {
   tool: string;
   input: unknown;
   createdAt?: number;
+  expiresAt?: number;
   /** Set when the thread already carries the decision. */
   decided?: ApprovalOutcome;
   /** A label above the card — the project name in the cross-project list. */
@@ -180,6 +181,7 @@ export function ApprovalCard(props: {
         </View>
       </View>
 
+      {props.expiresAt && !outcome ? <Text style={{ color: T.dim }}>Auto-denies at {new Date(props.expiresAt).toLocaleTimeString()}</Text> : null}
       {headline ? (
         <Text
           style={{ color: T.text, fontSize: 13, fontFamily: T.mono, lineHeight: 19 }}
@@ -341,6 +343,7 @@ export function ApprovalEvent(props: {
         tool={String(p.tool ?? "tool")}
         input={p.input ?? ""}
         createdAt={props.e.ts}
+        expiresAt={typeof props.e.payload.expiresAt === "number" ? props.e.payload.expiresAt : undefined}
         sessionOption={p.sessionOption === true}
         {...(decided ? { decided } : {})}
         onDecided={props.onDecided}
@@ -460,6 +463,7 @@ export function ApprovalsSheet(props: {
             tool={a.tool}
             input={a.input}
             createdAt={a.createdAt}
+            expiresAt={a.expiresAt}
             sessionOption={a.sessionOption}
             {...(many ? { context: project.name } : {})}
             onDecided={() => props.onChanged?.()}

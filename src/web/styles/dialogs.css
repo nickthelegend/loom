@@ -1567,3 +1567,12 @@
   .trycallout{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in oklab,var(--primary) 35%,var(--border));background:color-mix(in oklab,var(--primary) 7%,transparent);font-size:12.5px;line-height:1.5}
   .trycallout .btn{flex:none}
   .dempty .trydemo{margin-top:4px}
+
+  .safety-modal{max-width:560px;max-height:90vh;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+  .safety-modal h2,.safety-modal p{margin:0}
+  .safety-modal p{font-size:12px;line-height:1.5;color:var(--muted-foreground)}
+  .safety-modal label{display:flex;flex-direction:column;gap:5px;font-size:12px}
+  .safety-modal textarea,.safety-modal input,.safety-modal select{padding:8px;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:6px;font:inherit}
+  .safety-actions{display:flex;gap:8px;justify-content:flex-end}
+  .safety-modal pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+  .cpermission-status{font-size:11px;color:var(--muted-foreground);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

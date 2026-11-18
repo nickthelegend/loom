@@ -321,7 +321,9 @@ import { openMenu } from './menus.js';
       '<button class="ctool devonly" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
       "</span>" +
       // What the chosen agent may do without asking. Drawn by drawPermChip().
-      '<button class="cperm devonly" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
+      '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
+      '<span class="cpermission-status" id="cpermission-status" role="status"></span>' +
+      '<button class="ctool" id="safety-open" type="button" aria-label="Project safety">Safety</button>' +
       // The chosen agent's context meter and usage limits (usage.js).
       '<span class="cctx devonly" id="cctx" style="display:none"></span>' +
       // MCPs and Skills live behind this rather than beside it: they are

@@ -1,3 +1,5 @@
+import { redactValue, redactText } from "../core/redact.js";
+import { safetyDecision } from "../core/safety.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -216,6 +218,7 @@ export class LoomDaemon {
       /** The chat the asking turn is in — a guest decides only its own chat's. */
       chat?: string;
       createdAt: number;
+      expiresAt: number;
       settle: (d: ApprovalDecision, by?: string) => void;
     }
   >();
@@ -241,19 +244,35 @@ export class LoomDaemon {
     if (req.signal?.aborted) return { behavior: "deny", message: "The agent stopped waiting." };
     const rt = await this.runtime(req.project).catch(() => null);
     if (!rt) return { behavior: "deny", message: "project not open" };
+    const safety = rt.safetyPolicy();
+    const hard = safetyDecision(req.tool, (req.input ?? {}) as Record<string, unknown>, rt.info.dir, safety);
+    if (hard.deny) {
+      rt.log.append({ kind: "status", agentId: req.agent, payload: { state: "safety_denied", tool: req.tool, reason: hard.deny } });
+      return { behavior: "deny", message: hard.deny };
+    }
+    if (hard.allow) {
+      rt.log.append({ kind: "approval", agentId: req.agent, payload: { phase: "decided", tool: req.tool, behavior: "allow", by: "project allow rule" } });
+      return { behavior: "allow" };
+    }
+    const expiresAt = Date.now() + safety.approvalTimeoutMin * 60_000;
     const id = crypto.randomBytes(6).toString("hex");
     const tool = req.tool.slice(0, 120);
-    const preview = (req.summary ?? JSON.stringify(req.input ?? {})).slice(0, 4000);
+    const preview = redactText(req.summary ?? JSON.stringify(redactValue(req.input ?? {}))).slice(0, 4000);
     const chat = rt.chatOf(req.agent);
     rt.log.append({
       kind: "approval",
       agentId: req.agent,
       ...(chat ? { chat } : {}),
-      payload: { phase: "requested", approvalId: id, tool, input: preview, ...(req.sessionOption ? { sessionOption: true } : {}) },
+      payload: { phase: "requested", approvalId: id, tool, input: preview, expiresAt, ...(req.sessionOption ? { sessionOption: true } : {}) },
     });
     return new Promise<ApprovalDecision>((resolve) => {
       const abandoned = () => settle({ behavior: "deny", message: "The agent stopped waiting." });
       const settle = (d: ApprovalDecision, by?: string) => {
+        if (d.behavior === "allow") {
+          const current = safetyDecision(req.tool, (req.input ?? {}) as Record<string, unknown>, rt.info.dir, rt.safetyPolicy());
+          if (Date.now() >= expiresAt) d = { behavior: "deny", message: `No answer within ${safety.approvalTimeoutMin} minutes — denied.` };
+          else if (current.deny) d = { behavior: "deny", message: current.deny };
+        }
         clearTimeout(timer);
         req.signal?.removeEventListener("abort", abandoned);
         if (!this.approvals.delete(id)) return;
@@ -266,15 +285,16 @@ export class LoomDaemon {
         resolve(d);
       };
       const timer = setTimeout(
-        () => settle({ behavior: "deny", message: "No answer within 30 minutes — denied." }),
-        30 * 60_000,
+        () => settle({ behavior: "deny", message: `No answer within ${safety.approvalTimeoutMin} minutes — denied.` }),
+        Math.max(0, expiresAt - Date.now()),
       );
       this.approvals.set(id, {
         id,
         projectId: req.project,
         agent: req.agent,
         tool,
-        input: req.input ?? {},
+        input: redactValue(req.input ?? {}),
+        expiresAt,
         ...(req.sessionOption ? { sessionOption: true } : {}),
         ...(chat ? { chat } : {}),
         createdAt: Date.now(),
@@ -282,6 +302,7 @@ export class LoomDaemon {
       });
       // An agent whose turn ended has stopped waiting; don't hold the card open.
       req.signal?.addEventListener("abort", abandoned, { once: true });
+      if (req.signal?.aborted) abandoned();
     });
   }
 
@@ -622,7 +643,7 @@ export class LoomDaemon {
     app.get("/api/audit", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can read the audit trail" });
       const since = Number(req.query.since) || Date.now() - 7 * 86_400_000;
-      void auditTrail(since, this.runtimes).then((entries) => res.json({ entries })).catch((e) => res.status(500).json({ error: (e as Error).message }));
+      void auditTrail(since, this.runtimes, 500, req.query.risky === "true").then((entries) => res.json({ entries })).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
     registerReviewRoutes(app, withRuntime);
     registerCouncilRoutes(app, withRuntime);

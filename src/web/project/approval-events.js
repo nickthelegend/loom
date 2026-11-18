@@ -29,7 +29,7 @@ export function createApprovalEvents(view) {
       if (p.phase === "requested") {
         var list = state.approvals.list;
         if (list.some(function(a){ return a.id === p.approvalId; })) return;
-        list.push({ id: p.approvalId, projectId: view.pid, agent: ev.agentId, tool: p.tool, input: p.input, createdAt: ev.ts, chat: ev.chat || "main" });
+        list.push({ id: p.approvalId, projectId: view.pid, agent: ev.agentId, tool: p.tool, input: p.input, createdAt: ev.ts, expiresAt: p.expiresAt, sessionOption: p.sessionOption, chat: ev.chat || "main" });
         drawApBadge();
         // In this thread the card is right there; anywhere else, say so.
         var here = (ev.chat || "main") === view.chatId && (!view.desktop || state.tab === "thread");

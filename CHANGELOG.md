@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Project tool rules (#427).** Extends Auto's existing allow globs with explicit allow/deny tool patterns, deny precedence in every mode, owner/device safety settings, `loom safety`, and web/phone editors. Adapters that cannot intercept tools refuse hard policies.
+- **Secret checks before Git writes (#427).** Extends the existing review scanner to Loom's manual and automatic commits and pushes, including outgoing history. Blocks detected credentials with operation-scoped owner/device overrides in API, CLI, web and phone.
+- **Protected project paths (#427).** Relative glob rules prevent agent edits, including symlink and hard-link aliases. Protected-path policies refuse shell and opaque tools that cannot guarantee path protection.
+- **Project approval deadlines (#427).** Makes the existing 30-minute auto-deny configurable through safety settings and displays expiry on web and phone approval cards; late answers cannot release expired calls.
+- **Visible permission and sandbox status (#427).** Extends existing composer chips with effective sandbox labels, including explicit Codex sandbox overrides, and makes the web indicator visible outside Developer mode; phone shows the same status.
+- **Shell command denylist (#427).** Project command patterns block intercepted shell calls before execution, even in Bypass or with allow rules. The safety editors expose the denylist alongside protected paths.
+- **Credential redaction (#427).** Extends diagnostic-only redaction to persisted transcripts, historical reads, approval previews, live streams and transcript exports; streaming credentials are held across chunk boundaries.
+- **Project permission presets (#427).** Strict, normal and trusting presets apply permission modes and approval deadlines together, with strict protected paths, team-policy checks and refusal to change policy during active work.
+- **Risky activity audit (#427).** Extends the existing owner-only audit with `loom audit --risky`, risky tool calls, safety denials, approvals and secret overrides; project safety screens can display the report.
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

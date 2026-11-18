@@ -23,6 +23,7 @@
  * commit", "please tell me who you are").
  */
 
+import { SecretScanError } from "./git-safety.js";
 import { execFile } from "./process.js";
 import path from "node:path";
 import { logbook } from "./logbook.js";
@@ -42,6 +43,7 @@ function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
+        if (err instanceof SecretScanError) { reject(err); return; }
         const detail = String(stderr || err.message).trim();
         // git's own words beat ours: "nothing to commit, working tree clean" is
         // a better message than anything we'd write about exit code 1.
@@ -287,6 +289,7 @@ function gitNet(args: string[], cwd: string, timeoutMs = 45_000): Promise<string
       { cwd, maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout, stderr) => {
         if (err) {
+        if (err instanceof SecretScanError) { reject(err); return; }
           const detail = String(stderr || (err as Error).message).trim();
           const killed = (err as { killed?: boolean }).killed;
           reject(

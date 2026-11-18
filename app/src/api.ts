@@ -53,6 +53,7 @@ export interface DaemonReachability {
 }
 
 export interface AgentStatus {
+  permissionIndicator?: string;
   id: string;
   kind: string;
   role: string;
@@ -1087,10 +1088,10 @@ export const deleteChat = (c: Creds, id: string, chat: string) =>
 /** Stage these paths, commit them, and (optionally) push — the desktop's Source control. */
 export const gitStage = (c: Creds, id: string, paths: string[]) =>
   api<unknown>(c, `/api/projects/${id}/git/stage`, { method: "POST", body: JSON.stringify({ paths }) });
-export const gitCommit = (c: Creds, id: string, message: string) =>
-  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message }) });
-export const gitPush = (c: Creds, id: string) =>
-  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: "{}" });
+export const gitCommit = (c: Creds, id: string, message: string, overrideSecrets = false) =>
+  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message, overrideSecrets }) });
+export const gitPush = (c: Creds, id: string, overrideSecrets = false) =>
+  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: JSON.stringify({ overrideSecrets }) });
 
 /** Save a picture to the project (.loom/attachments) for a message to point at. */
 export const uploadAttachment = (c: Creds, id: string, name: string, dataUrl: string) =>
@@ -1633,6 +1634,7 @@ export const setAgentPermissions = (c: Creds, id: string, agentId: string, permi
 
 /** A tool call waiting on a human. `input` is the raw tool input (object) from GET. */
 export interface Approval {
+  expiresAt?: number;
   id: string;
   agent: string;
   tool: string;

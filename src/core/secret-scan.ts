@@ -6,7 +6,7 @@
 
 /** Text that looks like a secret, and how to say it. */
 export const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\b(sk|rk|pk)_(live|test)_[0-9a-zA-Z]{16,}|\bsk-[A-Za-z0-9_-]{20,}|\bgh[pousr]_[A-Za-z0-9]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}/, "what looks like a secret key"],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\b(sk|rk|pk)_(live|test)_[0-9a-zA-Z]{16,}|\bsk-[A-Za-z0-9_-]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bgh[pousr]_[A-Za-z0-9]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}/, "what looks like a secret key"],
   [/\b(password|passwd|secret|api[_-]?key|token)\b\s*[:=]\s*["'][^"'\s]{6,}["']/i, "a hard-coded credential"],
 ];
 

@@ -1,3 +1,4 @@
+import { openSafety } from '../safety.js';
 import { devMode } from '../mode.js';
 import { forecastChip,usageMeter } from '../usage.js';
 import { agentGlyph,agentLabel,agentSub,labelOf } from '../agents.js';
@@ -941,6 +942,8 @@ export function createComposer(view) {
       });
       var osend = document.getElementById("orchsend");
       if (osend) osend.onclick = view.sendOrchestra;
+      var safety = document.getElementById("safety-open");
+      if (safety) safety.onclick = function(){ openSafety(view.pid); };
       var pc = document.getElementById("cperm");
       if (pc) pc.onclick = function(){
         if (view.menuState && view.menuState.kind === "permmenu") { closeMenu(); return; }
@@ -1153,16 +1156,23 @@ export function createComposer(view) {
     /** The chip beside the agent picker: the chosen agent's mode, in its state colour. */
     function drawPermChip(cur){
       var pc = document.getElementById("cperm"); if (!pc) return;
-      // Nothing to set for the router (AUTO picks per hop), a bridge (it runs
-      // in its own window, under its own rules), or in Orchestrate, whose
-      // cast wears its modes on the chips instead.
-      if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") { pc.style.display = "none"; return; }
+      var indicator = document.getElementById("cpermission-status");
+      // When routing picks the agent later, say whose permissions apply instead
+      // of presenting one mode as if it governed the entire team.
+      if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") {
+        var label = state.cmode === "orch" ? "Team · per-agent permissions" : state.auto ? "Auto routing · per-agent permissions" : cur && cur.tier === "bridge" ? "External agent · unmanaged permissions" : "No agent selected";
+        pc.style.display = "none";
+        if (indicator) { indicator.textContent = label; indicator.title = label; }
+        return;
+      }
       var mode = permOf(cur), cell = permProfile(cur.kind).modes[mode] || {};
+      var detail = cur.permissionIndicator || (mode === "bypass" ? "Bypass · no approvals" : (PERM_SHORT[mode] || mode) + " · tool permissions");
+      if (indicator) { indicator.textContent = detail.includes(" · ") ? detail.split(" · ").slice(1).join(" · ") : detail; indicator.title = detail; }
       pc.style.display = "";
-      pc.className = "cperm devonly " + mode;
+      pc.className = "cperm " + mode;
       pc.setAttribute("data-mode", mode);
-      pc.title = "permissions \u00b7 " + (cell.label || PERM_NAMES[mode]) + " \u2014 click to change";
-      pc.setAttribute("aria-label", "permissions: " + (PERM_NAMES[mode] || mode));
+      pc.title = (cur.permissionIndicator || "permissions") + " \u00b7 " + (cell.label || PERM_NAMES[mode]) + " \u2014 click to change";
+      pc.setAttribute("aria-label", "permissions: " + (cur.permissionIndicator || PERM_NAMES[mode] || mode));
       pc.innerHTML = ICONS.shield + '<span class="cpl">' + esc(PERM_SHORT[mode] || mode) + '</span><span class="cchev">' + ICONS.chevron + "</span>";
     }
 

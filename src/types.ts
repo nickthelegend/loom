@@ -649,6 +649,7 @@ export function isAdapter(a: AnyAgent): a is Adapter {
 // ---------------------------------------------------------------------------
 
 export interface AgentStatus {
+  permissionIndicator?: string;
   capabilities: { steer: boolean };
   id: string;
   kind: string;

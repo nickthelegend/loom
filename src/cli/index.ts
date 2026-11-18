@@ -1041,16 +1041,47 @@ program
   });
 
 program
+  .command("safety")
+  .description("show or set this project's safety policy (JSON file or preset)")
+  .option("--preset <name>", "strict, normal or trusting")
+  .option("--file <path>", "policy JSON: allow, deny, protectedPaths, shellDeny, approvalTimeoutMin")
+  .action(async (opts: { preset?: string; file?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const body = opts.file ? JSON.parse(fs.readFileSync(opts.file, "utf8")) : opts.preset ? { preset: opts.preset } : undefined;
+    console.log(JSON.stringify(await client.safety(project.id, body), null, 2));
+  });
+
+program
+  .command("git:commit <message>")
+  .description("commit staged changes after scanning for secrets")
+  .option("--override-secrets", "explicitly allow detected secrets for this operation")
+  .action(async (message: string, opts: { overrideSecrets?: boolean }) => {
+    const client = await ensureDaemon(); const project = await currentProject(client);
+    console.log(JSON.stringify(await client.safeGit(project.id, "commit", { message, overrideSecrets: !!opts.overrideSecrets })));
+  });
+
+program
+  .command("git:push")
+  .description("push local commits after scanning their diffs for secrets")
+  .option("--override-secrets", "explicitly allow detected secrets for this operation")
+  .action(async (opts: { overrideSecrets?: boolean }) => {
+    const client = await ensureDaemon(); const project = await currentProject(client);
+    console.log(JSON.stringify(await client.safeGit(project.id, "push", { overrideSecrets: !!opts.overrideSecrets })));
+  });
+
+program
   .command("audit")
+  .option("--risky", "only risky tool calls, approvals, safety denials and secret overrides")
   .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
   .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")
   .option("--json", "print as JSON")
-  .action(async (opts: { since: string; json?: boolean }) => {
+  .action(async (opts: { since: string; json?: boolean; risky?: boolean }) => {
     const m = /^(\d+)\s*(h|d)$/i.exec(opts.since.trim());
     if (!m) fail("--since is like 24h or 7d");
     const since = Date.now() - Number(m[1]) * (m[2]!.toLowerCase() === "h" ? 3_600_000 : 86_400_000);
     const client = await ensureDaemon();
-    const { entries } = await client.audit(since);
+    const { entries } = await client.audit(since, opts.risky);
     if (opts.json) return void console.log(JSON.stringify(entries));
     if (!entries.length) return void console.log(pc.dim(`nothing to report since ${new Date(since).toLocaleString()}`));
     for (const e of entries) {

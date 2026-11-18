@@ -1,3 +1,5 @@
+import { RedactedStream } from "../core/redact.js";
+import { readSafety, writeSafety, parseSafety, presetMode, hasSafetyRules, SAFETY_PRESETS, type SafetyPolicy } from "../core/safety.js";
 import { writeLoomMcpSession } from "../core/loom-tools.js";
 import { createHash } from "node:crypto";
 import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
@@ -43,7 +45,7 @@ const SIGNED_OUT = /\b(?:not signed in|not logged in|please (?:run )?\S*\s*\/?lo
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { NightShift } from "./shift.js";
-import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
+import { isPermissionMode, permissionFor, permissionIndicator, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
   PromptQueue,
@@ -231,7 +233,7 @@ export class ProjectRuntime {
   private streamListeners = new Set<(f: LiveText) => void>();
   private liveListeners = new Set<(d: LiveFrame) => void>();
   /** Streamed text and tool progress from provider agents, coalesced for clients. Not persisted. */
-  private readonly live = new LiveDeltaThrottle((d) => { for (const cb of this.liveListeners) cb(d); });
+  private readonly live = new LiveDeltaThrottle((d) => { for (const cb of this.liveListeners) cb(d); }, 50, true);
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -1295,6 +1297,7 @@ export class ProjectRuntime {
         this.turns.busySince.delete(agent.id);
       }
       if (turnOver) this.openQuestions.delete(agent.id);
+      if (e.kind === "message" || turnOver) this.finishLiveText(agent.id);
       if (keepsPartial) {
         if (e.kind === "message" && !p.reasoning) typed = "";
         if (turnOver && typed.trim()) {
@@ -1458,6 +1461,45 @@ export class ProjectRuntime {
     if (cfg.enabled !== false) this.spawnAgent(cfg);
     this.saveConfig();
     return cfg;
+  }
+
+  private permissionState(cfg: AgentConfig): { permissions: PermissionMode; permissionIndicator: string } {
+    try {
+      const options = this.policyOptions(cfg);
+      return { permissions: permissionFor(cfg.kind, options), permissionIndicator: permissionIndicator(cfg.kind, options) };
+    } catch {
+      return { permissions: permissionFor(cfg.kind, cfg.options), permissionIndicator: "Blocked by project safety" };
+    }
+  }
+
+  safetyPolicy(): SafetyPolicy {
+    return readSafety(this.info.id) ?? { ...structuredClone(SAFETY_PRESETS.normal), allow: [...(this.config.permissions?.allow ?? [])].filter(p => typeof p === "string") };
+  }
+
+  setSafetyPolicy(value: unknown): SafetyPolicy {
+    const policy = parseSafety(value);
+    const mode = presetMode[policy.preset];
+    if (this.orchestra.active() || this.crews.list().some(c => c.state.goal && !["completed", "failed", "stopped"].includes(c.state.goal.status))) throw new Error("Wait for active orchestra and crew goals to finish before changing safety policy.");
+    for (const cfg of this.config.agents.filter(a => a.enabled !== false)) {
+      const live = this.agents.get(cfg.id);
+      if (live && isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id))) throw new Error("Wait for active turns to finish before changing safety policy.");
+      const effective = this.teamPolicy ? capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, cappedPermission(this.teamPolicy, mode, false)) : mode;
+      const why = unsupportedReason(cfg.kind, effective);
+      if (why) throw new Error(why);
+      if (hasSafetyRules(policy) && !["model", "claude-code", "echo"].includes(cfg.kind)) throw new Error(`${cfg.kind} cannot enforce hard safety rules; disable it before enabling this policy.`);
+    }
+    if (this.teamPolicy && cappedPermission(this.teamPolicy, mode, true) !== mode) throw new Error("This preset exceeds the team permission ceiling.");
+    writeSafety(this.info.id, policy);
+    for (const cfg of this.config.agents) {
+      const { permissionMode: _nativeMode, sandbox: _sandbox, ...options } = cfg.options ?? {};
+      cfg.options = { ...options, permissions: mode };
+      const live = this.agents.get(cfg.id);
+      if (live) void this.agentLifecycle.retire(cfg.id);
+      if (cfg.enabled !== false) this.spawnAgent(cfg);
+    }
+    this.saveConfig();
+    this.log.append({ kind: "status", payload: { state: "safety_updated", preset: policy.preset } });
+    return policy;
   }
 
   /** Keep deferred file edits when an unrelated setting is saved through the UI. */
@@ -2873,24 +2915,39 @@ export class ProjectRuntime {
     const out: { agentId: string; chat: string; text: string; think: string }[] = [];
     for (const [agentId, s] of this.liveSoFar) {
       if (chat !== undefined && s.chat !== chat) continue;
-      if (s.text || s.think) out.push({ agentId, ...s });
+      if (s.text || s.think) out.push({ agentId, chat: s.chat, text: s.text, think: s.think });
     }
     return out;
   }
 
-  private liveSoFar = new Map<string, { chat: string; text: string; think: string }>();
+  private liveSoFar = new Map<string, { chat: string; text: string; think: string; textStream: RedactedStream; thinkStream: RedactedStream }>();
+
+  private finishLiveText(agentId: string): void {
+    const s = this.liveSoFar.get(agentId);
+    if (!s) return;
+    this.live.finish(agentId, s.chat);
+    for (const reasoning of [false, true]) {
+      const text = (reasoning ? s.thinkStream : s.textStream).finish();
+      if (!text) continue;
+      const off = reasoning ? s.think.length : s.text.length;
+      if (reasoning) s.think += text; else s.text += text;
+      for (const cb of this.streamListeners) { try { cb({ agentId, chat: s.chat, text, reasoning, off }); } catch { /* a viewer cannot break a turn */ } }
+    }
+  }
 
   private liveText(f: LiveText): void {
     if (this.closed) return;
     let s = this.liveSoFar.get(f.agentId);
-    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "" }));
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "", textStream: new RedactedStream(), thinkStream: new RedactedStream() }));
+    const text = (f.reasoning ? s.thinkStream : s.textStream).push(f.text);
+    if (!text) return;
     const off = f.reasoning ? s.think.length : s.text.length;
-    if (f.reasoning) s.think += f.text;
-    else s.text += f.text;
+    if (f.reasoning) s.think += text;
+    else s.text += text;
     // a runaway reply can't grow the buffer without bound
     if (s.text.length > 400_000) s.text = "";
     if (s.think.length > 400_000) s.think = "";
-    const framed: LiveText = { ...f, off };
+    const framed: LiveText = { ...f, text, off };
     for (const cb of this.streamListeners) {
       try {
         cb(framed);
@@ -3848,7 +3905,7 @@ export class ProjectRuntime {
             holdsBaton: false,
             model,
             ...account,
-            permissions: permissionFor(cfg.kind, cfg.options),
+            ...this.permissionState(cfg),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             ...sampling(cfg),
             ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
@@ -3877,7 +3934,7 @@ export class ProjectRuntime {
           ...(cfg.kind === "model" && !cfg.options?.write ? { readOnly: true } : {}),
           model,
           ...account,
-          permissions: permissionFor(cfg.kind, cfg.options),
+          ...this.permissionState(cfg),
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
           ...sampling(cfg),
@@ -3967,7 +4024,7 @@ export class ProjectRuntime {
         role: cfg.role,
         busy: Boolean(live && isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id))),
         since: this.turns.busySince.get(cfg.id) ?? null,
-        permissions: permissionFor(cfg.kind, cfg.options),
+        ...this.permissionState(cfg),
         holdsBaton: this.validHolder() === cfg.id,
         chat: chat ?? last?.chat ?? null,
         chatTitle: chats.get(chat ?? last?.chat ?? "") ?? null,
@@ -4042,14 +4099,20 @@ export class ProjectRuntime {
     const test = this.config.proof?.testCommand ?? detectTestCommand(dir);
     return {
       projectDir: dir,
+      safety: this.safetyPolicy(),
       readPaths: (this.config.readPaths ?? []).filter((p) => typeof p === "string" && p.trim()).map((p) => path.resolve(dir, p)),
       // the project's own test command always runs: an agent has to be able to check its work
-      allow: [...(this.config.permissions?.allow ?? []).filter((a) => typeof a === "string"), ...(test ? [test] : [])],
+      allow: [...this.safetyPolicy().allow, ...(test ? [test] : [])],
     };
   }
 
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
     const opts: Record<string, unknown> = { ...(resolveAgentAccount(cfg).options ?? {}) };
+    const safety = readSafety(this.info.id);
+    if (safety) {
+      if (hasSafetyRules(safety) && !["model", "claude-code", "echo"].includes(cfg.kind)) throw new Error(`${cfg.kind} cannot enforce this project's safety rules.`);
+      if (!opts.permissions) opts.permissions = presetMode[safety.preset];
+    }
     if (this.runnerMode) {
       // A runner is its own trust tier (D70): agents bypass inside the sandbox,
       // capped by the team's runners.permissions rather than the laptop ceiling.
