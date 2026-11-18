@@ -122,6 +122,7 @@ beforeAll(async () => {
     "0011_github_only.sql",
     "0012_hardening.sql",
     "0013_chat_move.sql",
+    "0014_zones_and_confirmations.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
