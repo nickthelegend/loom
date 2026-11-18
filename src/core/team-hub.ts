@@ -155,7 +155,11 @@ export interface TeamMemoryIn {
   supersedes?: string;
 }
 
+export interface TeamInvite { id: string; createdBy: string; expiresAt: number }
+export interface TeamFleet { name: string; author: string; sealed: Sealed; updatedAt: number }
+
 export type FeedType =
+  | "mention"
   | "crew_request"
   | "crew_request_answered"
   | "member_joined"
@@ -289,6 +293,10 @@ export interface HubClient {
   createTeam(name: string): Promise<Team>;
   teams(): Promise<Array<Team & { role: TeamRole }>>;
   registerDevice(input: { label: string; sealPub: string; signPub: string }): Promise<HubDevice>;
+  listInvites(teamId: string): Promise<TeamInvite[]>;
+  revokeInvite(teamId: string, id: string): Promise<boolean>;
+  teamFleets(teamId: string): Promise<TeamFleet[]>;
+  putTeamFleet(teamId: string, name: string, sealed: Sealed | null): Promise<void>;
   createInvite(teamId: string, ttlMs?: number): Promise<{ invite: string; expiresAt: number }>;
   redeemInvite(invite: string): Promise<{ team: Team; role: TeamRole }>;
   members(teamId: string): Promise<MemberView[]>;
@@ -401,6 +409,7 @@ export class MemoryHub {
   private teamsById = new Map<string, Team>();
   private memberships = new Map<string, Map<string, Membership>>(); // team → user → membership
   private devices = new Map<string, HubDevice>();
+  private fleetsByTeam = new Map<string, TeamFleet[]>();
   private invites = new Map<string, { teamId: string; createdBy: string; expiresAt: number; usedBy?: string }>();
   private envelopes = new Map<string, Array<{ version: number; box: string }>>(); // `${team}/${device}`
   private reposByTeam = new Map<string, Set<string>>();
@@ -505,6 +514,34 @@ export class MemoryHub {
     const d = this.devices.get(deviceId);
     if (!d || d.userId !== userId) throw new HubError("that device isn't yours", 403);
     return d;
+  }
+
+  listInvites(userId: string, teamId: string): TeamInvite[] {
+    this.requireRole(teamId, userId, "member");
+    return [...this.invites].filter(([, i]) => i.teamId === teamId && !i.usedBy && i.expiresAt > this.now()
+      && (i.createdBy === userId || this.role(teamId, userId) === "owner"))
+      .map(([token, i]) => ({ id: crypto.createHash("sha256").update(token).digest("hex"), createdBy: i.createdBy, expiresAt: i.expiresAt }));
+  }
+
+  revokeInvite(userId: string, teamId: string, id: string): boolean {
+    if (!this.listInvites(userId, teamId).some(i => i.id === id)) return false;
+    for (const [token] of this.invites) if (crypto.createHash("sha256").update(token).digest("hex") === id) return this.invites.delete(token);
+    return false;
+  }
+
+  teamFleets(userId: string, teamId: string): TeamFleet[] {
+    this.requireRole(teamId, userId, "viewer");
+    return structuredClone(this.fleetsByTeam.get(teamId) ?? []);
+  }
+
+  putTeamFleet(userId: string, teamId: string, name: string, sealed: Sealed | null): void {
+    this.requireRole(teamId, userId, "member");
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) throw new HubError("invalid fleet name", 400);
+    if (sealed !== null && (!sealed || typeof sealed.c !== "string" || !sealed.c || !Number.isInteger(sealed.v) || sealed.v < 1 || JSON.stringify(sealed).length > 16000)) throw new HubError("fleet must be sealed and bounded", 400);
+    const rows = this.fleetsByTeam.get(teamId) ?? [];
+    const old = rows.find(f => f.name === name);
+    if (old && old.author !== userId && this.role(teamId, userId) !== "owner") throw new HubError("only the author or team owner may change this fleet", 403);
+    this.fleetsByTeam.set(teamId, [...rows.filter(f => f.name !== name), ...(sealed ? [{ name, author: old?.author ?? userId, sealed: structuredClone(sealed), updatedAt: this.now() }] : [])]);
   }
 
   createInvite(userId: string, teamId: string, ttlMs?: number | null): { invite: string; expiresAt: number } {
@@ -1061,6 +1098,11 @@ export class MemoryHub {
   appendFeed(userId: string, teamId: string, e: FeedIn): FeedEvent | null {
     this.requireRole(teamId, userId, "member");
     if (e.deviceId) this.device(e.deviceId, userId);
+    if (e.type === "mention") {
+      if (!e.repo || !this.reposByTeam.get(teamId)?.has(normalizeRepo(e.repo))) throw new HubError("mention repo is not shared", 403);
+      if (!this.members(userId, teamId).some(m => m.user.github === e.meta.to)) throw new HubError("mention recipient is not a teammate", 400);
+      if (!e.sealed || typeof e.sealed.c !== "string" || !e.sealed.c || !Number.isInteger(e.sealed.v) || e.sealed.v < 1 || JSON.stringify(e.sealed).length > 16000) throw new HubError("mention must be sealed and bounded", 400);
+    }
     if (e.type === "crew_request" || e.type === "crew_request_answered") {
       const id = e.meta.requestId;
       if (typeof id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new HubError("invalid crew request id", 400);
@@ -1073,7 +1115,7 @@ export class MemoryHub {
         for (const field of ["crew", "teammate"] as const) if (typeof e.meta[field] !== "string" || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(String(e.meta[field]))) throw new HubError(`invalid ${field}`, 400);
         const expiry = Number(e.meta.expiresAt);
         if (!Number.isFinite(expiry) || expiry <= this.now() || expiry > this.now() + 7 * 86400000) throw new HubError("crew request expiry must be within seven days", 400);
-        if (!e.sealed || JSON.stringify(e.sealed).length > 16000) throw new HubError("crew request text must be sealed and bounded", 400);
+        if (!e.sealed || typeof e.sealed.c !== "string" || !e.sealed.c || !Number.isInteger(e.sealed.v) || e.sealed.v < 1 || JSON.stringify(e.sealed).length > 16000) throw new HubError("crew request text must be sealed and bounded", 400);
         if (request && (request.userId !== userId || JSON.stringify(request.meta) !== JSON.stringify(e.meta) || JSON.stringify(request.sealed) !== JSON.stringify(e.sealed)))
           throw new HubError("crew request id already belongs to another request", 409);
       } else {
@@ -1165,6 +1207,10 @@ class MemoryHubClient implements HubClient {
   registerDevice(input: { label: string; sealPub: string; signPub: string }) {
     return this.run(() => this.hub.registerDevice(this.userId, input));
   }
+  listInvites(teamId: string) { return this.run(() => this.hub.listInvites(this.userId, teamId)); }
+  revokeInvite(teamId: string, id: string) { return this.run(() => this.hub.revokeInvite(this.userId, teamId, id)); }
+  teamFleets(teamId: string) { return this.run(() => this.hub.teamFleets(this.userId, teamId)); }
+  putTeamFleet(teamId: string, name: string, sealed: Sealed | null) { return this.run(() => this.hub.putTeamFleet(this.userId, teamId, name, sealed)); }
   createInvite(teamId: string, ttlMs?: number) {
     return this.run(() => this.hub.createInvite(this.userId, teamId, ttlMs));
   }

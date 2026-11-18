@@ -1,3 +1,4 @@
+import { ProjectSharing, TeammateMentions } from "./sharing";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -413,6 +414,7 @@ function ProjectCard(props: { p: Project; onPress: () => void }) {
           <Text numberOfLines={1} style={{ color: T.text, fontWeight: "600", fontSize: 15, flexShrink: 1 }}>
             {p.name}
           </Text>
+          {!!p.presence?.length && <Text accessibilityLabel={p.presence.map(person => person.name).join(", ") + " present"} style={{ color: T.ok, fontSize: 12 }}>● {p.presence.length}</Text>}
           {p.needsInput ? (
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.warn }} />
           ) : working ? (
@@ -811,7 +813,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
+type Tab = "sharing" | "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -820,6 +822,7 @@ type Tab = "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory
  */
 const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "thread", label: "Thread" },
+  { key: "sharing", label: "Sharing" },
   { key: "orchestra", label: "Orchestra", accent: T.thread },
   { key: "crew", label: "Crew", accent: T.shuttle },
   { key: "observatory", label: "Observatory", accent: T.primary },
@@ -2022,6 +2025,7 @@ export function ProjectScreen(props: {
               ) : null;
             })()}
             <AttachBar items={attach.items} onRemove={attach.remove} />
+            <TeammateMentions creds={creds} projectId={project.id} text={text} onChange={setText} />
             <View
               style={{
                 flexDirection: "row",
@@ -2140,6 +2144,8 @@ export function ProjectScreen(props: {
             setTab("thread");
           }}
         />
+      ) : tab === "sharing" ? (
+        <ProjectSharing creds={creds} projectId={project.id} chat={chatId} />
       ) : tab === "orchestra" ? (
         <OrchestraView
           creds={creds}

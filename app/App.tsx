@@ -23,6 +23,7 @@ import { FleetScreen } from "./src/fleet";
 import { enablePush, onApprovalAction, onNotificationOpen, registerApprovalActions } from "./src/push";
 import { BoardScreen, PairScreen, ProjectScreen, unpair } from "./src/screens";
 import { loadAuthSkipped, recordAppOpen, setAuthSkipped, useAuth } from "./src/supabase";
+import { isTeamMention } from "./src/sharing-model";
 import { notificationRoute, type NotificationRoute } from "./src/team-runners-model";
 import { T, THEME_KEY, onThemePref, scheme, setScheme, type ThemePref } from "./src/theme";
 import { WelcomeScreen } from "./src/welcome";
@@ -48,6 +49,7 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const auth = useAuth();
   // A tapped push notification, waiting for credentials to open its project.
+  const [openingTeam, setOpeningTeam] = useState(false);
   const [opening, setOpening] = useState<NotificationRoute | null>(null);
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export default function App() {
   useEffect(
     () =>
       onNotificationOpen((data) => {
+        if (isTeamMention(data)) { setOpeningTeam(true); return; }
         const r = notificationRoute(data);
         if (r) setOpening(r);
       }),
@@ -105,6 +108,10 @@ export default function App() {
       )
       .catch(() => {}); // a project this pairing can't see (or one since removed): stay put
   }, [opening, creds]);
+
+  useEffect(() => {
+    if (openingTeam && creds) { setOpeningTeam(false); setRoute({ name: "fleet", focus: "team" }); }
+  }, [openingTeam, creds]);
 
   // A revoked/expired token anywhere sends us back to the pair screen.
   useEffect(() => {

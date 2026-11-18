@@ -181,6 +181,11 @@ export class AuthManager {
     }));
   }
 
+  approvalDevices(projectId: string): Array<{ id: string; name: string; owner: boolean }> {
+    return this.config.clients.filter(c => !c.projects?.length || c.projects.includes(projectId))
+      .map(c => ({ id: c.id, name: c.name, owner: !c.projects?.length && !c.guest }));
+  }
+
   /**
    * The projects this token may touch: null = unrestricted (admin, or a client
    * paired without scope), otherwise the allow-list.

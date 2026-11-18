@@ -434,14 +434,21 @@ export function createComposer(view) {
 
     function openFileMenu(q, at){
       view.menuState = { kind: "file", at: at, sel: 0, items: [] };
-      api("/api/projects/" + view.pid + "/find?q=" + encodeURIComponent(q))
-        .then(function(j){
+      var request = view.menuState;
+      Promise.all([api("/api/projects/" + view.pid + "/find?q=" + encodeURIComponent(q)),
+        api("/api/projects/" + view.pid + "/teammates").catch(function(){ return { teammates: [] }; })])
+        .then(function(results){
+          var j = results[0];
+          if (view.menuState !== request) return;
           if (!view.menuState || view.menuState.kind !== "file") return;
           var items = (j.matches || []).slice(0, 40).map(function(pth){
             var base = pth.split("/").pop();
             return { label: base, sub: pth, value: "@" + pth, icon: ICONS.file };
           });
-          renderMenu(items, j.recent ? "recent files" : "files");
+          var people = results[1].teammates.filter(function(p){ return p.github.toLowerCase().indexOf(q.toLowerCase()) >= 0; }).slice(0, 10).map(function(p){
+            return { label: "@" + p.github, sub: "Notify teammate · " + p.name, value: "@" + p.github, icon: ICONS.team };
+          });
+          renderMenu(people.concat(items), people.length ? "teammates and files" : j.recent ? "recent files" : "files");
         })
         .catch(function(){ closeMenu(); });
     }
@@ -1267,7 +1274,7 @@ export function createComposer(view) {
       if (state.cmode === "orch") return view.planState
         ? "Describe the goal \u2014 the orchestrator writes PLAN.md and a spec per task, changing no code\u2026"
         : "Describe the goal \u2014 the orchestrator splits it into tasks and runs them in parallel\u2026";
-      return view.planState ? "What should be planned? The agent writes it to plans/ and changes no code\u2026" : "Message\u2026  @ for files, / for actions";
+      return view.planState ? "What should be planned? The agent writes it to plans/ and changes no code\u2026" : "Message\u2026  @ for teammates or files, / for actions";
     }
 
     function loadPrompts(){

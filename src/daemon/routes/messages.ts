@@ -1,11 +1,13 @@
+import { logbook } from "../../core/logbook.js";
 import { quoteMessage } from "../../core/chat-composer.js";
 import type { Express } from 'express';
 import { recordRecent } from "../../core/prompts.js";
+import type { TeamLink } from "../team.js";
 import type { WithRuntime } from './context.js';
 import { ContinuityError, Id, Text, parseBounded } from "../../core/continuity/contracts.js";
 import { z } from "zod";
 /** Register messages routes in the order established by LoomDaemon.routes(). */
-export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): void {
+export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime, team?: TeamLink): void {
 
   // { messages: LoomEvent[] }, oldest first, last 1–1000 message events in this chat.
   app.get("/api/projects/:id/chats/:chat/messages", withRuntime(async (rt, req, res) => {
@@ -125,6 +127,8 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
         if (!(error instanceof ContinuityError)) throw error;
         res.status(error.code === "invalid" ? 400 : error.code === "unsupported" ? 422 : 409).json({ error: error.message, code: error.code }); return;
       }
+      // Delivery failure must not turn an accepted chat message into a retry.
+      if (!guest) await team?.mention(rt, chat || "main", text).catch(e => logbook.warn("team", "couldn’t deliver chat mentions", String(e)));
       recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
       res.json(result);
     }),
