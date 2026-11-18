@@ -89,6 +89,7 @@ export class ConversationStore {
     state.chats = (state.chats ?? []).filter((c) => c.id !== id);
     if (state.chats.length === before) return false;
     if (state.branchSources) delete state.branchSources[id];
+    if (state.chatComposer) delete state.chatComposer[id];
     writeProjectState(this.projectDir, state);
     return true;
   }

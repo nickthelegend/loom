@@ -158,6 +158,10 @@ export interface BrainExport {
     chat?: string;
     agent?: string;
     crew?: string;
+    /** Kept so a round trip can't make a private or untrusted memory shareable (D13, D43). */
+    private?: boolean;
+    untrusted?: boolean;
+    expiresAt?: number;
   }>;
 }
 
@@ -415,13 +419,15 @@ export class Brain {
    * export is the live memories, not the event log — history stays where it
    * happened; what travels is what the project currently knows.
    */
-  export(projectName: string): BrainExport {
+  export(projectName: string, opts: { includeExpired?: boolean } = {}): BrainExport {
+    const now = Date.now();
     return {
       format: "loom-brain",
       version: 1,
       project: projectName,
-      exportedAt: Date.now(),
-      memories: this.all().map((m) => ({
+      exportedAt: now,
+      // expired memories are dead to retrieval; they don't travel unless asked for
+      memories: this.all().filter((m) => opts.includeExpired || !isExpired(m, now)).map((m) => ({
         kind: m.kind,
         text: m.text,
         entities: m.entities,
@@ -429,6 +435,9 @@ export class Brain {
         ...(m.scope.chat ? { chat: m.scope.chat } : {}),
         ...(m.scope.agent ? { agent: m.scope.agent } : {}),
         ...(m.scope.crew ? { crew: m.scope.crew } : {}),
+        ...(m.private ? { private: true } : {}),
+        ...(m.untrusted ? { untrusted: true } : {}),
+        ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
       })),
     };
   }
@@ -447,8 +456,12 @@ export class Brain {
     }
     let added = 0;
     let known = 0;
+    const now = Date.now();
     for (const m of doc.memories) {
       if (!m?.text?.trim() || !MEMORY_KINDS_SET.has(m.kind)) continue;
+      // an expiry that isn't a number is a broken file, not "never expires"
+      if (m.expiresAt !== undefined && !(typeof m.expiresAt === "number" && Number.isFinite(m.expiresAt))) continue;
+      if (typeof m.expiresAt === "number" && m.expiresAt <= now) continue; // already dead: not resurrected
       const { created } = this.add({
         kind: m.kind,
         text: m.text,
@@ -457,6 +470,10 @@ export class Brain {
         ...(m.chat || m.agent || m.crew
           ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}), ...(m.crew ? { crew: m.crew } : {}) } }
           : {}),
+        // anything but an explicit false keeps the protection: a malformed flag errs private
+        ...(m.private !== undefined && m.private !== false ? { private: true } : {}),
+        ...(m.untrusted !== undefined && m.untrusted !== false ? { untrusted: true } : {}),
+        ...(typeof m.expiresAt === "number" ? { expiresAt: m.expiresAt } : {}),
         provenance,
       });
       if (created) added++;

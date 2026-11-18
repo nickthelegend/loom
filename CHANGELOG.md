@@ -19,6 +19,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **User command aliases (#426).** `loom alias set <name> -- <command> [args...]`, `list` and `rm`, plus web Settings → CLI aliases, persist literal argument lists, reject cycles and preserve built-in commands. Scoped tokens and shared-chat guests cannot manage machine-wide aliases.
 - **TUI scoreboard (#426).** A fifth tab, `/scoreboard` and a palette entry show the existing recorded model standings, refresh live and preserve unknown cost/rate markers. Phone Project tools also provides a scoreboard with time-window filters.
 
+### Fixed
+
+- **Model tools stay inside the project through symlinks (#431).** `read_file`, `search`, `write_file` and the write preview now resolve every existing path component (and refuse dangling links) before checking containment and the `.git`/`.loom` exclusions, so a link like `leak -> /elsewhere` can no longer read or write outside the project.
+- **Model agents run only the tools they were offered (#431).** A tool call the provider returns is executed only if that hop advertised it: `tools: false` runs nothing, `write: false` never writes even under `bypass`, and a model that keeps calling tools past the hop limit is stopped instead of looping.
+- **Stop cancels a turn waiting for a daemon slot (#431).** A turn queued behind the turn gate counts as running for Stop; stopping it leaves the gate without taking a slot, and the prompt never runs.
+- **Stopping an ACP agent settles its pending requests (#431).** `stop()` rejects outstanding JSON-RPC requests, and a request made with no process refuses at once, so a send waiting on `initialize` or `session/prompt` no longer hangs forever holding its turn slot.
+- **Memory updates learned from outside content are untrusted (#431).** An extractor UPDATE from a turn that read web, issue or PR content now marks the memory untrusted (an existing untrusted flag is never cleared), so it is no longer published to the team as trusted.
+- **Brain export/import keeps privacy, trust and expiry (#431).** Exports carry `private`, `untrusted` and `expiresAt` and leave expired memories out unless asked; imports keep those flags (a malformed flag errs private/untrusted) and skip entries that have already expired.
+- **Making a shared memory private keeps it for its author, and clearing private shares it again (#431).** A withdrawn team memory stays in the author's own briefing pool, and once it is shareable again it is re-published instead of staying withdrawn forever.
+- **An edited team memory starts its confirmations over (#431).** When an author's edit or re-publish changes a memory's content, teammates who confirmed the old text no longer count as confirming the new text — on the reference hub and the hosted hub (`supabase/migrations/0014_zones_and_confirmations.sql`).
+- **Lease checks cover every hard zone a claim touches (#431).** The coordinator, the reference hub and the hosted hub's `claim_lease`/`extend_lease` (migration 0014) now refuse a claim when any of its hard zones is held, not only the first one listed.
+- **Skill install and removal can't escape through a symlinked `skills` directory (#431).** Installing, authoring and removing a project skill now resolve the real destination and refuse anything outside the real project root, so `skills -> /elsewhere` can't redirect a copy or a forced recursive delete.
+- **Onboarding retries never delete a directory they didn't create (#431).** Each clone attempt goes into a staging directory the job creates; only that is cleaned up on failure, and a finished clone moves to the destination without replacing anything there (it lands at `name-2` if the destination filled up meanwhile).
+
+- **Alert webhooks after phone access is on (#428).** Without `LOOM_WEBHOOK_SECRET`, `/api/webhooks/alerts` now requires the request's own socket to be loopback (with a loopback Host and no relay marker), not just the daemon's primary bind address. Before, a LAN or tailnet listener added by phone access, or a relayed request, could quarantine agents and move the baton unauthenticated.
+- **Screenshots from scoped tokens (#428).** `POST /api/projects/:id/preview/screenshot` is refused to project-scoped tokens. The daemon's browser runs on this machine, so it could load `/api/bootstrap` and photograph the admin token.
+- **Provider changes from scoped tokens (#428).** Creating, updating and removing providers (`POST`/`DELETE /api/providers/:id`) needs an owner or unscoped token. Before, a scoped token could point a provider at its own host and collect the stored key on the next model refresh.
+- **Revoked and expired sockets (#428).** Revoking a device now closes its open WebSockets. A Share-live guest's socket closes when its link expires and gets no frames after that. Terminal input re-checks the credential, and the heartbeat re-checks every socket.
+- **Push notifications across project scopes (#428).** Push recipients are now filtered by the event's project, and for a guest by its chat, so a device paired for one project no longer receives another project's questions, replies or approvals.
+- **Console logs across project scopes (#428).** `GET /api/logs` returns a scoped token only its own projects' records, with nothing daemon-wide. `DELETE /api/logs` needs an owner or unscoped token.
+- **Prompt history across project scopes (#428).** The machine-wide prompt library and Recent history (`/api/prompts*`) are refused to project-scoped tokens, so they can no longer read or clear prompts sent in other projects.
+- **Attachment writes through symlinks (#428).** A new file's nearest existing ancestor must now resolve inside the project, and dangling links are refused. Before, a `.loom/attachments` linked outside the project, or a dangling link at the destination, wrote the file outside it.
+- **Duplicate project runtimes (#428).** Concurrent first requests for a project now share one opening runtime. Before, each opened its own, and only the last one was ever closed.
+- **Empty files in the explorer (#428).** `GET /api/projects/:id/file` on a zero-byte file answers with empty content. Before, it threw outside Express and the request hung.
+- **Shutdown with phones connected (#428).** `close()` now terminates sockets on phone-access listeners and closes their connections, so an update's restart is no longer held open by a connected phone. The update restart also has a 15-second deadline.
+- **IPv6 listeners (#428).** WebSocket connections on a daemon bound to `::1` or `::` no longer fail with an invalid-URL error before authentication.
+- **Directory previews (#428).** The `/preview/<token>/` link minted for a folder now serves its `index.html` and no longer falls through to the bearer wall.
+- **Loom Cloud with `--tailnet` (#428).** The relay now forwards HTTP and stream requests to the address the daemon actually listens on, not a hard-coded 127.0.0.1.
+
+### Added
+
+- Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
+- Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
+- Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.
+- Daemon-backed per-chat composer drafts shared by desktop and phone, with revision checks to protect concurrent edits.
+- Named prompt templates with `{{variables}}`, web and phone forms, `/template name`, and `loom templates`, reusing the saved prompt library with owner-only writes.
+- Copy source Markdown for individual messages or entire chats on web and phone, alongside the existing chat export.
+- Remember expanded and collapsed tool outputs per message across visits and devices.
+- Show the current chat's total cost, tokens, and completed turns in web and phone headers, using existing usage accounting.
+- Open chats at their first unread reply with an Unread divider on web and phone, including replies before the latest history page.
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

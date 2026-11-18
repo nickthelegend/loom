@@ -15,7 +15,7 @@
  * in a tab.
  */
 
-import type { Express, Request, Response } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -55,10 +55,14 @@ function sweep(): void {
 
 /** Before the auth wall: the token is the credential, scoped to one directory. */
 export function registerPreviewPublic(app: Express): void {
-  app.get("/preview/:tok/*rest", (req: Request, res: Response) => {
+  // `{/*rest}`: a directory's link is /preview/<token>/ with nothing after it, which a bare
+  // `*rest` (one or more segments in Express 5) never matched, so it fell through to the bearer wall
+  app.get("/preview/:tok{/*rest}", (req: Request, res: Response, next: NextFunction) => {
+    const rest = (req.params as unknown as { rest?: string[] | string }).rest;
+    // only the folder's own link (/preview/<token>/) — /preview/<x> without the slash stays unmatched
+    if (rest === undefined && !req.path.endsWith("/")) return void next();
     const entry = tokens.get(String(req.params.tok));
     if (!entry || entry.exp < Date.now()) return void res.status(410).type("text/plain").send("this preview link has expired — open it again from Loom");
-    const rest = (req.params as unknown as { rest: string[] | string }).rest;
     const rel = decodeURIComponent(Array.isArray(rest) ? rest.join("/") : String(rest ?? ""));
     let file = inside(entry.dir, rel);
     if (file && fs.statSync(file).isDirectory()) file = inside(entry.dir, path.join(rel, "index.html"));

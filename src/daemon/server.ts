@@ -3,7 +3,7 @@ import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import { readPrRecords } from "../core/pr-feedback.js";
-import { ClientDelivery } from "./delivery.js";
+import { ClientDelivery, type ClientScope } from "./delivery.js";
 import { ChatPresenceTracker } from "./presence.js";
 import type { PresencePerson } from "../core/presence.js";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -170,8 +170,11 @@ export class LoomDaemon {
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
+  /** Runtimes being opened, by project id, so concurrent first requests share one. */
+  private opening = new Map<string, Promise<ProjectRuntime>>();
   private closeProjects: () => Promise<void> = async () => {};
-  private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
+  /** Every live socket, with what it may see and the credential it connected with (so revoking it ends it). */
+  private sockets = new Map<WebSocket, ClientScope & { token?: string }>();
   private readonly delivery = new ClientDelivery(this.sockets, (socket) => socket.terminate());
   private readonly presence = new ChatPresenceTracker<WebSocket>((snapshot) =>
     this.broadcastFrame({ ...snapshot }, snapshot.projectId));
@@ -371,7 +374,8 @@ export class LoomDaemon {
       cloudStatus: (...args) => this.cloudStatus(...args),
       startCloud: (...args) => this.startCloud(...args),
       stopCloud: (...args) => this.stopCloud(...args),
-      pushTokens: (...args) => this.pushTokens(...args),
+      pushTokens: () => this.pushTokens(),
+      revalidateSockets: () => this.revalidateSockets(),
       runtime: (...args) => this.runtime(...args),
       get specRunner() { return daemon.specRunner; },
       startHealLoop: (...args) => this.startHealLoop(...args),
@@ -666,12 +670,22 @@ export class LoomDaemon {
     if (!info) throw new Error(`unknown project "${idOrName}" — run loom init first`);
     const existing = this.runtimes.get(info.id);
     if (existing) return existing;
+    // Two cold requests at once must share one open: each runtime owns agents,
+    // an event-log handle and watchers, and only the one kept in the map is
+    // ever closed.
+    const inFlight = this.opening.get(info.id);
+    if (inFlight) return inFlight;
+    const opening = this.openRuntime(info).finally(() => this.opening.delete(info.id));
+    this.opening.set(info.id, opening);
+    return opening;
+  }
+
+  private async openRuntime(info: ProjectInfo): Promise<ProjectRuntime> {
     const rt = await ProjectRuntime.open(info);
     rt.sides.onEvent(frame => {
       this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
     });
-    const host = this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host;
-    rt.apiUrl = `http://${host.includes(":") ? `[${host}]` : host}:${this.port}`;
+    rt.apiUrl = this.localUrl();
     rt.onServerEvent((f) => {
       this.broadcastFrame({ type: "server", projectId: info.id, ...f }, info.id);
     });
@@ -774,10 +788,19 @@ export class LoomDaemon {
     this.delivery.publish(frame, { kind: "project", projectId });
   }
 
-  private pushTokens(category?: PushCategory): string[] {
+  /**
+   * Devices to buzz. With a target, only devices allowed to see that project
+   * (and, for a guest, that one chat) — a push carries the reply, the question
+   * and the approval's input, so it follows the same scope as HTTP and the socket.
+   */
+  private pushTokens(category?: PushCategory, target?: { projectId: string; chat?: string }): string[] {
     const cfg = readDaemonConfig();
     return (cfg?.clients ?? [])
       .filter((c) => !category || wantsPush(c.pushKinds, category))
+      .filter((c) => {
+        if (c.guest) return Boolean(target) && c.guest.expiresAt > Date.now() && c.guest.project === target!.projectId && c.guest.chat === (target!.chat ?? "main");
+        return !target || !c.projects?.length || c.projects.includes(target.projectId);
+      })
       .map((c) => c.pushToken)
       .filter((t): t is string => Boolean(t));
   }
@@ -804,7 +827,7 @@ export class LoomDaemon {
         } catch { /* a push without the snippet */ }
       }
     }
-    const tokens = this.pushTokens(category);
+    const tokens = this.pushTokens(category, { projectId, ...(event.chat ? { chat: event.chat } : {}) });
     if (!tokens.length) return;
     const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
     // a tool approval can be answered on the alert itself: Allow / Deny, on the computer that asked
@@ -933,6 +956,9 @@ export class LoomDaemon {
   private attachWs(server: Server): WebSocketServer {
     const wss = new WebSocketServer({ server, path: "/ws" });
     const heartbeat = setInterval(() => {
+      // a device revoked from another process, or a guest link run out, loses its sockets here too
+      this.auth.reload();
+      this.revalidateSockets();
       for (const ws of wss.clients) {
         const live = ws as WebSocket & { loomAlive?: boolean };
         if (live.loomAlive === false) { try { ws.terminate(); } catch { /* gone */ } continue; }
@@ -943,7 +969,8 @@ export class LoomDaemon {
     heartbeat.unref();
     wss.on("close", () => clearInterval(heartbeat));
     wss.on("connection", (ws, req) => {
-      const url = new URL(req.url ?? "/ws", `http://${this.host}:${this.port}`);
+      // only the path and query matter, and a bare IPv6 host (::1, ::) isn't a valid URL base
+      const url = new URL(req.url ?? "/ws", "http://localhost");
       // Prefer the token in the `Sec-WebSocket-Protocol` header (a header isn't
       // written to browser history or a proxy's request-line log the way a
       // `?token=` query is); fall back to the query for the CLI/native clients.
@@ -989,8 +1016,12 @@ export class LoomDaemon {
       this.sockets.set(ws, {
         ...(resolvedProject ? { project: resolvedProject } : {}),
         ...(wsScope ? { scope: wsScope } : {}),
-        ...(wsGuest ? { chat: wsGuest.chat } : {}),
+        ...(wsGuest ? { chat: wsGuest.chat, expiresAt: wsGuest.expiresAt } : {}),
+        ...(token ? { token } : {}),
       });
+      // a Share-live link ends on time, even for a socket that only listens
+      const expiry = wsGuest ? setTimeout(() => this.endSocket(ws), Math.max(0, wsGuest.expiresAt - Date.now())) : null;
+      expiry?.unref?.();
       ws.send(
         JSON.stringify({
           type: "hello",
@@ -1018,6 +1049,7 @@ export class LoomDaemon {
           return;
         }
         if (!resolvedProject || !msg.term || wsGuest || wsScope) return; // a guest or a project-scoped token never drives a terminal
+        if (!this.auth.isAuthorized(token)) return void this.endSocket(ws); // revoked since it connected
         const sess = this.terminals.get(resolvedProject, String(msg.term));
         if (!sess) return;
         if (msg.type === "term-input" && typeof msg.data === "string") sess.write(msg.data);
@@ -1030,11 +1062,32 @@ export class LoomDaemon {
       (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true;
       ws.on("pong", () => { (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true; });
       ws.on("close", () => {
+        if (expiry) clearTimeout(expiry);
         this.sockets.delete(ws);
         this.presence.remove(ws);
       });
     });
     return wss;
+  }
+
+  /** Stop delivering to a socket at once and close it as unauthorized. */
+  private endSocket(ws: WebSocket): void {
+    this.sockets.delete(ws);
+    this.presence.remove(ws);
+    try { ws.close(4401, "unauthorized"); } catch { /* already closing */ }
+  }
+
+  /** End every socket whose credential no longer authorizes it (revoked, or a guest link expired). */
+  private revalidateSockets(): void {
+    for (const [ws, s] of [...this.sockets]) {
+      if (s.token && !this.auth.isAuthorized(s.token)) this.endSocket(ws);
+    }
+  }
+
+  /** This daemon's own base URL, for calls it makes to itself: a wildcard bind is reached on loopback. */
+  private localUrl(): string {
+    const host = this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host;
+    return `http://${host.includes(":") ? `[${host}]` : host}:${this.port}`;
   }
 
   /** Record where we actually bound so CLIs can find us. */
@@ -1181,7 +1234,8 @@ export class LoomDaemon {
         transport,
         // the channel's own key still opens it for phones paired before per-device keys; `loom cloud rotate` retires it
         keys: () => [creds.key, ...this.auth.relayKeys()],
-        localBase: () => `http://127.0.0.1:${this.port}`,
+        // where the daemon actually listens: with --tailnet that's the tailnet IP, and nothing is on 127.0.0.1
+        localBase: () => this.localUrl(),
         identity: () => ({ version: BUILD_REV, name: os.hostname() }),
       });
       logbook.info("cloud", "Loom Cloud relay connected");
@@ -1240,9 +1294,16 @@ export class LoomDaemon {
     await this.terminals.closeAll();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();
+    // The same goes for phone-access listeners: their sockets are ended, not
+    // waited on, or a phone left connected over the LAN holds shutdown (and an
+    // update's restart) open for as long as it stays.
     for (const { server, wss } of this.extra.values()) {
+      for (const ws of wss.clients) ws.terminate();
       wss.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      });
     }
     this.extra.clear();
     // Close the live sockets too. wss.close() stops new connections but leaves
