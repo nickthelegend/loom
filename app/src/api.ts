@@ -138,6 +138,8 @@ export interface Chat {
   id: string;
   title: string;
   createdAt: number;
+  /** Bookmarked message ids shared with the desktop. */
+  starred?: number[];
   /** Newest agent reply in the chat (unread dots). */
   lastReplyId?: number;
   pinned?: boolean;
