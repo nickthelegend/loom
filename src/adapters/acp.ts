@@ -110,12 +110,18 @@ export class AcpAdapter extends AdapterBase {
 
   async stop(): Promise<void> {
     await this.interrupt();
-    this.child?.kill();
+    const child = this.child;
     this.child = null;
     this.ready = null;
     this.liveSessions.clear();
     this.sessionModels.clear();
     this.defaultModels.clear();
+    // The child's close handler skips cleanup once this.child is cleared, so the
+    // requests still waiting on it are settled here — otherwise a send() awaiting
+    // initialize or session/prompt never returns and keeps its turn slot forever.
+    for (const w of this.pending.values()) w.reject(new Error("the ACP agent was stopped"));
+    this.pending.clear();
+    child?.kill();
   }
 
   // ── JSON-RPC over stdio ──
@@ -127,6 +133,8 @@ export class AcpAdapter extends AdapterBase {
   private request(method: string, params: Json): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      // no process to answer (stopped mid-turn): nothing would ever settle this
+      if (!this.child) return reject(new Error("the ACP agent isn't running"));
       this.pending.set(id, { resolve, reject });
       this.write({ id, method, params });
     });

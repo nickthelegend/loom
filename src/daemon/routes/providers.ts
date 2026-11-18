@@ -1,4 +1,11 @@
-import type { Express } from 'express';
+import type { Express, Request, Response } from 'express';
+
+/** A provider's key and destination are this machine's: a project-scoped token never changes them. */
+const machineWide = (req: Request, res: Response): boolean => {
+  if (!(req as Request & { projectScope?: string[] | null }).projectScope) return true;
+  res.status(403).json({ error: "providers need an owner or unscoped token" });
+  return false;
+};
 import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider } from "../../core/providers.js";
 /** Register providers routes in the order established by LoomDaemon.routes(). */
 export function registerProvidersRoutes(app: Express): void {
@@ -21,6 +28,8 @@ export function registerProvidersRoutes(app: Express): void {
   });
 
   app.post("/api/providers/:id", (req, res) => {
+    // a new baseUrl keeps the stored key, and the models call sends it there
+    if (!machineWide(req, res)) return;
     const body = (req.body ?? {}) as {
       key?: string;
       baseUrl?: string;
@@ -41,6 +50,7 @@ export function registerProvidersRoutes(app: Express): void {
   });
 
   app.delete("/api/providers/:id", (req, res) => {
+    if (!machineWide(req, res)) return;
     const forgotten = forgetProvider(String(req.params.id));
     res.json({ forgotten, providers: listProviders() });
   });

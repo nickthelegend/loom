@@ -213,6 +213,14 @@ export class TeamBrain {
         continue;
       }
       const h = memoryHmac(key, m.text);
+      if (mine?.state === "forgotten" && mine.author === me) {
+        // withdrawn earlier (made private, flagged untrusted) and shareable again:
+        // the author restored it, so it goes back to the team under its own id
+        const out = await hub.publishMemory(share.teamId, { id: m.id, repo: share.repo, hmac: h, sealed: sealForTeam(key, sealedOf(m)), deviceId: device });
+        this.cache.set(out.memory.id, out.memory);
+        if (out.memory.state === "live") byHmac.set(out.memory.hmac, out.memory);
+        continue;
+      }
       if (mine) {
         if (mine.state !== "live" || mine.hmac === h) continue; // resolved against, or already current
         const sealed = sealForTeam(key, sealedOf(m));
@@ -465,7 +473,9 @@ export class TeamBrain {
     }
     for (const m of own) {
       const t = this.cache.get(m.id);
-      if (t && t.state !== "live") continue; // resolved against (D47) or withdrawn
+      // resolved against (D47) leaves the pool; withdrawn from the team (made
+      // private, say) is still this project's own memory and stays in it
+      if (t && t.state === "superseded") continue;
       take({ ...m, tier: "own" });
     }
     return out;

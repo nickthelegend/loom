@@ -82,7 +82,9 @@ export function registerUpdatesRoutes(app: Express, ctx: Pick<RouteContext, "cac
       logbook.info("update", `updated via ${ran.join(" && ")} — restarting on the new build`);
       // Let the answer and the log frames reach the clients before we go.
       setTimeout(() => {
-        void ctx.close().finally(() => process.exit(0));
+        // bounded: the new build is installed, and nothing still open may keep the old one running
+        const deadline = new Promise<void>((r) => setTimeout(r, 15_000).unref());
+        void Promise.race([ctx.close(), deadline]).finally(() => process.exit(0));
       }, 750);
     })();
   });

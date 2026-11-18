@@ -1,5 +1,9 @@
 /** Client transport only: no persistence, Brain or harness dependencies. */
-export interface ClientScope { project?: string; scope?: string[]; /** a guest's one chat (Share live) */ chat?: string }
+export interface ClientScope {
+  project?: string; scope?: string[]; /** a guest's one chat (Share live) */ chat?: string;
+  /** When this client's credential lapses (a guest link): nothing is delivered after it. */
+  expiresAt?: number;
+}
 export interface FrameConnection {
   readonly readyState: number;
   /** Bytes queued and not yet written (ws). A client this far behind is slow or gone. */
@@ -53,6 +57,10 @@ export class ClientDelivery<T extends FrameConnection> {
     const disposable = DISPOSABLE.has(String(payload.type));
     for (const [client, scope] of this.clients) {
       if (client.readyState !== 1 || !visible(scope, audience)) continue;
+      if (scope.expiresAt !== undefined && scope.expiresAt <= Date.now()) {
+        try { client.terminate?.(); } catch { /* already gone */ }
+        continue;
+      }
       // a guest sees its chat's frames and nothing else — no terminals, logs, other threads
       if (scope.chat && (audience.kind !== "project" || frameChat(payload) !== scope.chat)) continue;
       const failed = (error: unknown) => {

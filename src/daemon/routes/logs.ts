@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import { logbook, type LogLevel } from "../../core/logbook.js";
 /** Register logs routes in the order established by LoomDaemon.routes(). */
 export function registerLogsRoutes(app: Express): void {
@@ -10,16 +10,22 @@ export function registerLogsRoutes(app: Express): void {
   app.get("/api/logs", (req, res) => {
     const since = req.query.since === undefined ? undefined : Number(req.query.since);
     const level = req.query.level as "error" | "warn" | "info" | undefined;
-    res.json({
-      logs: logbook.list({
-        ...(Number.isFinite(since) ? { since } : {}),
-        ...(level ? { level } : {}),
-        ...(req.query.project ? { project: String(req.query.project) } : {}),
-      }),
+    // A scoped token sees its own projects' records and nothing daemon-wide —
+    // the same rule the socket's log frames follow (daemon/delivery.ts).
+    const scope = (req as Request & { projectScope?: string[] | null }).projectScope;
+    const logs = logbook.list({
+      ...(Number.isFinite(since) ? { since } : {}),
+      ...(level ? { level } : {}),
+      ...(req.query.project ? { project: String(req.query.project) } : {}),
     });
+    res.json({ logs: scope ? logs.filter((r) => Boolean(r.project && scope.includes(r.project))) : logs });
   });
 
-  app.delete("/api/logs", (_req, res) => {
+  app.delete("/api/logs", (req, res) => {
+    // the book is every project's: clearing it is the owner's (or their own unscoped device's)
+    if ((req as Request & { projectScope?: string[] | null }).projectScope) {
+      return void res.status(403).json({ error: "clearing the Console needs an owner or unscoped token" });
+    }
     logbook.clear();
     res.json({ ok: true });
   });
