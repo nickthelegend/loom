@@ -14,7 +14,7 @@ import "react-native-get-random-values";
 
 import { scopeOf } from "./src/cache-model";
 import { parseLocation, accentOf } from "./src/shell-model";
-import { ACCENT_KEY, accent, onAccent, setAccent } from "./src/theme";
+import { ACCENT_KEY, onAccent, setAccent } from "./src/theme";
 import { usePhoneEntry } from "./src/phone-entry";
 import { usePhoneLock, LockScreen } from "./src/phone-lock";
 import { loadHaptics } from "./src/phone-preferences";
@@ -183,8 +183,9 @@ export default function App() {
   }, [pastWelcome]);
 
   // Dark by default, as on the desktop; Light, or follow the phone, from the
-  // account sheet. The palette swaps in place and the tree below remounts
-  // under a new key, so every inline style reads the new tokens.
+  // account sheet. The palette swaps in place and the tree re-renders in place
+  // (nothing is memoized, every style reads T at render), so drafts and open
+  // chats survive a switch.
   const [, refreshAppearance] = useState(0);
   useEffect(() => {
     void kv.get(ACCENT_KEY).then(v => { setAccent(accentOf(v)); refreshAppearance(n => n + 1); });
@@ -203,7 +204,7 @@ export default function App() {
     {/* Android 15+ draws every app edge to edge (and an app targeting API 36
         can't opt out), so the status and navigation bars are real insets on
         both platforms now — not an opaque bar Android lays out for us. */}
-    <SafeAreaView key={scheme + accent} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
       <StatusBar style={scheme === "light" ? "dark" : "light"} />
       <View style={{ flex: 1, opacity: lock.locked ? 0 : 1 }} pointerEvents={lock.locked ? "none" : "auto"} accessibilityElementsHidden={lock.locked} importantForAccessibility={lock.locked ? "no-hide-descendants" : "auto"}>
       {!booted || !auth.ready || !revealed ? (

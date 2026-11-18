@@ -33,7 +33,7 @@ describe.skipIf(process.env.LOOM_TEST_POSTGRES !== "1" && !process.env.LOOM_PGLI
       create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid$$;
       grant usage on schema auth to authenticated;`);
     await sql(fs.readFileSync("supabase/migrations/0002_teams.sql", "utf8"));
-    await sql(fs.readFileSync("supabase/migrations/0014_teams_sharing.sql", "utf8"));
+    await sql(fs.readFileSync("supabase/migrations/0015_teams_sharing.sql", "utf8"));
     await sql(`insert into auth.users values ('${a}', '{"user_name":"alice"}'), ('${b}', '{"user_name":"bob"}'), ('${outsider}', '{"user_name":"charlie"}');
       insert into teams(id,name) values ('${team}','r3');
       insert into team_members(team_id,user_id,role) values ('${team}','${a}','owner'), ('${team}','${b}','member');

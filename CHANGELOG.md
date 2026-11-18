@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-11-19
+
+**Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,
+save recipes, and tune model routing; review and explain shared memory; keep working from your
+phone with offline sending; and connect teams and integrations with clearer safety controls.
+Release notes: docs/release-notes/v2.1.0.md.
+
 ### Added
 
 - Retry an individual failed, blocked, or stalled Orchestra task on another agent/model from the API, CLI, web, or phone, preserving its worktree (#417).
@@ -49,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accent presets on the phone (#422).** The six web presets already existed; the phone now offers the same device-local choices, and web windows apply accent changes live.
 - **Actionable empty tabs (#422).** Existing empty-state explanations now have direct task, memory and agent actions on web/phone; Team retains its create/join flow and gains a useful fallback when team access is unavailable.
 
-- **NDJSON turns (#426).** `loom ask --json` and `loom send --json` stream live text deltas, durable events and per-chat outcomes, with request-correlated queued sends, timeouts and interruption exit codes. `send --json` now implies waiting instead of printing the old one-object result.
+- **NDJSON turns (#426).** `loom ask --json` and `loom send --stream` stream live text deltas, durable events and per-chat outcomes, with request-correlated queued sends, timeouts and interruption exit codes. `loom send --json` still prints one object; it now implies `--wait`.
 - **Complete shell suggestions (#426).** Existing command-name completions now derive commands, aliases, subcommands and short/long options from Commander for Bash, Zsh and Fish, including user aliases.
 - **Watch an Orchestra run (#426).** `loom watch --run <id>` reuses Orchestra progress events to follow run, task and report changes through completion; `--json` emits only NDJSON and interruption closes the watcher.
 - **HTML chat export (#426).** `loom export --format html` reuses the existing standalone replay renderer. The web export is labelled HTML, and phone Project tools can save or share the same HTML file.
