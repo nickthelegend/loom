@@ -1943,10 +1943,11 @@ function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<strin
     id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
     // every outcome key, 0 when none: a script reads tasks.failed without checking it exists
     terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, done: 0, running: 0, pending: 0, needs_input: 0, conflict: 0, failed: 0, cancelled: 0, ...taskCounts(run) },
+    budgetUsd: run.budgetUsd, planOnly: run.planOnly, planApprovedAt: run.planApprovedAt, kindLimits: run.kindLimits, stallMinutes: run.stallMinutes, webhookDelivery: run.webhookDelivery,
     branch: run.branch, costUsd: run.costUsd, race: run.race, compare: run.compare,
     orchestrator: run.orchestrator, workers: run.workers, workerDetails: run.workerDetails ?? [],
     // Keep outcome counts in tasks for existing scripts; taskDetails carries each selection.
-    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status, result: t.result, files: t.files, diffStat: t.diffStat, costUsd: t.costUsd, startedAt: t.startedAt, finishedAt: t.finishedAt })),
+    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status, stalledAt: t.stalledAt, prompt: t.prompt, dependsOn: t.dependsOn, result: t.result, files: t.files, diffStat: t.diffStat, costUsd: t.costUsd, startedAt: t.startedAt, finishedAt: t.finishedAt })),
     ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
   };
 }
@@ -1980,10 +1981,12 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Recor
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
     const files = t.files?.length ? pc.dim(` · ${t.files.length} file${t.files.length === 1 ? "" : "s"}`) : "";
     console.log(`   ${color(t.status.padEnd(11))} ${pc.bold(t.id)} ${t.title} ${pc.dim(`→ ${t.agent}${selection(t)}`)}${deps}${files}`);
+    if (t.stalledAt) console.log(pc.yellow(`               stalled — loom orchestra:retry ${run.id} ${t.id} agent@model`));
+    if (run.planOnly && !run.planApprovedAt) console.log(pc.dim(`               ${t.prompt}`));
     if (t.hold) console.log(`               ${pc.yellow(`held (${t.hold.kind}):`)} ${t.hold.reason.slice(0, 200)}`);
     if (t.error) console.log(`               ${pc.red(t.error.split("\n")[0]!.slice(0, 160))}`);
   }
-  if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(`(loom orchestra:reply ${run.id} "…")`)}`);
+  if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(run.planOnly && !run.planApprovedAt && run.tasks.length ? `(loom orchestra:approve ${run.id})` : `(loom orchestra:reply ${run.id} "…")`)}`);
   if (run.summary) console.log(`   ${pc.green("summary:")} ${run.summary}`);
   if (run.error) console.log(`   ${pc.red("error:")} ${run.error}`);
   if (run.status === "completed" && !run.applied) {
@@ -2333,6 +2336,10 @@ program
 
 program
   .command("orchestrate <goal>")
+  .option("--plan-only", "preview the planner output; workers wait for explicit approval")
+  .option("--kind-limits <json>", 'per-kind parallel limits, e.g. {"echo":2}')
+  .option("--stall-minutes <n>", "mark workers stalled after this many minutes without progress")
+  .option("--webhook-url <url>", "POST a signed completion to this HTTP(S) URL")
   .description("one orchestrator plans the goal; many worker agents build it in parallel, each in its own worktree")
   .option("-o, --orchestrator <agent>", "agent[@model][:effort] who plans and reviews (default: claude-code if present)")
   .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN], @saved-fleet or best:N (default: every agent in the project)")
@@ -2346,7 +2353,7 @@ program
   .option("--push", "with --apply: push the branch after merging")
   .option("--no-watch", "start it and return instead of following it to the end")
   .option("--progress", "one line per task event and worker report while watching or applying")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean; progress?: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; planOnly?: boolean; kindLimits?: string; stallMinutes?: string; webhookUrl?: string; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean; progress?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -2356,6 +2363,10 @@ program
         ...(opts.workers ? { workers: opts.workers.split(",").map((w) => w.trim()).filter(Boolean) } : {}),
         ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}),
         ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
+        planOnly: opts.planOnly,
+        kindLimits: opts.kindLimits ? JSON.parse(opts.kindLimits) : undefined,
+        stallMinutes: opts.stallMinutes ? Number(opts.stallMinutes) : undefined,
+        webhookUrl: opts.webhookUrl,
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
         ...(opts.race ? { race: true } : {}),
@@ -2458,6 +2469,20 @@ for (const action of ["abort", "apply", "cleanup", "resume"] as const) {
       }
     });
 }
+
+program.command("orchestra:graph <run>").description("export the run's task graph as Mermaid").action(async (run: string) => {
+  const client = await ensureDaemon(), project = await currentProject(client);
+  console.log((await client.orchestraGraph(project.id, run)).mermaid);
+});
+program.command("orchestra:approve <run>").description("approve a plan-only run and start its workers").action(async (run: string) => {
+  const client = await ensureDaemon(), project = await currentProject(client);
+  await client.orchestraAction(project.id, run, "approve-plan");
+  console.log("plan approved");
+});
+program.command("orchestra:retry <run> <task> <agent>").description("retry a failed or stalled task on agent[@model][:effort]").action(async (run: string, task: string, agent: string) => {
+  const client = await ensureDaemon(), project = await currentProject(client);
+  printRun((await client.retryOrchestraTask(project.id, run, task, agent)).run);
+});
 
 program
   .command("orchestra:reply <runId> <text>")
@@ -4382,6 +4407,29 @@ queueCmd
     const client = await ensureDaemon();
     const { recipes } = await client.recipes();
     if (!recipes.length) return console.log(pc.dim("none saved — loom queue save <name>"));
+    for (const r of recipes) {
+      console.log(`${pc.cyan(r.name)} ${pc.dim(`${r.steps.length} step(s)${r.fromProject ? ` · from ${r.fromProject}` : ""}`)}`);
+      for (const s of r.steps) console.log(`  ${pc.dim(s.to.padEnd(12))} ${s.text.split("\n")[0]!.slice(0, 80)}`);
+    }
+  });
+
+program
+  .command("recipes [action] [name] [run]")
+  .description("list recipes; run <name> starts an Orchestra recipe; save <name> <run> saves one")
+  .action(async (action?: string, name?: string, run?: string) => {
+    const client = await ensureDaemon();
+    if (action === "run" || action === "save") {
+      if (!name || (action === "save" && !run)) throw new Error("use recipes run <name> or recipes save <name> <run>");
+      const project = await currentProject(client);
+      if (action === "run") printRun((await client.runOrchestraRecipe(project.id, name)).run);
+      else { await client.orchestraAction(project.id, run!, "recipe", { name }); console.log(`saved ${name}`); }
+      return;
+    }
+    if (action) throw new Error("unknown recipe action");
+    const orchestra = await client.orchestraRecipes();
+    for (const recipe of orchestra.recipes) console.log(`${recipe.name} · Orchestra · ${recipe.options.goal}`);
+    const { recipes } = await client.recipes();
+    if (!recipes.length && !orchestra.recipes.length) return console.log(pc.dim("none saved — loom recipes save <name> <run>"));
     for (const r of recipes) {
       console.log(`${pc.cyan(r.name)} ${pc.dim(`${r.steps.length} step(s)${r.fromProject ? ` · from ${r.fromProject}` : ""}`)}`);
       for (const s of r.steps) console.log(`  ${pc.dim(s.to.padEnd(12))} ${s.text.split("\n")[0]!.slice(0, 80)}`);

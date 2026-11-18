@@ -1461,6 +1461,10 @@ export interface OrchestraTaskHold {
 /** One unit of work a worker agent runs on its own branch. `chat` is its thread. */
 export interface OrchestraTask {
   id: string;
+  prompt?: string;
+  stalledAt?: number;
+  model?: string;
+  effort?: string;
   title: string;
   agent: string;
   kind: string;
@@ -1486,6 +1490,14 @@ export interface OrchestraReport { at: number; kind: "checkpoint" | "needs_input
 /** One orchestrator, many parallel workers, one integration branch. */
 export interface OrchestraRun {
   id: string;
+  budgetUsd?: number;
+  planOnly?: boolean;
+  planApprovedAt?: number;
+  kindLimits?: Record<string, number>;
+  stallMinutes?: number;
+  webhookUrl?: string;
+  webhookDelivery?: { at: number; state: "pending" | "sent" | "failed"; error?: string };
+  timeline?: Array<{ at: number; taskId: string; phase: string; attempt: number; text?: string }>;
   goal: string;
   orchestrator: { agent: string; kind: string };
   workers: string[];
@@ -1532,7 +1544,7 @@ export const getOrchestraRun = (c: Creds, id: string, runId: string) =>
 export const startOrchestra = (
   c: Creds,
   id: string,
-  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
+  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean } & import("./orchestra-options").RunOptions,
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
 
 /** Ask several (#377): the same prompt to each entrant (agent or agent@model×N), side by side; keep one. */
@@ -2321,3 +2333,5 @@ export interface UpdateStatus {
 }
 export const getUpdates = (creds: Creds, refresh = false) =>
   api<UpdateStatus>(creds, `/api/updates${refresh ? "?refresh" : ""}`);
+
+export interface OrchestraRecipe { name: string; options: { goal: string } & import("./orchestra-options").RunOptions; savedAt: number }

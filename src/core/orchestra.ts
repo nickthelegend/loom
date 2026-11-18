@@ -31,6 +31,7 @@
  * task's agent output streams into that task's own chat.
  */
 
+import { validateOrchestraOptions, sendCompletionWebhook, type OrchestraTimelineEvent } from "./orchestra-options.js";
 import { writeLoomMcpSession } from "./loom-tools.js";
 import type { McpServerConfig } from "../types.js";
 import { intakePrBody, recordIntakeRun } from "./intake.js";
@@ -223,6 +224,8 @@ export interface OrchestraTask extends OrchestraModel {
   attempts: number;
   /** Follow-up messages queued by the orchestrator, run after the current turn. */
   queued: string[];
+  lastProgressAt?: number;
+  stalledAt?: number;
   reports?: OrchestraReport[];
   lastReport?: OrchestraReport | null;
   result?: string;
@@ -270,6 +273,13 @@ export interface OrchestraRun {
   round: number;
   maxRounds: number;
   maxParallel: number;
+  kindLimits?: Record<string, number>;
+  stallMinutes?: number;
+  planOnly?: boolean;
+  planApprovedAt?: number;
+  timeline?: OrchestraTimelineEvent[];
+  webhookUrl?: string;
+  webhookDelivery?: { at: number; state: "pending" | "sent" | "failed"; error?: string };
   summary?: string;
   question?: string;
   error?: string;
@@ -294,6 +304,7 @@ export interface OrchestraRun {
   budgetUsd?: number;
   /** So the 80% word is said once, not once a turn. */
   budgetWarned?: boolean;
+  budgetPaused?: boolean;
   /** Phase 5: set while the goal is being handed to another machine; nothing new starts. */
   moving?: boolean;
   /** Where the goal went (D75). */
@@ -374,6 +385,10 @@ export interface OrchestraStartOptions {
   /** Fleet rows as agent[@model][:effort][xN] (also ×N), N = 1..100. Defaults to the roster. */
   workers?: string[];
   maxParallel?: number;
+  kindLimits?: Record<string, number>;
+  stallMinutes?: number;
+  planOnly?: boolean;
+  webhookUrl?: string;
   maxRounds?: number;
   /** Write the plan as markdown specs other agents can read (plans/<run>/). */
   plan?: boolean;
@@ -1077,6 +1092,7 @@ export class OrchestraEngine {
     const report: OrchestraReport = { at: Math.max(Date.now(), (task.lastReport?.at ?? 0) + 1), kind: b.kind!, text };
     task.reports = [...(task.reports ?? []), report].slice(-20);
     task.lastReport = report;
+    this.progress(run, task);
     this.save(run);
     this.emit(run, "task_report", { taskId, report, task: taskSummary(task) });
     if (!run.race && (report.kind === "needs_input" || report.kind === "stuck")) {
@@ -1110,7 +1126,119 @@ export class OrchestraEngine {
     return "\n\nWorker progress reports:\n" + [...reports].flatMap(([id, entries]) => entries.map(r => `${id} (${r.kind}): ${r.text}`)).join("\n");
   }
 
+  private stallTimer = setInterval(() => this.checkStalled(), 1000);
+  private taskTurns = new Map<string, Promise<void>>();
+  private retrying = new Set<string>();
+
+  private progress(run: OrchestraRun, task: OrchestraTask): void {
+    task.lastProgressAt = Date.now();
+    if (task.stalledAt) {
+      delete task.stalledAt;
+      this.emit(run, "task_progress", { taskId: task.id });
+    }
+  }
+
+  checkStalled(now = Date.now()): void {
+    for (const run of this.runs.values()) {
+      if (isTerminal(run.status) || run.moving) continue;
+      for (const task of run.tasks) {
+        if (task.status !== "running" || task.stalledAt || now - (task.lastProgressAt ?? task.startedAt ?? now) < (run.stallMinutes ?? 10) * 60_000) continue;
+        task.stalledAt = now;
+        this.emit(run, "task_stalled", { taskId: task.id, task: taskSummary(task) });
+      }
+    }
+  }
+
+  async approvePlan(runId: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    if (!run.planOnly || run.planApprovedAt || run.status !== "waiting_human" || !run.tasks.length) throw new Error("no plan awaiting approval");
+    if (this.overBudget(run)) throw new Error("raise the budget before approving this plan");
+    if (run.plan) await this.writePlan(run, "plan");
+    if (run.planApprovedAt || run.status !== "waiting_human") throw new Error("run is no longer awaiting approval");
+    run.planApprovedAt = Date.now();
+    run.question = undefined;
+    run.status = "running";
+    this.save(run);
+    this.emit(run, "plan_approved");
+    this.schedule(run);
+    return run;
+  }
+
+  setBudget(runId: string, maxUsd: number): OrchestraRun {
+    if (maxUsd === undefined) throw new Error("maxUsd is required");
+    validateOrchestraOptions({ goal: "budget", maxUsd });
+    const run = this.mustGet(runId);
+    if (isTerminal(run.status) || run.moving) throw new Error("run is not active");
+    const paused = run.budgetPaused;
+    run.budgetPaused = false;
+    run.budgetUsd = maxUsd;
+    run.budgetWarned = false;
+    this.save(run);
+    if (!this.overBudget(run) && paused) {
+      run.budgetPaused = false;
+      run.question = undefined;
+      run.status = run.planOnly && !run.planApprovedAt ? "waiting_human" : "running";
+      this.save(run);
+      this.schedule(run);
+    }
+    this.emit(run, "budget", { budgetUsd: maxUsd });
+    return run;
+  }
+
+  async retryTask(runId: string, taskId: string, agent: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId), task = run.tasks.find(t => t.id === taskId);
+    if (!task) throw new Error("no such task in this run");
+    const key = `${run.id}/${task.id}`;
+    if (run.moving || run.status === "moved" || run.applied || this.orchestratorBusy.has(run.id) || [...this.retrying].some(k => k.startsWith(`${run.id}/`)) || this.admitting.has(key)) throw new Error("task cannot be retried now");
+    if (!["failed", "cancelled", "needs_input", "conflict"].includes(task.status) && !(task.status === "running" && task.stalledAt)) throw new Error("only failed, cancelled, blocked or stalled tasks can be retried");
+    const cfg = this.resolveAgent(agent);
+    if (!cfg || isRemoteWorker(cfg.id)) throw new Error("choose a local worker agent[@model][:effort]");
+    if (this.active() && this.active()!.id !== run.id) throw new Error("another run is active");
+    this.retrying.add(key);
+    const previous = run.status;
+    const wasRunning = task.status === "running";
+    run.status = "waiting_human";
+    task.status = "cancelled";
+    try {
+      const old = this.live.get(key);
+      await old?.interrupt();
+      await this.taskTurns.get(key);
+      await old?.stop();
+      this.live.delete(key);
+      this.turnText.delete(key);
+      this.lastError.delete(key);
+      this.workerQuestion.delete(key);
+      if ((run.status as OrchestraStatus) === "aborted" && previous !== "aborted") throw new Error("run was aborted during retry");
+      if (wasRunning) this.taskEnded(run, task);
+      task.agent = cfg.id;
+      task.kind = cfg.kind;
+      task.model = modelOf(cfg).model;
+      task.effort = modelOf(cfg).effort;
+      const workers = this.workersFor(run).filter(w => w.id !== cfg.id);
+      workers.push(cfg);
+      this.workerCfgs.set(run.id, workers);
+      run.workers = workers.map(w => w.id);
+      run.workerDetails = workers.map(workerOf);
+      task.status = "pending";
+      task.queued = [];
+      task.error = undefined;
+      task.hold = undefined;
+      task.stalledAt = undefined;
+      task.finishedAt = undefined;
+      task.reported = false;
+      run.error = undefined;
+      run.summary = undefined;
+      run.status = "running";
+      run.question = undefined;
+      this.emit(run, "task_reassigned", { taskId, task: taskSummary(task) });
+      this.save(run);
+      this.schedule(run);
+      return run;
+    } finally { this.retrying.delete(key); }
+  }
+
   constructor(private host: OrchestraHost) {
+    this.stallTimer.unref();
     for (const run of this.loadRuns()) this.runs.set(run.id, run);
     // A daemon restart kills every CLI a run was driving. Say so honestly
     // instead of showing tasks "running" that nothing runs.
@@ -1191,6 +1319,12 @@ export class OrchestraEngine {
   }
 
   private emit(run: OrchestraRun, phase: string, extra: Record<string, unknown> = {}, chat?: string): void {
+    if (["task_started", "task_finished", "task_report", "task_stalled", "task_reassigned", "task_progress"].includes(phase) && typeof extra.taskId === "string") {
+      const task = run.tasks.find(t => t.id === extra.taskId);
+      const report = extra.report as OrchestraReport | undefined;
+      (run.timeline ??= []).push({ at: Date.now(), taskId: extra.taskId, attempt: task?.attempts ?? 0, phase, status: task?.status, agent: task?.agent, model: task?.model, ...(report ? { text: report.text, reportKind: report.kind } : {}) });
+      this.save(run);
+    }
     this.host.append({
       kind: "orchestra",
       chat: chat ?? run.chat,
@@ -1250,6 +1384,7 @@ export class OrchestraEngine {
   }
 
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
+    validateOrchestraOptions(opts);
     if (opts.workers?.some(w => w.startsWith("best:"))) {
       if (opts.workers.length !== 1 || !/^best:\d+$/.test(opts.workers[0]!)) throw new Error("use best:N as the entire worker fleet");
       opts = { ...opts, workers: await this.selectBest(Number(opts.workers[0]!.slice(5)), this.host.roster().map(a => a.id)) };
@@ -1354,6 +1489,8 @@ export class OrchestraEngine {
         this.host.coordinator?.()?.maxParallel?.() ?? HARD_MAX_PARALLEL,
       ),
       ...(opts.plan ? { plan: true } : {}),
+      planOnly: opts.planOnly, kindLimits: opts.kindLimits, stallMinutes: opts.stallMinutes ?? 10,
+      webhookUrl: opts.webhookUrl, timeline: [],
       ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
       // A cap for this goal: what was asked for, else the project's default.
       ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
@@ -1447,6 +1584,7 @@ export class OrchestraEngine {
       if (t.status === "running" || t.status === "pending") {
         t.status = "cancelled";
         t.error = reason;
+        this.taskEnded(run, t);
       }
     }
     this.save(run);
@@ -1460,6 +1598,7 @@ export class OrchestraEngine {
   /** The human answers an orchestrator's question (or adds direction mid-run). */
   async reply(runId: string, text: string): Promise<OrchestraRun> {
     const run = this.mustGet(runId);
+    if (run.planOnly && !run.planApprovedAt && run.tasks.length) throw new Error("approve the plan explicitly before continuing");
     const msg = text.trim();
     if (!msg) throw new Error("empty reply");
     if (isTerminal(run.status) && run.status !== "completed") {
@@ -1469,7 +1608,15 @@ export class OrchestraEngine {
     run.question = undefined;
     // Over its budget (D64): a human saying continue raises the cap by one more budget.
     const cap = this.goalCap(run);
+    const budgetPause = run.budgetPaused;
+    run.budgetPaused = false;
     if (cap !== null && run.costUsd >= cap) run.budgetUsd = run.costUsd + (this.host.coordinator?.()?.goalBudgetUsd?.() ?? cap);
+    if (budgetPause && run.race) {
+      run.status = "running";
+      this.save(run);
+      this.schedule(run);
+      return run;
+    }
     if (run.status === "completed") {
       // Reopen: more work on the same integration branch.
       run.status = "reviewing";
@@ -1728,6 +1875,8 @@ export class OrchestraEngine {
     const cap = this.goalCap(run);
     this.warnNearBudget(run);
     if (cap === null || run.costUsd < cap) return false;
+    if (run.budgetPaused && run.status === "waiting_human") return true;
+    run.budgetPaused = true;
     run.status = "waiting_human";
     run.question =
       `This goal has spent $${run.costUsd.toFixed(2)} of its $${cap.toFixed(2)} budget. ` +
@@ -1851,8 +2000,13 @@ export class OrchestraEngine {
   }
 
   async shutdown(): Promise<void> {
+    clearInterval(this.stallTimer);
     for (const run of this.runs.values()) {
       if (isTerminal(run.status)) continue;
+      if (run.planOnly && !run.planApprovedAt && run.status === "waiting_human") {
+        await this.stopAll(run);
+        continue;
+      }
       run.interrupted = {
         at: Date.now(),
         tasks: run.tasks.filter((t) => t.status === "running" || t.status === "pending").map((t) => t.id),
@@ -2027,6 +2181,14 @@ export class OrchestraEngine {
       ...(notes.length ? { rejected: notes } : {}),
     });
 
+    if (run.planOnly && !run.planApprovedAt && run.tasks.length) {
+      run.status = "waiting_human";
+      run.question = "Review the task graph and prompts, then approve the plan to start workers.";
+      this.save(run);
+      this.emit(run, "plan_preview", { tasks: run.tasks.map(taskSummary) });
+      return;
+    }
+    if (this.overBudget(run)) return;
     if (question) {
       run.status = "waiting_human";
       run.question = question;
@@ -2167,6 +2329,7 @@ export class OrchestraEngine {
     if (!task) throw new Error(`no task "${taskId}"`);
     if (task.status === "done") throw new Error(`task ${taskId} already merged`);
     task.status = "cancelled";
+    this.taskEnded(run, task);
     task.reported = true;
     const live = this.live.get(`${run.id}/${task.id}`);
     if (live?.busy()) void live.interrupt().catch(() => {});
@@ -2191,7 +2354,7 @@ export class OrchestraEngine {
       task.reported = false;
       this.emit(run, "task", { task: taskSummary(task) });
     }
-    if (run.status !== "running" || run.moving) return;
+    if (run.status !== "running" || run.moving || (run.planOnly && !run.planApprovedAt)) return;
     if (this.overBudget(run)) return;
     const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
     let slots = run.maxParallel - inFlight;
@@ -2215,8 +2378,13 @@ export class OrchestraEngine {
         continue;
       }
       if (!deps.every((d) => !d || d.status === "done")) continue;
+      const limit = run.kindLimits?.[task.kind];
+      if (limit !== undefined && run.tasks.filter(t => t.kind === task.kind && (t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))).length >= limit) continue;
       slots--;
-      void this.admitAndRun(run, task);
+      const key = `${run.id}/${task.id}`;
+      const turn = this.admitAndRun(run, task);
+      this.taskTurns.set(key, turn);
+      void turn.finally(() => { if (this.taskTurns.get(key) === turn) this.taskTurns.delete(key); });
     }
     this.save(run);
     if (waiting || run.tasks.some((t) => t.status === "pending" && t.hold && t.hold.kind !== "decide")) this.armRecheck(run);
@@ -2300,7 +2468,7 @@ export class OrchestraEngine {
       a = { go: false, hold: { kind: "capacity", reason: `team hub unreachable: ${(err as Error).message}`, since: Date.now() } };
     }
     this.admitting.delete(key);
-    if (isTerminal(run.status) || task.status !== "pending") return;
+    if (isTerminal(run.status) || run.status !== "running" || task.status !== "pending" || this.overBudget(run)) return;
     if (!a.go) {
       const was = task.hold?.reason;
       task.hold = { ...a.hold, since: task.hold?.since ?? a.hold.since, checkedAt: Date.now() };
@@ -2316,6 +2484,7 @@ export class OrchestraEngine {
     task.hold = undefined;
     if (a.note) this.addNote(run.id, a.note);
     if (a.rebase) {
+      this.admitting.add(key);
       try {
         await this.syncWithBase(run);
       } catch (err) {
@@ -2324,8 +2493,9 @@ export class OrchestraEngine {
         this.emit(run, "task", { task: taskSummary(task) });
         this.maybeReview(run);
         return;
-      }
+      } finally { this.admitting.delete(key); }
     }
+    if (run.status !== "running" || task.status !== "pending" || this.overBudget(run)) return;
     return this.runTask(run, task);
   }
 
@@ -2425,10 +2595,18 @@ export class OrchestraEngine {
     return lines.join("\n");
   }
 
+  private taskEnded(run: OrchestraRun, task: OrchestraTask): void {
+    task.stalledAt = undefined;
+    if (!task.attempts || run.timeline?.some(e => e.taskId === task.id && e.attempt === task.attempts && e.phase === "task_finished")) return;
+    task.finishedAt = Date.now();
+    this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+  }
+
   private async runTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     task.status = "running";
     task.attempts++;
-    task.startedAt ??= Date.now();
+    task.startedAt = Date.now();
+    this.progress(run, task);
     task.error = undefined;
     this.save(run);
     this.emit(run, "task", { task: taskSummary(task) });
@@ -2466,7 +2644,7 @@ export class OrchestraEngine {
     task.reported = false;
     this.save(run);
     this.emit(run, "task", { task: taskSummary(task) });
-    this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+    this.taskEnded(run, task);
     if ((task.status as TaskStatus) === "done") this.host.coordinator?.()?.onTaskDone?.(run, task);
     this.schedule(run);
   }
@@ -2556,7 +2734,7 @@ export class OrchestraEngine {
       task.reported = false;
       this.save(run);
       this.emit(run, "task", { task: taskSummary(task) });
-      this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+      this.taskEnded(run, task);
       this.schedule(run);
       return false;
     }
@@ -2596,6 +2774,11 @@ export class OrchestraEngine {
     this.host.append({ kind: "status", chat: task.chat, payload: { state: "team_task", runId: run.id, taskId: task.id,
       text: `Sent to a teammate's machine (${task.kind}) — it runs there with their agent and comes back here to merge.` } });
     const res = await coord.runRemote(run, task, base, prompt);
+    if (typeof res.costUsd === "number" && Number.isFinite(res.costUsd) && res.costUsd >= 0) {
+      run.costUsd += res.costUsd;
+      task.costUsd = (task.costUsd ?? 0) + res.costUsd;
+      this.save(run);
+    }
     await this.gitLock.run(async () => {
       await git(["fetch", "-q", "origin", res.ref], task.dir!);
       await git(["merge", "-q", "--ff-only", "FETCH_HEAD"], task.dir!);
@@ -2687,6 +2870,7 @@ export class OrchestraEngine {
       if (task && task.status === "running" && !isTerminal(run.status) && !run.moving) this.report(run.id, task.id, report);
     };
     agent.onStream?.((d) => {
+      if (task && d.text) this.progress(run, task);
       this.host.stream?.({ agentId, chat, ...d });
       if (!task || d.reasoning) return;
       resetReportTurn();
@@ -2700,6 +2884,7 @@ export class OrchestraEngine {
       stream = stream.slice(-20_000);
     });
     agent.onEvent((e) => {
+      if (task && ["message", "tool_call", "file_edit"].includes(e.kind)) this.progress(run, task);
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
         if (task) {
@@ -2745,6 +2930,7 @@ export class OrchestraEngine {
           run.costUsd += usd;
           const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
           if (task) task.costUsd = (task.costUsd ?? 0) + usd;
+          this.save(run);
         }
       }
       if (terminal) turnCost = undefined;
@@ -2791,6 +2977,15 @@ export class OrchestraEngine {
       ...(run.race ? { race: true } : {}),
       ...(run.compare ? { compare: true } : {}),
     });
+    if (status === "completed" && run.webhookUrl && !run.webhookDelivery) {
+      run.webhookDelivery = { at: Date.now(), state: "pending" };
+      this.save(run);
+      void sendCompletionWebhook(this.host.projectDir, this.host.projectId, run).then(() => {
+        run.webhookDelivery = { at: Date.now(), state: "sent" };
+      }).catch(err => {
+        run.webhookDelivery = { at: Date.now(), state: "failed", error: (err as Error).message };
+      }).finally(() => { this.save(run); this.emit(run, "webhook", { delivery: run.webhookDelivery }); });
+    }
     if (summary && run.race) {
       // nobody led a race, so Loom says how it ended
       this.host.append({
@@ -2981,6 +3176,8 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     ...(t.result !== undefined ? { result: t.result } : {}),
     ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
     ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
+    ...(t.stalledAt ? { stalledAt: t.stalledAt } : {}),
+    ...(t.lastProgressAt ? { lastProgressAt: t.lastProgressAt } : {}),
     reports: t.reports ?? [],
     lastReport: t.lastReport ?? null,
     ...(t.touches?.length ? { touches: t.touches } : {}),

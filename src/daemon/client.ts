@@ -395,15 +395,28 @@ export class DaemonClient {
   /** Start with agent[@model][:effort][xN] worker specs; run.workerDetails describes the expanded fleet. */
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean; team?: boolean },
+    body: import("../core/orchestra.js").OrchestraStartOptions,
   ): Promise<{ run: OrchestraRun }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, { ...body });
+  }
+
+  orchestraGraph(id: string, run: string): Promise<{ mermaid: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/graph`);
+  }
+  orchestraRecipes(): Promise<{ recipes: import("../core/orchestra-options.js").OrchestraRecipe[] }> {
+    return this.request("GET", "/api/orchestra-recipes");
+  }
+  runOrchestraRecipe(id: string, name: string): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra-recipes/${encodeURIComponent(name)}/run`, {});
+  }
+  retryOrchestraTask(id: string, run: string, task: string, agent: string): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/tasks/${encodeURIComponent(task)}/retry`, { agent });
   }
 
   orchestraAction(
     id: string,
     runId: string,
-    action: "abort" | "reply" | "apply" | "cleanup" | "resume",
+    action: "abort" | "reply" | "apply" | "cleanup" | "resume" | "approve-plan" | "budget" | "recipe",
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return this.request(

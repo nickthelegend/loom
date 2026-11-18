@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Retry an individual failed, blocked, or stalled Orchestra task on another agent/model from the API, CLI, web, or phone, preserving its worktree (#417).
+- Extend existing Orchestra USD budget pauses with validated run options, web/phone budget controls, and an explicit budget-increase API that resumes pending work (#417).
+- Export Orchestra task graphs as Mermaid with `loom orchestra:graph`, the graph API, and web/phone copy actions (#417).
+- Save named Orchestra recipes containing a goal, resolved fleet, and run options; launch from web/phone or `loom recipes run <name>` alongside existing queue recipes (#417).
+- Detect stalled Orchestra workers after a configurable period without output or reports and offer reassignment without freeing their occupied slots prematurely (#417).
+- Extend the existing Orchestra timeline strip with durable per-attempt start, end, report, and reassignment events, a timeline API, and a phone timeline (#417).
+- Limit parallel Orchestra workers by agent kind within each run, in addition to the existing overall parallel limit (#417).
+- Preview planner output with `--plan-only` and explicit approval before workers start; retain the separate existing plan-file mode (#417).
+- Send signed run-completion webhooks using a private project secret, with delivery outcomes visible in web and phone run views (#417).
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,
