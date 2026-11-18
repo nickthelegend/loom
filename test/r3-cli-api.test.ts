@@ -96,7 +96,9 @@ describe("2.1 real CLI streams", () => {
     expect(lines(result.out).filter(e => e.kind === "message").every(e => !String(e.payload.text).includes("previous turn"))).toBe(true);
   });
   it("terminates an interrupted agent stream and leaves work running when only the watcher is stopped", async () => {
-    for (const stopAgent of [true, false]) {
+    // Windows can't deliver SIGINT to a child: kill("SIGINT") terminates it outright, so
+    // only the agent-side interrupt is checkable there
+    for (const stopAgent of process.platform === "win32" ? [true] : [true, false]) {
       const child = spawn(process.execPath, [...cli, "send", "sleep:5000 interrupt test", "--stream"], { cwd: dir, env: env() });
       let out = ""; child.stdout.on("data", d => { out += d; });
       const done = new Promise<number | null>(resolve => child.on("close", resolve));
