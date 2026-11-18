@@ -1,3 +1,4 @@
+import { Operations } from "./ops";
 /**
  * Account & privacy — the profile sheet behind the avatar on the board.
  *
@@ -361,6 +362,7 @@ export function AccountSheet(props: {
       )}
 
       {/* about: Loom is open source and runs on your computer; this app is its remote */}
+      {props.creds && <Operations creds={props.creds} />}
       <View style={{ gap: 6 }}>
         <SectionLabel text="About" />
         <Panel>
@@ -382,6 +384,8 @@ export function AccountSheet(props: {
               </Text>
             </TouchableOpacity>
           )}
+          {upd?.changelog?.entries.map(entry => <View key={entry.version} style={{ gap: 4 }}><Text style={{ color: T.text, fontWeight: "600" }}>Changes in {entry.version}</Text><Text selectable style={{ color: T.dim, fontSize: 12 }}>{entry.notes}</Text></View>)}
+          {upd?.behindRelease && upd.changelog?.available === false && <Text style={{ color: T.dim }}>Changelog unavailable — open the release notes above.</Text>}
           <AboutRow label="Install Loom on a computer" hint="loompad.tech · macOS, Linux and Windows apps, or npm" onPress={() => openLink(INSTALL_URL)} />
           <AboutRow label="Source code on GitHub" hint="Loom is open source — star it, file an issue, send a fix" onPress={() => openLink(REPO_URL)} />
           {canRate && <AboutRow label="Rate Loom" hint="On Google Play — it helps other people find it" onPress={rateLoom} />}

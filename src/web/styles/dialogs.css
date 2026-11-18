@@ -1584,3 +1584,8 @@
 .unread-divider:before,.unread-divider:after{content:"";height:1px;flex:1;background:var(--border)}
 .template-form{width:min(420px,90vw);padding:24px;background:var(--background);border:1px solid var(--border);border-radius:var(--radius)}
 .template-form .field{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+
+  .ops-fields{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+  .ops-fields label{display:flex;align-items:center;gap:8px;font-size:12px}
+  .ops-fields input{width:85px;background:var(--muted);color:var(--foreground);border:1px solid var(--border);border-radius:5px;padding:6px}
+  .ops-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow-y:auto}

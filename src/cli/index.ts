@@ -68,8 +68,7 @@ import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
 import { fmtUsd, formatAgentRosterRow, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
-
-const LOG_MAX_BYTES = 5 * 1024 * 1024;
+import { rotateDaemonLog } from "../core/ops.js";
 
 /**
  * Where a background daemon's output goes: ~/.loom/daemon.log, appended.
@@ -81,11 +80,7 @@ const LOG_MAX_BYTES = 5 * 1024 * 1024;
 function openDaemonLog(): number {
   const home = ensureLoomHome();
   const file = path.join(home, "daemon.log");
-  try {
-    if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, file + ".1");
-  } catch {
-    /* no log yet, or it vanished — either way, open a fresh one below */
-  }
+  rotateDaemonLog(file);
   return fs.openSync(file, "a");
 }
 
@@ -4459,6 +4454,8 @@ program
       return;
     }
     console.log(pc.yellow(`Loom ${u.latest} is out`) + (u.release?.url ? pc.dim(`  ${u.release.url}`) : ""));
+    for (const entry of u.changelog?.entries ?? []) console.log(`\n${entry.version}\n${entry.notes}`);
+    if (u.changelog?.available === false) console.log(pc.dim("Changelog unavailable — open the release notes link above."));
     if (opts.check) return;
     if (!u.canApply) {
       console.log(pc.dim(u.refusal ?? "this install can't update itself"));
@@ -4970,22 +4967,26 @@ program
   .action(async (opts: { json: boolean; fix?: boolean }) => {
     const { collectDoctorReport, fixProject } = await import("./doctor.js");
     const dir = currentProjectDir();
+    let fixes: ReturnType<typeof fixProject> | undefined;
     if (opts.fix) {
       if (!dir) {
         console.error(pc.red("not inside a Loom project — nothing to fix"));
         process.exitCode = 1;
         return;
       }
-      const { fixed, unfixable } = fixProject(dir);
-      for (const f of fixed) console.log(` ${pc.green("✓")} ${f}`);
-      for (const u of unfixable) console.log(` ${pc.yellow("⚠")} ${u}`);
-      if (!fixed.length && !unfixable.length) console.log(pc.dim("nothing needed fixing"));
+      fixes = fixProject(dir);
+      const { fixed, unfixable } = fixes;
+      if (!opts.json) {
+        for (const f of fixed) console.log(` ${pc.green("✓")} ${f}`);
+        for (const u of unfixable) console.log(` ${pc.yellow("⚠")} ${u}`);
+        if (!fixed.length && !unfixable.length) console.log(pc.dim("nothing needed fixing"));
+      }
       // fall through to a fresh diagnosis, so the report reflects the repairs
     }
     const report = await collectDoctorReport(dir);
     const checks = report.checks;
     if (opts.json) {
-      console.log(JSON.stringify(report));
+      console.log(JSON.stringify({ ...report, ...(fixes ? { fixes } : {}) }));
       if (report.summary.failures) process.exitCode = 1;
       return;
     }
@@ -5121,12 +5122,56 @@ program
   .command("backup")
   .description("everything Loom knows — settings, pairings, prompts, every project's log and brain — in one .tar.gz")
   .option("--out <file>", "where to write it (default: ~/loom-backup-<time>.tar.gz)")
-  .action((opts: { out?: string }) => {
+  .option("--every <interval>", "schedule backups while the daemon is running, e.g. 1d")
+  .option("--keep <count>", "number of scheduled archives to retain", "7")
+  .option("--off", "disable the backup schedule")
+  .option("--status", "show the persisted schedule and last result")
+  .action(async (opts: { out?: string; every?: string; keep: string; off?: boolean; status?: boolean }) => {
+    if ([Boolean(opts.every), Boolean(opts.off), Boolean(opts.status)].filter(Boolean).length > 1 || (opts.out && (opts.every || opts.off || opts.status))) throw new Error("choose a one-off output or one schedule action");
+    if (opts.every || opts.off || opts.status) {
+      const client = await ensureDaemon();
+      if (opts.every) await client.scheduleBackup(opts.every, Number(opts.keep));
+      if (opts.off) await client.disableBackup();
+      console.log(JSON.stringify(await client.ops(), null, 2));
+      return;
+    }
     const r = makeBackup(opts.out);
     const mb = (r.bytes / 1024 / 1024).toFixed(1);
     console.log(pc.green(`✓ backed up ${r.projects} project${r.projects === 1 ? "" : "s"} and ~/.loom → ${r.file} (${mb} MB)`));
     console.log(pc.dim("  left out: orchestra worktrees (their branches are in your repos) and the model cache"));
     console.log(pc.yellow("  it holds your pairing tokens and cloud keys — keep it somewhere private"));
+  });
+
+program
+  .command("du")
+  .description("per-project disk bytes: worktrees, logs and attachments")
+  .option("--json", "print machine-readable results")
+  .action(async (opts: { json?: boolean }) => {
+    const result = await (await ensureDaemon()).diskUsage();
+    if (opts.json) return void console.log(JSON.stringify(result));
+    const { fmtBytes } = await import("./doctor.js");
+    for (const p of result.projects) {
+      console.log(`${p.name}  ${fmtBytes(p.total)}  worktrees ${fmtBytes(p.worktrees)} · logs ${fmtBytes(p.logs)} · attachments ${fmtBytes(p.attachments)}`);
+      if (p.skipped.length) console.log(`  unreadable: ${p.skipped.join(", ")}`);
+    }
+  });
+
+program
+  .command("worktrees:prune")
+  .description("prune clean finished Orchestra worktrees by age or retained count; branches stay")
+  .option("--days <days>", "maximum age in days")
+  .option("--keep <count>", "maximum finished runs retained")
+  .option("--save", "save this policy for automatic pruning")
+  .option("--dry-run", "only report what would be removed")
+  .action(async (opts: { days?: string; keep?: string; save?: boolean; dryRun?: boolean }) => {
+    const { prunePolicy } = await import("../core/ops.js");
+    const policy = opts.days !== undefined || opts.keep !== undefined ? prunePolicy({ days: Number(opts.days ?? 7), keep: Number(opts.keep ?? 10000) }) : undefined;
+    if (opts.save && !policy) throw new Error("give --days or --keep to save a policy");
+    if (opts.save && opts.dryRun) throw new Error("--dry-run does not save a policy; omit --save");
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    if (opts.save) await client.worktreePolicy(project.id, policy!);
+    console.log(JSON.stringify(await client.pruneWorktrees(project.id, Boolean(opts.dryRun), policy), null, 2));
   });
 
 program

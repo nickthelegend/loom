@@ -111,6 +111,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Doctor repairs across surfaces (#423).** Existing `loom doctor --fix` now includes repairs in a single `--json` report; the web and phone Operations panels apply the same safe project fixes and show the resulting checks.
+- **Prometheus scraping (#423).** Admin-token `GET /metrics` exports persisted per-project turns, reported USD cost, errors and current queue depth, complementing the existing OTLP exporter.
+- **Live daemon log rotation (#423).** The existing startup rotation now also runs every second while the daemon is up, retaining a capped 5 MiB previous generation without invalidating stdout/stderr descriptors.
+- **Scheduled backups (#423).** `loom backup --every 1d --keep 7` persists a daemon schedule with private archives, successful-backup retention and one catch-up after downtime; `--status`, `--off`, and web/phone controls manage it. Worktree and backup archives are excluded from snapshots.
+- **Redacted crash bundles (#423).** Uncaught exceptions write private diagnostic bundles with stacks, versions and a bounded redacted log tail; the newest ten are available to owners in web and phone Operations.
+- **Project disk usage (#423).** `loom du` and project APIs report worktree, log and attachment bytes, including crew/proof and configured worktree locations; web and phone reports show unreadable paths and avoid following symlinks.
+- **Worktree retention policy (#423).** Existing seven-day Orchestra cleanup gains configurable age/count limits, hourly sweeps, `loom worktrees:prune --dry-run`, and web/phone previews. Automatic removal preserves dirty or locked worktrees, active runs and branches.
+- **Intervening update notes (#423).** CLI, web and phone update checks display the tagged changelog between installed and latest versions, including intermediate releases, with an explicit unavailable state when notes cannot be fetched.
+- **Stale-session recovery controls (#423).** Existing stale reporting and reaping now have web/phone project reports and one-click reap; the new action rechecks that the session is still stale before interrupting and respawning it.
+
 - Pin messages per chat, with persistent pinned strips and message navigation on web and phone.
 - Project Bookmarks lists and `loom bookmarks`, extending existing message stars across chats.
 - Linked quote replies on web and phone, preserving source Markdown above the reply and sending it as agent context.

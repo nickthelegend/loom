@@ -58,6 +58,7 @@ export class DaemonError extends Error {
 
 /** What the daemon says about whether this copy of Loom is current. */
 export interface UpdateStatus {
+  changelog?: import("../core/updater.js").UpdateChangelog;
   version: string;
   rev: string;
   root: string | null;
@@ -278,6 +279,28 @@ export class DaemonClient {
   /** The daemon's providers: what it can actually use (keys masked). */
   providers(): Promise<{ providers: import("../core/providers.js").ProviderSummary[] }> {
     return this.request("GET", "/api/providers");
+  }
+
+  ops(): Promise<{ backup: import("../core/backup-schedule.js").BackupSchedule | null }> {
+    return this.request("GET", "/api/ops");
+  }
+
+  scheduleBackup(every: string, keep: number): Promise<unknown> {
+    return this.request("PUT", "/api/ops/backups", { every, keep });
+  }
+
+  disableBackup(): Promise<unknown> { return this.request("DELETE", "/api/ops/backups"); }
+
+  diskUsage(): Promise<{ projects: Array<ReturnType<typeof import("../core/ops.js").projectDiskUsage>> }> {
+    return this.request("GET", "/api/ops/du");
+  }
+
+  worktreePolicy(id: string, policy: import("../core/ops.js").PrunePolicy): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/worktrees/policy`, { ...policy });
+  }
+
+  pruneWorktrees(id: string, dryRun: boolean, policy?: import("../core/ops.js").PrunePolicy): Promise<{ candidates: string[]; removed: string[]; skipped: Array<{ id: string; reason: string }> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/worktrees/prune`, { dryRun, policy }, 120_000);
   }
 
   /** `loom doctor` as the daemon sees it: its checks, plus its PATH and key names to compare with the shell's. */

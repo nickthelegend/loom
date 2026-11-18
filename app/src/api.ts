@@ -2347,6 +2347,7 @@ export const crewDiff = (c: Creds, id: string, crew: string) =>
 
 /** The computer's Loom against the newest release (GET /api/updates). */
 export interface UpdateStatus {
+  changelog?: { entries: Array<{ version: string; notes: string }>; available: boolean };
   version: string;
   latest: string | null;
   behindRelease: boolean;
