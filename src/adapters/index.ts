@@ -129,19 +129,32 @@ export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = f
 function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent {
   if (!isAdapter(agent)) return agent;
   const send = agent.send.bind(agent);
+  const busy = agent.busy.bind(agent);
+  let preparing = false;
+  agent.busy = () => preparing || busy();
   const say = (why: string) => (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
     .emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
   agent.send = async (input: SendInput) => {
+    if (preparing || busy()) throw new Error(`agent "${cfg.id}" is busy`);
     const selected = input.model ?? (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
     const model = selected ? resolveModel(selected) : undefined;
     input = { ...input, ...(model ? { model } : {}) };
-    const release = process.env.LOOM_TURN_GATE === "off" ? () => {} : await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+    preparing = true;
+    let release = () => {};
     try {
-      await enforceModelCap(model);
-      return await send(input);
-    } finally {
+      if (process.env.LOOM_TURN_GATE !== "off") release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+      const cap = enforceModelCap(model);
+      if (cap) await cap;
+    } catch (error) {
       release();
+      throw error;
+    } finally {
+      preparing = false;
     }
+    // The concrete adapter owns busy state from here, including completion
+    // events that can synchronously trigger the next turn.
+    try { return await send(input); }
+    finally { release(); }
   };
   return agent;
 }

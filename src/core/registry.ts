@@ -4,7 +4,7 @@
  *
  * LOOM_HOME env var overrides the home directory (used heavily by tests).
  */
-import { validateAgentOptions } from "./model-routing.js";
+import { validateAgentOptions } from "./model-routing-settings.js";
 
 
 import crypto from "node:crypto";
