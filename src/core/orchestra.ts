@@ -1,3 +1,4 @@
+import { predictMerge } from "./worktrees.js";
 /**
  * Orchestra — one orchestrator agent, many worker agents, in parallel.
  *
@@ -227,7 +228,9 @@ export interface OrchestraTask extends OrchestraModel {
   lastReport?: OrchestraReport | null;
   result?: string;
   files?: string[];
-  /** Changes against the race's base commit. Binary files count as files, with zero lines. */
+  /** Counts already integrated, so retrying a conflict does not count the same edits twice. */
+  mergedDiffStat?: { insertions: number; deletions: number };
+  /** Changes by this task. Binary files count as files, with zero lines. */
   diffStat?: { files: number; insertions: number; deletions: number };
   error?: string;
   costUsd?: number;
@@ -959,7 +962,7 @@ async function commitAll(dir: string, message: string): Promise<boolean> {
   const staged = (await git(["diff", "--cached", "--name-only"], dir)).trim();
   if (!staged) return false;
   await git(
-    ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "--no-verify", "-m", message],
+    ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "-m", message],
     dir,
   );
   return true;
@@ -1540,12 +1543,12 @@ export class OrchestraEngine {
     this.orchestratorBusy.delete(run.id);
     const refs: string[] = [];
     await this.gitLock.run(async () => {
-      await commitAll(run.dir, `orchestra ${run.id}: moved to ${where}`).catch(() => false);
+      await commitAll(run.dir, `orchestra ${run.id}: moved to ${where}`);
       await git(["push", "-q", "-f", "origin", `${run.branch}:${runRef(run.id, "main")}`], run.dir);
       refs.push(runRef(run.id, "main"));
       for (const t of run.tasks) {
         if (!t.dir || !t.branch || !fs.existsSync(t.dir)) continue;
-        await commitAll(t.dir, `orchestra ${run.id}/${t.id}: work in progress, moved to ${where}`).catch(() => false);
+        await commitAll(t.dir, `orchestra ${run.id}/${t.id}: work in progress, moved to ${where}`);
         await git(["push", "-q", "-f", "origin", `${t.branch}:${runRef(run.id, t.id)}`], t.dir);
         refs.push(runRef(run.id, t.id));
       }
@@ -1680,7 +1683,7 @@ export class OrchestraEngine {
     const b = this.prBranch(run);
     await this.gitLock.run(async () => {
       await git(["fetch", "-q", "origin", `+refs/heads/${b}:refs/remotes/origin/${b}`], run.dir);
-      await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`).catch(() => false);
+      await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`);
       try {
         await git(["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-edit", "-q", `origin/${b}`], run.dir);
       } catch (err) {
@@ -1786,7 +1789,7 @@ export class OrchestraEngine {
     }
     let already = false;
     await this.gitLock.run(async () => {
-      await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
+      await commitAll(run.dir, `orchestra ${run.id}: final edits`);
       // already in this branch (a worker pushed it and you pulled, or it was applied by hand):
       // record it, without a merge commit that changes nothing (field: a chain left a run "unapplied")
       const tree = async (ref: string) => (await git(["rev-parse", `${ref}^{tree}`], dir).catch(() => "")).trim();
@@ -1794,6 +1797,8 @@ export class OrchestraEngine {
       const runTree = await tree(run.branch);
       if (contained || (runTree && runTree === (await tree("HEAD")))) { already = true; return; }
       try {
+        const prediction = await predictMerge(dir, "HEAD", run.branch);
+        if (!prediction.clean) throw new Error(`pre-merge conflict: ${prediction.detail}`);
         await git(
           ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Merge orchestra run ${run.id}: ${run.goal.slice(0, 60)}`, run.branch],
           dir,
@@ -2079,7 +2084,7 @@ export class OrchestraEngine {
         const staged = (await git(["diff", "--cached", "--name-only"], run.dir)).trim();
         if (staged) {
           await git(
-            ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "--no-verify", "-m",
+            ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "-m",
               why === "plan" ? `plan: ${run.goal.split("\n")[0]!.slice(0, 60)}` : `plan: results of orchestra ${run.id}`],
             run.dir,
           );
@@ -2640,19 +2645,27 @@ export class OrchestraEngine {
     }
     await this.gitLock.run(async () => {
       await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
-      const files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => ""))
-        .split("\n")
-        .filter(Boolean);
+      const fork = (await git(["merge-base", run.branch, task.branch!], dir)).trim();
+      const files = [...new Set([...(task.files ?? []), ...(await git(["diff", "--name-only", fork, "HEAD"], dir)).split("\n").filter(Boolean)])];
       task.files = files;
+      const stat = await git(["diff", "--shortstat", fork, "HEAD"], dir);
+      task.diffStat = {
+        files: files.length,
+        insertions: (task.mergedDiffStat?.insertions ?? 0) + Number(/(\d+) insertion/.exec(stat)?.[1] ?? 0),
+        deletions: (task.mergedDiffStat?.deletions ?? 0) + Number(/(\d+) deletion/.exec(stat)?.[1] ?? 0),
+      };
       // Anything the orchestrator left lying in the integration tree would
       // block the merge; record it rather than lose it.
       await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`);
       try {
+        const prediction = await predictMerge(run.dir, "HEAD", task.branch!);
+        if (!prediction.clean) throw new Error(`pre-merge conflict: ${prediction.detail}`);
         await git(
           ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `orchestra ${task.id}: ${task.title}`, task.branch!],
           run.dir,
         );
         task.status = "done";
+        task.mergedDiffStat = { insertions: task.diffStat.insertions, deletions: task.diffStat.deletions };
         task.mergeCommit = (await git(["rev-parse", "HEAD"], run.dir)).trim();
         const stat = await git(["diff", "--shortstat", `${task.mergeCommit}^1`, task.mergeCommit], run.dir).catch(() => "");
         task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
@@ -2884,7 +2897,7 @@ export class OrchestraEngine {
         }
         run.delivered = { mode, into, ...(pushed ? { pushed } : {}), at: Date.now() };
       } else if (mode === "pr") {
-        await this.gitLock.run(() => commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false));
+        await this.gitLock.run(() => commitAll(run.dir, `orchestra ${run.id}: final edits`));
         const target = this.prBranch(run);
         await git(["push", "-q", "-u", "origin", `${run.branch}:${target}`], run.dir);
         if (run.delivered?.prUrl || run.from) {

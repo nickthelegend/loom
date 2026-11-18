@@ -1698,23 +1698,51 @@ program
     }
   });
 
+program.command("pr:describe")
+  .description("draft a PR description from a chat")
+  .option("--chat <id>", "chat to describe", "main")
+  .option("--template <name>", "standard, security or release", "standard")
+  .action(async (opts: { chat: string; template: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    console.log((await client.describePr(project.id, opts.chat, opts.template)).description);
+  });
+
+program.command("changelog:suggest <branch>")
+  .description("suggest CHANGELOG bullets from a merged branch")
+  .option("--base <ref>", "branch containing the merge", "HEAD")
+  .action(async (branch: string, opts: { base: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    console.log((await client.suggestChangelog(project.id, branch, opts.base)).entry);
+  });
+
+program.command("git:stats")
+  .description("show lines added/removed and unique files per agent")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    console.log(JSON.stringify(await client.diffStats(project.id), null, 2));
+  });
+
 program
   .command("review <agents...>")
   .description("several agents review the same change at once — read-only, off the baton — and their findings land in one place")
   .option("--file <path>", "review this file")
   .option("--diff", "review the uncommitted changes (the default)")
   .option("--text <ask>", "review something you describe instead")
+  .option("--template <name>", "review checklist: standard, security or release", "standard")
   .option("--focus <what>", "what to look hardest at, e.g. \"error handling\"")
   .option("--no-wait", "start it and return; the summary lands in the thread")
   .option("--json", "print the finished review as JSON")
   .option("--timeout <seconds>", "stop waiting after this long", "1800")
-  .action(async (agentArgs: string[], opts: { file?: string; diff?: boolean; text?: string; focus?: string; wait: boolean; json?: boolean; timeout: string }) => {
+  .action(async (agentArgs: string[], opts: { template?: string; file?: string; diff?: boolean; text?: string; focus?: string; wait: boolean; json?: boolean; timeout: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const agents = agentArgs.flatMap((a) => a.split(",")).map((a) => a.trim()).filter(Boolean);
     let review;
     try {
-      ({ review } = await client.startReview(project.id, { agents, ...(opts.file ? { file: opts.file } : {}), ...(opts.text ? { text: opts.text } : {}), ...(opts.focus ? { focus: opts.focus } : {}) }));
+      ({ review } = await client.startReview(project.id, { agents, template: opts.template, ...(opts.file ? { file: opts.file } : {}), ...(opts.text ? { text: opts.text } : {}), ...(opts.focus ? { focus: opts.focus } : {}) }));
     } catch (err) {
       if (opts.json) { process.exitCode = 1; return void console.log(JSON.stringify({ status: "error", error: err instanceof Error ? err.message : String(err) })); }
       return fail(err instanceof Error ? err.message : String(err));

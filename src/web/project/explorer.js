@@ -1,3 +1,4 @@
+import { gitReviewHtml, bindGitReview } from "./git-review.js";
 import { brandMark,wireRoleEditors } from '../agents.js';
 import { api } from '../connection.js';
 import { visibleFiles } from '../diff.js';
@@ -18,6 +19,7 @@ import { editorItems, loadEditors } from '../editors.js';
  * Creating this module only binds functions; startup and cleanup belong to project.js.
  */
 export function createExplorer(view) {
+    var commitDraft = "";
 
 
     // ---- right rail (source control) ----------------------------------------
@@ -306,6 +308,7 @@ export function createExplorer(view) {
         '<button class="iconbtn xs" id="gitpush" title="push to the remote" aria-label="push">' + ICONS.up + "</button>" +
         "</div>";
 
+      html += gitReviewHtml(view.pid, state.chat || "main");
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
       // Loom's own working files (.loom/: the event log, sessions, memory) are
       // not your changes. Folded into one row, with the fix: ignore them.
@@ -320,7 +323,7 @@ export function createExplorer(view) {
       // when the tree is clean, so the panel's shape doesn't jump around.
       html += '<div class="scmcommit">' +
         '<div class="scmmsgwrap">' +
-        '<textarea id="gmsg" class="scmmsg" rows="1" placeholder="Message (\u2318\u21b5 to commit)"></textarea>' +
+        '<textarea id="gmsg" class="scmmsg" rows="1" placeholder="Message (\u2318\u21b5 to commit)">' + esc(commitDraft) + '</textarea>' +
         '<button class="scmgen" id="gitgen" type="button" title="Draft a message from the staged diff">' + ICONS.spark + " Generate</button>" +
         "</div>" +
         '<div class="scmcommitrow">' +
@@ -397,6 +400,7 @@ export function createExplorer(view) {
 
     /** Every control in the Source control view. */
     function wireGitRows(el){
+      bindGitReview(view.pid, state.chat || "main");
       function act(path, body, said){
         return api("/api/projects/" + view.pid + "/git/" + path, { method: "POST", body: JSON.stringify(body) })
           .then(function(){ refreshGit(); if (said) toast(said); })
@@ -456,7 +460,7 @@ export function createExplorer(view) {
       // split button opens a small menu of the fuller actions.
       var msgbox = document.getElementById("gmsg");
       function autosizeMsg(){ if (!msgbox) return; msgbox.style.height = "auto"; msgbox.style.height = Math.min(160, msgbox.scrollHeight) + "px"; }
-      if (msgbox) { msgbox.addEventListener("input", autosizeMsg); autosizeMsg(); }
+      if (msgbox) { msgbox.addEventListener("input", function(){ commitDraft = msgbox.value; autosizeMsg(); }); autosizeMsg(); }
       function doCommit(alsoStageAll, alsoPush){
         var msg = ((msgbox && msgbox.value) || "").trim();
         if (!msg) { toast("a commit needs a message"); if (msgbox) msgbox.focus(); return; }
@@ -471,7 +475,7 @@ export function createExplorer(view) {
         pre.then(function(){
           return api("/api/projects/" + view.pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) });
         }).then(function(r){
-          if (msgbox) { msgbox.value = ""; autosizeMsg(); }
+          commitDraft = ""; if (msgbox) { msgbox.value = ""; autosizeMsg(); }
           toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
           if (alsoPush) {
             toast("pushing\u2026");
@@ -500,8 +504,8 @@ export function createExplorer(view) {
       var gen = document.getElementById("gitgen");
       if (gen) gen.onclick = function(){
         gen.disabled = true; gen.classList.add("busy");
-        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: "{}" })
-          .then(function(r){ if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
+        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: JSON.stringify({ chat: state.chat || "main" }) })
+          .then(function(r){ commitDraft = r.message; msgbox = document.getElementById("gmsg"); if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
           .catch(function(e){ toast(e.message); })
           .then(function(){ gen.disabled = false; gen.classList.remove("busy"); });
       };

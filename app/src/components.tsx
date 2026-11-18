@@ -282,6 +282,7 @@ export function Segmented<K extends string>(props: {
  * near-white fill with dark text; everything else is a raised neutral key.
  */
 export function Btn(props: {
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   primary?: boolean;
@@ -290,6 +291,9 @@ export function Btn(props: {
   return (
     <TouchableOpacity
       onPress={props.onPress}
+      disabled={props.disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: props.disabled }}
       activeOpacity={0.7}
       style={{
         backgroundColor: props.primary ? T.bright : T.raised,
@@ -749,6 +753,8 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  if (e.kind === "review" && p.phase === "started") return <Sys text={`Review checklist\n${(Array.isArray(p.checklist) ? p.checklist : []).map(item => "☐ " + String(item)).join("\n")}`} />;
+  if (e.kind === "status" && p.state === "git_failed") return <Sys text={`Git: ${String(p.text || "commit failed")}`} />;
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
   if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Generate per-turn commit subjects from the prompt and diff, with an offline template and an optional configured model (#420).
+- Draft editable PR descriptions from a chat with `loom pr:describe`, source control and phone controls (#420).
+- Opt into a Git branch per chat, created on the first reported edit and reused on later turns (#420).
+- Show per-agent lines added/removed and unique file counts in project insights, the API and `loom git:stats` (#420).
+- Harden existing single-file checkpoint rewind against path patterns and symlink escapes, and expose it on the phone (#420).
+- Preflight Orchestra integration with Git merge prediction and report conflicts before merging (#420).
+- Attach standard, security or release review checklists to reviews and PR drafts across CLI, web and phone (#420).
+- Honor repository hooks for Orchestra and crew commits, preserve unrelated staged files in turn commits, and surface Git failures in the thread (#420).
+- Suggest CHANGELOG bullets from a merged branch's commits in CLI, web and phone (#420).
+
 ## [2.0.0] — 2026-11-17
 
 **Loom 2: every agent, every model, as many as you want.** Fleets of agents on different models,

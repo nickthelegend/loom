@@ -101,7 +101,7 @@ import { shortModel } from './permissions.js';
     var what = t.kind === "file" ? t.file : t.kind === "diff" ? "the uncommitted changes" : t.label || "your request";
     if (p.phase === "started") {
       return '<div class="sys reviewline">\ud83d\udd0d ' + esc((p.agents || []).map(labelOf).join(", ")) + " reviewing " + esc(what) +
-        " \u2014 read-only, nobody takes the baton" + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") +
+        " \u2014 read-only, nobody takes the baton" + (p.checklist ? "<ul>" + p.checklist.map(function(c){ return "<li>☐ " + esc(c) + "</li>"; }).join("") + "</ul>" : "") + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") +
         ((p.unreliable || []).length ? ' <span class="rvwarn">\u26a0 ' + esc(p.unreliable.map(labelOf).join(", ")) + " hasn\u2019t finished a review here yet</span>" : "") + "</div>";
     }
     if (p.phase !== "done") return "";
@@ -425,6 +425,8 @@ import { shortModel } from './permissions.js';
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
     }
     // a model agent moving to its next model (a busy or app-only free model), and a CLI stopping early: say so
+    if (e.kind === "status" && p.state === "git_failed") return '<div class="sys warnline">Git: ' + esc(p.text || "commit failed") + "</div>";
+    if (e.kind === "status" && p.state === "chat_branch") return '<div class="sys">Branch: ' + esc(p.branch || "") + "</div>";
     if (e.kind === "status" && p.state === "model_fallback") {
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }

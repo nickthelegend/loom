@@ -1,3 +1,4 @@
+import { GitReviewPanel } from "./git-review";
 /**
  * The three screens: Pair, Board, Project — quiet graphite.
  *
@@ -2236,6 +2237,10 @@ export function ProjectScreen(props: {
               ) : (
                 <Sys text="working tree is clean" />
               )}
+              <GitReviewPanel creds={creds} id={project.id} chat={chatId} agent={selected ?? project.holder ?? undefined} checkpoints={checkpoints ?? []} onMessage={setCommitMsg} onRewind={() => {
+                void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(e => setErr(String(e)));
+                void getCheckpoints(creds, project.id).then(x => setCheckpoints(x.checkpoints)).catch(e => setErr(String(e)));
+              }} />
               {/* Rewind: the files as they were before a turn — the desktop's rewind menu */}
               {checkpoints && checkpoints.length ? (
                 <View style={{ gap: 2, marginTop: spacing.md }}>
