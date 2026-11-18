@@ -1,3 +1,4 @@
+import { mountR4Insights } from './insights-r4.js';
 import { api } from '../connection.js';
 import { esc,money } from '../format.js';
 import { ICONS,LOADER } from '../icons.js';
@@ -270,6 +271,7 @@ export function createObservatory(view) {
     }
 
     function renderObservatory(el, p, m, events){
+      var r4Existing = el.querySelector(".r4insights");
       var agents = (p.agents || []), byAgent = obByAgent(m);
       var active = agents.filter(function(a){ return a.busy; }).length;
       var totalUsd = m.totalUsd != null ? m.totalUsd : (p.costUsd || 0);
@@ -400,6 +402,7 @@ export function createObservatory(view) {
       if (state.obView === "logs") observatoryLogs(p);
       if (state.obView === "alerts") observatoryAlerts(p, events);
       if (state.obView === "travel") observatoryTravel(p);
+      if (state.obView === "metrics") mountR4Insights(el.querySelector(".obbody"), p, r4Existing);
     }
 
     // "Why did I fail?" — pull the agent's own traces and root-cause them.

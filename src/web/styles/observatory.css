@@ -471,3 +471,16 @@
   .psswitch input:checked+.pssl{background:color-mix(in srgb,var(--ok) 30%,transparent);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
   .psswitch input:checked+.pssl::after{transform:translateX(14px);background:var(--ok)}
   .psswitch input:disabled+.pssl{opacity:.6;cursor:default}
+
+  .r4insights{display:grid;gap:14px;margin-top:20px;min-width:0}
+  .r4insights h2{font-size:16px;margin:0}.r4insights h3{font-size:13px;margin:0 0 12px}.r4insights h4{font-size:12px;color:var(--muted-foreground)}
+  .r4toolbar{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .r4toolbar label{display:grid;gap:4px;font-size:12px;color:var(--muted-foreground)}
+  .r4toolbar input,.r4toolbar select,.r4toolbar>select{background:var(--secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px;color:var(--foreground);font:inherit;max-width:100%}
+  .r4toolbar input[name=expression]{width:320px}.r4insights .btn{font-size:12px;overflow-wrap:anywhere;white-space:normal}
+  .r4table{overflow:auto;margin-bottom:10px}.r4table table{border-collapse:collapse;width:100%;font-size:12px;text-align:left}
+  .r4table th,.r4table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}.r4table th{color:var(--muted-foreground);font-weight:500}
+  .r4table pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:600px}.r4table a{color:var(--primary)}
+  .r4bar{display:grid;grid-template-columns:minmax(100px,1fr) minmax(60px,2fr) minmax(150px,2fr);gap:10px;align-items:center;font-size:12px;padding:6px 0}
+  .r4bar meter{width:100%;accent-color:var(--primary)}.r4bar span{overflow-wrap:anywhere}
+  @media(max-width:600px){.r4bar{grid-template-columns:1fr}.r4toolbar input[name=expression]{width:230px}}

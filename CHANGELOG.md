@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Extend existing tool counters with correlated outcomes, failure rates and measured average duration by tool and agent in `loom insights tools`, project APIs, Observatory and phone cards (#450).
+- Extend existing turn-duration metrics with first-output and turn p50/p95 by model and agent, durable stream timing, `loom insights latency`, APIs and Observatory charts (#450).
+- Approval wait percentiles, responders and most-asked commands in `loom insights approvals` and Observatory, with confirmed owner/owner-phone suggestions for non-shell tool-wide allow rules (#450).
+- Extend digest error collapsing with normalized failed-turn groups, counts, last-seen times and example links in `loom insights errors`, project APIs, Observatory and the phone (#450).
+- Compare adjacent periods for turns, finish rate, spend and changed lines via `loom insights compare --period 7d`, the project API, Observatory tiles and digest direction markers (#450).
+- Extend the event log with filtered, paginated `loom events` queries, a project query API and an Observatory table with saved per-project filters (#450).
+- Project reliability and speed alert rules for finish rate, turn minutes, errors per hour and queue depth, persisted and evaluated by the daemon with existing desktop/phone notifications; CLI, web and phone create/list/pause/test controls (#450).
+- Extend existing file diff statistics with edit, re-edit and rewind hot spots via `loom insights files`, project APIs and an Observatory card that opens files (#450).
+- Agent working-time timesheets by project, agent and UTC day, excluding recorded human waits and overlapping work; `loom insights hours --csv`, project APIs, an Observatory chart and phone summary (#450).
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

@@ -11,6 +11,7 @@
  * behind it doesn't get written.
  */
 
+import { comparison } from "../observability/r4/analytics.js";
 import type { LoomEvent } from "../types.js";
 
 export interface DigestLine {
@@ -26,6 +27,7 @@ export interface DigestLine {
 }
 
 export interface Digest {
+  comparison?: ReturnType<typeof comparison>;
   since: number;
   lines: DigestLine[];
   /** Totals worth one line at the top, when there's anything to total. */
@@ -121,5 +123,16 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
       eventId: 0,
     });
   }
-  return { since, lines: lines.slice(0, MAX_LINES), turns, costUsd, waiting: [...waiting] };
+  return withDigestComparison({ since, lines: lines.slice(0, MAX_LINES), turns, costUsd, waiting: [...waiting] }, events);
+}
+
+/** Keep the digest's short narrative while comparing the full retained history. */
+export function withDigestComparison(value: Digest, events: LoomEvent[], now = Date.now()): Digest {
+  const compare = comparison(events, Math.max(1, now - value.since), now);
+  const comparisonText = "vs previous: " + Object.entries(compare.changes).map(([name, change]) => `${name} ${change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "→"} ${Math.abs(change.delta).toFixed(2)}`).join(" · ");
+  const lines = value.lines.map(line => ({ ...line }));
+  if (lines[0]?.kind === "cost" && lines[0].text.startsWith("vs previous:")) lines.shift();
+  if (lines[0]?.kind === "cost") lines[0].text = lines[0].text.split(" · vs previous:")[0] + " · " + comparisonText;
+  else if (compare.current.turns || compare.previous.turns || compare.current.lines || compare.previous.lines) lines.unshift({ at: now, kind: "cost", text: comparisonText, eventId: 0 });
+  return { ...value, comparison: compare, lines: lines.slice(0, MAX_LINES) };
 }

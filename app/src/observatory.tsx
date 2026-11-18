@@ -1,3 +1,4 @@
+import { R4Insights } from "./r4-insights";
 import { diffSummary } from "./git-review-model";
 /**
  * The Observatory, natively.
@@ -272,6 +273,7 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
         ) : (
           <ReplayView snapshots={snapshots} decisions={decisions} spans={spans} />
         )}
+        {view === "metrics" ? <R4Insights creds={creds} projectId={project.id} /> : null}
       </ScrollView>
 
       <TriageSheet
