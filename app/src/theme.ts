@@ -91,7 +91,7 @@ const LIGHT: typeof DARK = {
 
 /**
  * The tokens every screen reads. Mutable on purpose: setScheme swaps the
- * palette in place and the app remounts its tree, so the hundreds of inline
+ * palette in place and the app re-renders its tree, so the hundreds of inline
  * styles that read T.x pick the new values up without each one subscribing.
  */
 export const T: typeof DARK = { ...DARK };

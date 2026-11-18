@@ -953,7 +953,7 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
   if (status === 401) {
     await clearCreds();
     onUnauthorized?.();
-    throw new Error("unauthorized — pair again");
+    throw new ApiError("unauthorized — pair again", 401);
   }
   if (status < 200 || status >= 300) throw new ApiError(String(json.message ?? json.error ?? `HTTP ${status}`), status);
   return json as T;

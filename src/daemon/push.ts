@@ -133,18 +133,27 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
   }
 }
 
+/** The machine is part of the key because a phone can pair with several computers. */
+export function projectPushGroup(data: Record<string, unknown>): string {
+  return `loom:${encodeURIComponent(String(data.daemon ?? ""))}:${encodeURIComponent(String(data.projectId ?? ""))}`;
+}
+
 /** Send one message to many devices in a single Expo batch call. Best-effort. */
-export async function sendExpoPush(tokens: string[], message: PushMessage): Promise<void> {
+export async function sendExpoPush(tokens: string[], message: PushMessage, groupedAndroid: ReadonlySet<string> = new Set()): Promise<void> {
   if (!tokens.length || process.env.LOOM_NO_PUSH) return;
   const url = process.env.LOOM_EXPO_PUSH_URL ?? EXPO_PUSH_URL;
-  const batch = tokens.map((to) => ({
-    to,
-    title: message.title,
-    body: message.body,
-    sound: "default",
-    ...(message.data ? { data: message.data } : {}),
-    ...(message.categoryId ? { categoryId: message.categoryId } : {}),
-  }));
+  const batch = tokens.map((to) => {
+    const group = message.data?.projectId ? projectPushGroup(message.data) : undefined;
+    const androidData = group && groupedAndroid.has(to);
+    return {
+      to,
+      ...(androidData ? { priority: "high" } : { title: message.title, body: message.body, sound: "default" }),
+      ...(group ? { threadId: group } : {}),
+      ...(message.data ? { data: { ...message.data, ...(group ? { projectGroup: group } : {}),
+        ...(androidData ? { loomTitle: message.title, loomBody: message.body } : {}) } } : {}),
+      ...(message.categoryId ? { categoryId: message.categoryId } : {}),
+    };
+  });
   try {
     await fetch(url, {
       method: "POST",

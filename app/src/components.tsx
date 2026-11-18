@@ -1,3 +1,4 @@
+import { diffLocations, type DiffLocation } from "./phone-batch-model";
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
 import { MessagePressable, type ChatActions } from "./chat-composer";
@@ -333,7 +334,10 @@ export function Sys(props: { text: string; color?: string }) {
 }
 
 /** Unified diff with +/− washes; used by turn cards and the Changes tab. */
-export function DiffView(props: { patch: string; maxHeight?: number }) {
+export function DiffView(props: { patch: string; maxHeight?: number; onAsk?: (line: DiffLocation) => void }) {
+  const context = useContext(ThreadCtx);
+  const ask = props.onAsk ?? context?.askLine;
+  const locations = diffLocations(props.patch);
   const lines = props.patch.split("\n");
   return (
     <ScrollView
@@ -372,6 +376,8 @@ export function DiffView(props: { patch: string; maxHeight?: number }) {
         return (
           <Text
             key={i}
+            onLongPress={locations[i] && ask ? () => ask(locations[i]!) : undefined}
+            accessibilityHint={locations[i] && ask ? "Hold to ask about this line in chat" : undefined}
             style={{
               color: add ? T.gitAdd : del ? T.gitDel : meta ? T.faint : T.dim,
               backgroundColor: add ? T.diffAddBg : del ? T.diffDelBg : "transparent",
@@ -446,7 +452,7 @@ export interface BranchCtx {
   edit: (eventId: number, text: string) => void;
   retry: (eventId: number) => void;
 }
-export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx; composer?: ChatActions } | null>(null);
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx; composer?: ChatActions; askLine?: (line: DiffLocation) => void } | null>(null);
 
 /** ‹ n/m › under a message that has other versions (#375). */
 function BranchPager(props: { eventId: number; mine: boolean }) {

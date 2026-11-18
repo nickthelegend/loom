@@ -341,6 +341,8 @@ export interface PairedClient {
   guest?: GuestScope;
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
+  /** The Android client can present grouped data notifications. */
+  pushGroupByProject?: boolean;
   platform?: string;
   /** Which push categories this device wants (questions, approvals, done, goals); absent means all. */
   pushKinds?: string[];

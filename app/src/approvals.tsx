@@ -9,6 +9,7 @@
  * to one line.
  */
 
+import { haptic } from "./haptics";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { decideApproval, getApprovals, type Approval, type Creds, type LoomEvent } from "./api";
@@ -98,6 +99,7 @@ export function ApprovalCard(props: {
     const message = decision === "deny" ? reason.trim() : "";
     try {
       await decideApproval(props.creds, props.projectId, props.approvalId, decision, message || undefined);
+      haptic.success();
       const o: ApprovalOutcome = { behavior: decision === "deny" ? "deny" : "allow", ...(message ? { message } : {}) };
       setLocal(o);
       props.onDecided?.(o);

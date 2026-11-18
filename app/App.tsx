@@ -12,6 +12,11 @@ import "react-native-get-random-values";
  * optional; "continue without an account" is remembered.
  */
 
+import { usePhoneEntry } from "./src/phone-entry";
+import { usePhoneLock, LockScreen } from "./src/phone-lock";
+import { loadHaptics } from "./src/phone-preferences";
+import { outbox } from "./src/outbox";
+import { haptic } from "./src/haptics";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
@@ -34,6 +39,7 @@ type Route =
   | {
       name: "project";
       project: Project;
+      action?: "new-chat";
       chat?: { id: string; title: string };
       from?: "board" | "fleet";
       /** Opened from a tapped push: which tab (and goal), and a nonce so a second tap re-opens it. */
@@ -47,6 +53,33 @@ export default function App() {
   const [skipped, setSkipped] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const auth = useAuth();
+  const lock = usePhoneLock();
+  const entry = usePhoneEntry();
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => { if (lock.ready && !lock.locked) setRevealed(true); }, [lock.ready, lock.locked]);
+  useEffect(() => { if (lock.locked) setAccountOpen(false); }, [lock.locked]);
+  const [pendingNew, setPendingNew] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(false);
+  useEffect(() => { void loadHaptics().catch(() => {}); }, []);
+  useEffect(() => {
+    if (!booted || !creds || !lock.ready || lock.locked || !entry.action) return;
+    setRoute({ name: "board" });
+    setPendingNew(entry.action === "new-chat");
+    setPendingApprovals(entry.action === "approvals");
+    entry.clearAction();
+  }, [booted, creds, lock.ready, lock.locked, entry.action]);
+  useEffect(() => {
+    if (!entry.text || !creds || lock.locked) return;
+    setRoute({ name: "board" });
+  }, [entry.text, creds, lock.locked]);
+  useEffect(() => {
+    if (!creds || !lock.ready || lock.locked) return;
+    let live = true;
+    const flush = () => { if (live && AppState.currentState === "active") void outbox(creds).then(q => live ? q.flush(() => live && AppState.currentState === "active") : undefined).catch(() => {}); };
+    flush(); const timer = setInterval(flush, 4000);
+    const sub = AppState.addEventListener("change", state => { if (state === "active") flush(); });
+    return () => { live = false; clearInterval(timer); sub.remove(); };
+  }, [creds, lock.ready, lock.locked]);
   // A tapped push notification, waiting for credentials to open its project.
   const [opening, setOpening] = useState<NotificationRoute | null>(null);
 
@@ -61,19 +94,22 @@ export default function App() {
     });
   }, []);
 
-  // Allow / Deny on an approval alert, answered on the computer that asked — the app needn't open.
+  // Notification answers wait behind the same lock as the app's approval sheet.
+  const [approvalAction, setApprovalAction] = useState<{ data: Record<string, unknown>; decision: "allow" | "deny" } | null>(null);
+  useEffect(() => onApprovalAction((data, decision) => setApprovalAction({ data, decision })), []);
+  useEffect(() => { if (lock.ready) void registerApprovalActions(lock.enabled); }, [lock.ready, lock.enabled]);
   useEffect(() => {
-    void registerApprovalActions();
-    return onApprovalAction((data, decision) => {
-      const projectId = typeof data.projectId === "string" ? data.projectId : "";
-      const approvalId = typeof data.approvalId === "string" ? data.approvalId : "";
-      if (!projectId || !approvalId) return;
-      void listMachines().then(({ machines, activeId }) => {
-        const m = machineForPush(machines, data.daemon, activeId);
-        if (m) void decideApproval(credsOf(m) as Creds, projectId, approvalId, decision).catch(() => {});
-      });
+    if (!approvalAction || !lock.ready || lock.locked) return;
+    const { data, decision } = approvalAction;
+    setApprovalAction(null);
+    const projectId = typeof data.projectId === "string" ? data.projectId : "";
+    const approvalId = typeof data.approvalId === "string" ? data.approvalId : "";
+    if (!projectId || !approvalId) return;
+    void listMachines().then(({ machines, activeId }) => {
+      const m = machineForPush(machines, data.daemon, activeId);
+      if (m) void decideApproval(credsOf(m) as Creds, projectId, approvalId, decision).then(() => haptic.success()).catch(() => {});
     });
-  }, []);
+  }, [approvalAction, lock.ready, lock.locked]);
 
   // Register for pushes whenever we have credentials (idempotent).
   useEffect(() => {
@@ -90,7 +126,7 @@ export default function App() {
     [],
   );
   useEffect(() => {
-    if (!opening || !creds) return;
+    if (!opening || !creds || !lock.ready || lock.locked) return;
     const want = opening;
     setOpening(null);
     void getProject(creds, want.projectId)
@@ -104,7 +140,7 @@ export default function App() {
         }),
       )
       .catch(() => {}); // a project this pairing can't see (or one since removed): stay put
-  }, [opening, creds]);
+  }, [opening, creds, lock.ready, lock.locked]);
 
   // A revoked/expired token anywhere sends us back to the pair screen.
   useEffect(() => {
@@ -133,8 +169,7 @@ export default function App() {
   }, [pastWelcome]);
 
   // Dark by default, as on the desktop; Light, or follow the phone, from the
-  // account sheet. The palette swaps in place and the tree below remounts
-  // under a new key, so every inline style reads the new tokens.
+  // account sheet. Re-render in place so drafts and open chats survive a switch.
   const sysScheme = useColorScheme();
   const [themePref, setThemePref] = useState<ThemePref>("dark");
   useEffect(() => {
@@ -148,9 +183,10 @@ export default function App() {
     {/* Android 15+ draws every app edge to edge (and an app targeting API 36
         can't opt out), so the status and navigation bars are real insets on
         both platforms now — not an opaque bar Android lays out for us. */}
-    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
       <StatusBar style={scheme === "light" ? "dark" : "light"} />
-      {!booted || !auth.ready ? (
+      <View style={{ flex: 1, opacity: lock.locked ? 0 : 1 }} pointerEvents={lock.locked ? "none" : "auto"} accessibilityElementsHidden={lock.locked} importantForAccessibility={lock.locked ? "no-hide-descendants" : "auto"}>
+      {!booted || !auth.ready || !revealed ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
       ) : showWelcome ? (
         <WelcomeScreen
@@ -173,7 +209,10 @@ export default function App() {
       ) : route.name === "board" ? (
         <BoardScreen
           creds={creds}
-          onOpen={(project) => setRoute({ name: "project", project })}
+          initialApprovals={pendingApprovals}
+          onApprovalsOpened={() => setPendingApprovals(false)}
+          entryHint={pendingNew ? "Choose a project for your new chat" : entry.text ? "Choose a project for shared text" : undefined}
+          onOpen={(project) => { setRoute({ name: "project", project, ...(pendingNew ? { action: "new-chat" as const } : {}) }); setPendingNew(false); }}
           onFleet={() => setRoute({ name: "fleet" })}
           onUnpair={() => {
             void unpair();
@@ -209,6 +248,9 @@ export default function App() {
           key={`${route.project.id}:${route.chat?.id ?? ""}:${route.focus?.n ?? ""}`}
           creds={creds}
           project={route.project}
+          initialAction={route.action}
+          sharedDraft={entry.text}
+          onSharedDraft={entry.clearText}
           {...(route.chat ? { initialChat: route.chat } : {})}
           {...(route.focus ? { initialTab: route.focus.tab } : {})}
           {...(route.focus?.crewId ? { initialCrewId: route.focus.crewId } : {})}
@@ -216,9 +258,13 @@ export default function App() {
           onBack={() => setRoute(route.from === "fleet" ? { name: "fleet" } : { name: "board" })}
         />
       )}
+      </View>
+      <LockScreen visible={lock.locked && (lock.ready || !!lock.error)} error={lock.error} onUnlock={() => void lock.unlock()} />
       <AccountSheet
         themePref={themePref}
-        visible={accountOpen}
+        biometricLock={lock.enabled}
+        onBiometricLock={lock.toggle}
+        visible={accountOpen && !lock.locked}
         onClose={() => setAccountOpen(false)}
         user={auth.user}
         creds={creds}
