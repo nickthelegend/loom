@@ -69,6 +69,7 @@ import { SemanticIndex } from "../core/semantic.js";
 import { Servers } from "../core/servers.js";
 import {
   SkillInstallError,
+  assertReallyInside,
   installSkillFromDir,
   installSkillFromGit,
   type SkillInstallResult,
@@ -1567,6 +1568,8 @@ export class ProjectRuntime {
       );
     }
     const dir = path.join(own, skill.id);
+    // a `skills` link out of the project would aim this recursive delete elsewhere
+    assertReallyInside(this.info.dir, dir);
     fs.rmSync(dir, { recursive: true, force: true });
     if (this.config.skills?.[skill.id]) this.setSkillEnabled(skill.id, false);
     return { removed: true, id: skill.id, path: dir };

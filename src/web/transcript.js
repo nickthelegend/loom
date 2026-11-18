@@ -378,7 +378,8 @@ import { shortModel } from './permissions.js';
           '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +
           '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
           (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
-          '<button type="button" class="uact ustar" title="Star" aria-label="star your message">' + ICONS.star + "</button>" +
+          '<button type="button" class="uact ustar" title="Bookmark" aria-label="bookmark your message">' + ICONS.star + "</button>" +
+          '<button type="button" class="uact msgmore" title="Message actions" aria-label="more actions">' + ICONS.dots + "</button>" +
           // a steer went into a turn that was already running, not a new one (#373)
           (p.steer ? '<span class="usteer" title="sent into the turn that was running">steered</span>' : "") +
           '<span class="wt" data-rel="' + Number(e.ts || 0) + '" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + relClock(e.ts) + "</span></div></div>";
@@ -416,7 +417,7 @@ import { shortModel } from './permissions.js';
         var att = /^\.loom\/attachments\//.test(im.path);
         return '<button type="button" class="toolimg"' + (att ? "" : ' data-artifact="' + esc(im.path) + '"') + ' title="' + esc(im.path) + '"><img ' + (att ? 'data-att="' : 'data-projimg="') + esc(im.path) + '" alt=""></button>';
       }).join("") + "</div>" : "";
-      return '<div class="tool' + (det ? " hasdet" : "") + (failed ? " tfail" : "") + '" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"' + (p.parent ? ' data-parent="' + esc(p.parent) + '"' : "") + ">" +
+      return '<div class="tool' + (det ? " hasdet" : "") + (failed ? " tfail" : "") + '" data-event-id="' + Number(e.id || 0) + '" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"' + (p.parent ? ' data-parent="' + esc(p.parent) + '"' : "") + ">" +
         '<span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
         (p.server ? '<span class="tsrv">' + esc(p.server) + "</span>" : "") +
         '<span class="tx">' + esc(p.server ? String(p.summary || "").replace(/^[^·]*·\s*/, "") : (p.summary || p.tool || p.name)) + "</span>" +
@@ -455,7 +456,7 @@ import { shortModel } from './permissions.js';
     }
     if (e.kind === "file_edit") {
       var fdiff = p.diff ? '<span class="tchev">' + ICONS.chevron + '</span><div class="tooldet md">' + mdToHtml("```diff\n" + String(p.diff) + "\n```") + "</div>" : "";
-      return '<div class="tool' + (p.diff ? " hasdet" : "") + '" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" + fdiff +
+      return '<div class="tool' + (p.diff ? " hasdet" : "") + '" data-event-id="' + Number(e.id || 0) + '" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" + fdiff +
         (ARTIFACT_EXT.test(String(p.path || "")) ? '<button type="button" class="artchip mini" data-artifact="' + esc(p.path) + '" title="preview ' + esc(p.path) + '">' + ICONS.play + "Preview</button>" : "") + "</div>";
     }
     if (e.kind === "turn_diff") {

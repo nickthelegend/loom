@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import { timingSafeEqual } from "node:crypto";
 import { listProjects } from "../../core/registry.js";
-import { isLoopbackHost } from '../system.js';
+import { isLoopback, isLoopbackHost } from '../system.js';
 import type { RouteContext } from './context.js';
 /** Register alerts routes in the order established by LoomDaemon.routes(). */
 export function registerAlertsRoutes(app: Express, ctx: Pick<RouteContext, "host" | "runtime" | "startHealLoop">): void {
@@ -40,10 +40,16 @@ export function registerAlertsRoutes(app: Express, ctx: Pick<RouteContext, "host
       // that secret whenever the daemon binds past localhost" — this makes it
       // true rather than advisory, and says which variable to set instead of
       // just refusing.
-      if (!secret && !isLoopbackHost(ctx.host)) {
+      //
+      // "On loopback" means the daemon is bound there AND this request's own
+      // socket is loopback: phone access (expose()) adds a LAN or tailnet
+      // listener without changing the primary host, and a relayed request
+      // arrives from loopback carrying x-loom-via. Same rule as /api/bootstrap.
+      const local = !req.headers["x-loom-via"] && isLoopback(req.socket.remoteAddress) && isLoopbackHost(req.headers.host);
+      if (!secret && (!isLoopbackHost(ctx.host) || !local)) {
         return void res.status(401).json({
           error:
-            "this daemon is not bound to localhost, so the webhook needs LOOM_WEBHOOK_SECRET set",
+            "this daemon is reachable beyond localhost, so the webhook needs LOOM_WEBHOOK_SECRET set",
         });
       }
       const body = (req.body ?? {}) as Record<string, unknown>;

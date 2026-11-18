@@ -118,13 +118,62 @@ export const READ_TOOLS: ToolSpec[] = [
 export function insideProject(root: string, rel: string): string {
   const base = path.resolve(root);
   const full = path.resolve(base, rel || ".");
+  contained(base, full, rel);
+  // The lexical check alone is not the boundary: `leak -> /elsewhere` is inside
+  // by name and outside by what fs.readFileSync actually opens. Prove it again
+  // on the real path — the deepest part that exists, through every link — and
+  // hand back that path, so what was checked is what gets opened.
+  const realBase = realOrSelf(base);
+  const real = realPath(full, rel);
+  contained(realBase, real, rel);
+  return real;
+}
+
+function contained(base: string, full: string, rel: string): void {
   if (full !== base && !full.startsWith(base + path.sep)) {
     throw new Error(`"${rel}" is outside the project`);
   }
   const parts = path.relative(base, full).split(path.sep).filter(Boolean);
   const blocked = parts.find((p) => HIDDEN.has(process.platform === "win32" ? p.toLowerCase() : p));
   if (blocked) throw new Error(`"${blocked}" isn't readable from here`);
-  return full;
+}
+
+function realOrSelf(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * A path with every existing component resolved through its links; the parts
+ * that don't exist yet (a file about to be written) are appended as named. A
+ * link that points nowhere is refused: writing through it would create its
+ * target, wherever that is.
+ */
+function realPath(full: string, rel: string): string {
+  const rest: string[] = [];
+  let probe = full;
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(probe), ...rest.reverse());
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+      let dangling = false;
+      try {
+        dangling = fs.lstatSync(probe).isSymbolicLink();
+      } catch {
+        /* doesn't exist at all: keep walking up */
+      }
+      if (dangling) throw new Error(`"${rel}" goes through a link that points nowhere`);
+      const parent = path.dirname(probe);
+      if (parent === probe) return full;
+      rest.push(path.basename(probe));
+      probe = parent;
+    }
+  }
 }
 
 function cut(text: string, limit: number): { text: string; cut: boolean } {
@@ -191,6 +240,8 @@ export function runReadTool(root: string, call: ToolCall): ToolResult {
       const query = String(call.args.query ?? "");
       if (!query) return fail("search needs a query");
       const root2 = insideProject(root, String(call.args.path ?? "."));
+      // insideProject hands back real paths, so hits are named relative to the real root
+      const base = realOrSelf(path.resolve(root));
       const hits: string[] = [];
       const walk = (dir: string, depth: number) => {
         if (depth > 8 || hits.length >= MAX_ENTRIES) return;
@@ -208,17 +259,28 @@ export function runReadTool(root: string, call: ToolCall): ToolResult {
             walk(full, depth + 1);
             continue;
           }
+          // A link is read only when where it really leads is inside the
+          // project too, and never followed into a directory (cycles).
+          let target = full;
+          if (e.isSymbolicLink()) {
+            try {
+              target = insideProject(root, path.relative(base, full));
+              if (fs.statSync(target).isDirectory()) continue;
+            } catch {
+              continue;
+            }
+          }
           let body: string;
           try {
-            if (fs.statSync(full).size > 2_000_000) continue;
-            body = fs.readFileSync(full, "utf8");
+            if (fs.statSync(target).size > 2_000_000) continue;
+            body = fs.readFileSync(target, "utf8");
           } catch {
             continue;
           }
           if (body.includes("\0") || !body.includes(query)) continue;
           body.split("\n").forEach((line, i) => {
             if (hits.length < MAX_ENTRIES && line.includes(query)) {
-              hits.push(`${path.relative(root, full).split(path.sep).join("/")}:${i + 1}: ${line.trim().slice(0, 200)}`);
+              hits.push(`${path.relative(base, full).split(path.sep).join("/")}:${i + 1}: ${line.trim().slice(0, 200)}`);
             }
           });
         }

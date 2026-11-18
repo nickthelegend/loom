@@ -1,3 +1,4 @@
+import { registerChatComposerRoutes } from "./chat-composer.js";
 import { ChatMoveError } from "../../core/chat-move.js";
 import { HubError } from "../../core/team-hub.js";
 import type { TeamLink } from "../team.js";
@@ -17,6 +18,8 @@ import { createShare, listShares, revokeShare } from "../../core/shares.js";
 import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
 export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team: TeamLink): void {
+
+  registerChatComposerRoutes(app, withRuntime);
 
   /** Owner only. POST {to: runnerDeviceId, wait?: boolean} waits by default, then returns
    * {chat: ChatInfo, jobId}. chat.movedTo is also on GET /chats. wait:false returns 409
@@ -457,6 +460,10 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
     "/api/projects/:id/chats/:chatId/star",
     withRuntime(async (rt, req, res) => {
       const { eventId, on } = (req.body ?? {}) as { eventId?: unknown; on?: unknown };
+      const who = req as Request & { guest?: unknown; projectScope?: string[] | null };
+      if (who.guest || who.projectScope) return void res.status(403).json({ error: "bookmarks are private to the owner and their devices" });
+      if (!rt.chats().some(c => c.id === req.params.chatId) || !rt.log.list({ chat: String(req.params.chatId), kinds: ["message"] }).some(e => e.id === eventId))
+        return void res.status(400).json({ error: "no such message in this chat" });
       const starred = rt.starMessage(String(req.params.chatId), Number(eventId), on !== false);
       if (!starred) return void res.status(400).json({ error: "no such thread or message" });
       res.json({ starred });
