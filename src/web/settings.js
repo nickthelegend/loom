@@ -1,4 +1,5 @@
 /** Browser settings module. See README.md for ownership and startup. */
+import { renderIntegrationSettings } from "./integrations-ui.js";
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,logout } from './connection.js';
@@ -45,6 +46,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       { id: "agentskills", label: "Loom for agents", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
+      { id: "integrations", label: "Integrations & email", icon: ICONS.gear },
       { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
       { id: "about", label: "About", icon: ICONS.info }
     ];
@@ -1055,6 +1057,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           '<label class="trsw"><input type="checkbox" data-b="' + p + '-same-approvers"' + (!c || c.approvers === undefined ? ' checked' : '') + '><span>Let everyone listed above answer approvals</span></label>' +
           '<div class="field"><label>Approvers <span class="opt">user ids, comma-separated; empty = nobody</span></label><input data-b="' + p + '-approvers" value="' + esc(c ? (c.approvers || []).join(", ") : "") + '"' + (!c || c.approvers === undefined ? ' disabled' : '') + ' spellcheck="false"></div>' +
           '<div class="field"><label>In channels <span class="opt">ids; blank = any channel the bot is in</span></label><input data-b="' + p + '-channels" value="' + esc(c ? (c.channels || []).join(", ") : "") + '" spellcheck="false"></div>' +
+          (p === "discord" ? '<div class="field"><label>Orchestra progress channel <span class="opt">one thread per run; blank disables</span></label><input data-b="discord-orchestra" value="' + esc((c && c.orchestraChannel) || "") + '"></div>' : '<p class="hintx">Add a /loom slash command with commands scope in your Slack app. /loom &lt;goal&gt; starts Orchestra on this bridge’s project.</p>') +
           '<div class="field"><label>Project <span class="opt">blank = the only one</span></label><input data-b="' + p + '-project" value="' + esc((c && c.project) || "") + '" spellcheck="false"></div>' +
           "</div>" +
           '<div class="pillrow"><button class="btn primary sm" data-save="' + p + '">' + (c && c.enabled ? "Save & reconnect" : "Connect") + "</button>" +
@@ -1071,6 +1074,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       Array.prototype.forEach.call(pane.querySelectorAll("[data-save]"), function(btn){
         btn.onclick = function(){
           var p = btn.getAttribute("data-save"), body = { enabled: true, users: val(p + "-users"), channels: val(p + "-channels"), project: val(p + "-project") };
+          if (p === "discord") body.orchestraChannel = val("discord-orchestra");
           body.approvers = pane.querySelector('[data-b="' + p + '-same-approvers"]').checked ? null : val(p + "-approvers");
           if (val(p + "-bot")) body.botToken = val(p + "-bot");
           if (p === "slack" && val("slack-app")) body.appToken = val("slack-app");
@@ -1097,6 +1101,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       else if (cur === "accounts") renderAccounts();
       else if (cur === "agentskills") renderAgentSkills();
       else if (cur === "cloud") renderCloud();
+      else if (cur === "integrations") renderIntegrationSettings(pane, sapi);
       else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();
       else if (cur === "about") renderAbout();

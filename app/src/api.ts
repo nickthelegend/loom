@@ -970,10 +970,10 @@ export const createBranch = (c: Creds, id: string, chat: string, body: { fromEve
 export const activateBranch = (c: Creds, id: string, chat: string, branch: string, rewindFiles = false) =>
   api<{ active: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/branches/${encodeURIComponent(branch)}/activate`, { method: "POST", body: JSON.stringify(rewindFiles ? { rewindFiles: true } : {}) });
 /** My issues (#382): open issues assigned to you, and starting them as chats or Orchestra goals. */
-export interface IntakeIssue { source: "github" | "linear"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
-export const getIntake = (c: Creds, id: string, source: "github" | "linear", label?: string) =>
+export interface IntakeIssue { source: "github" | "linear" | "jira"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
+export const getIntake = (c: Creds, id: string, source: "github" | "linear" | "jira", label?: string) =>
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake?source=${source}${label ? `&label=${encodeURIComponent(label)}` : ""}`);
-export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
+export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear" | "jira"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake/start`, { method: "POST", body: JSON.stringify(body) });
 /** Files (#380): the project's own tree, read-only — the desktop's Explorer. */
 export interface FileEntry { name: string; path: string; dir: boolean }

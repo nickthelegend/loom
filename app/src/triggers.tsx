@@ -4,6 +4,7 @@
  * Adding, editing and removing stay on the computer (the daemon refuses them from a phone).
  */
 
+import { IntegrationsPanel } from "./integrations";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Switch, Text, TouchableOpacity, View } from "react-native";
 import { fireTrigger, getTriggers, setTriggerEnabled, type Creds, type Trigger, type TriggerRun } from "./api";
@@ -62,6 +63,7 @@ export function TriggersView(props: { creds: Creds; projectId: string; onOpenCha
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, gap: spacing.sm }}
       refreshControl={<RefreshControl refreshing={false} onRefresh={() => void load()} tintColor={T.dim} />}>
+      <IntegrationsPanel creds={props.creds} projectId={props.projectId} />
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
       {data === null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 24 }} /> : null}
       {data && data.triggers.length === 0 && (
