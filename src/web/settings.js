@@ -1465,7 +1465,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       '<button class="btn primary" id="pcreate">Create project<span class="kbd">⌘↵</span></button></div>' +
     "</div>";
     document.body.appendChild(scrim);
-    api("/api/templates").then(function(r){
+    api("/api/init-templates").then(function(r){
       if (!scrim.isConnected) return;
       var select = scrim.querySelector("#nptemplate");
       select.innerHTML += r.templates.map(function(t){ return '<option value="' + esc(t.name) + '">' + esc(t.name + " — " + t.description) + '</option>'; }).join("");

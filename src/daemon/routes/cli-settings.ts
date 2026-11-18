@@ -5,7 +5,8 @@ import { validateConfigFile } from "../../core/config-validation.js";
 import { findProject } from "../../core/registry.js";
 
 export function registerCliSettingsRoutes(app: Express): void {
-  app.get("/api/templates", (_req, res) => res.json({ templates: starterTemplates() }));
+  // /api/templates is the prompt-template library; starter project templates live here
+  app.get("/api/init-templates", (_req, res) => res.json({ templates: starterTemplates() }));
   app.get("/api/projects/:id/config/validate", (req, res) => {
     const project = findProject(String(req.params.id));
     if (!project) return void res.status(404).json({ error: "no such project" });

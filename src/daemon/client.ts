@@ -291,7 +291,7 @@ export class DaemonClient {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}), ...(template ? { template } : {}) });
   }
 
-  templates(): Promise<{ templates: Array<{ name: string; description: string }> }> { return this.request("GET", "/api/templates"); }
+  initTemplates(): Promise<{ templates: Array<{ name: string; description: string }> }> { return this.request("GET", "/api/init-templates"); }
   validateConfig(id: string): Promise<import("../core/config-validation.js").ConfigValidation> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/config/validate`); }
   aliases(): Promise<{ aliases: import("../core/aliases.js").CommandAliases }> { return this.request("GET", "/api/aliases"); }
   saveAlias(name: string, args: string[]): Promise<unknown> { return this.request("PUT", "/api/aliases", { name, args }); }
