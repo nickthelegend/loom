@@ -1,4 +1,7 @@
+import { recordChat } from "./workspace-r4/workspace.js";
+import { mountWorkspaceShell,mountHomeWorkspace } from "./workspace-r4/index.js";
 /** Browser shell module. See README.md for ownership and startup. */
+import { publishSelection,saveTab } from './session.js';
 import { devMode } from './mode.js';
 import { agentGlyph,agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
@@ -21,6 +24,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
 import { renderHome } from './welcome.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
+import { openSharing, projectPresenceHtml } from './sharing.js';
 import { openShareLive } from './share-live.js';
 import { openTriggers } from './triggers-ui.js';
 
@@ -175,10 +179,12 @@ import { openTriggers } from './triggers-ui.js';
     };
     var dmain = document.getElementById("dmain");
     var homeView = null;
+    mountWorkspaceShell();
     function drawEmpty(){
       // Home (#403): Get started, the demo, Loom for agents, your projects, who's winning
       if (homeView && dmain.querySelector(".home")) { homeView.refreshProjects(); return; }
       homeView = renderHome(dmain, { openProject: function(id){ select(id); } });
+      mountHomeWorkspace(dmain);
     }
     /**
      * Search the open project's conversations.
@@ -277,7 +283,7 @@ import { openTriggers } from './triggers-ui.js';
         var rows = '<div class="srow' + (sel ? " sel" : "") + '" data-id="' + esc(p.id) + '">' +
           '<div class="n">' +
           '<button class="scaret' + (open ? " open" : "") + '" data-caret="' + esc(p.id) + '" aria-label="' + (open ? "collapse " : "expand ") + esc(p.name) + '" aria-expanded="' + (open ? "true" : "false") + '">' + ICONS.chevron + "</button>" +
-          '<span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" +
+          '<span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" + projectPresenceHtml(p.presence) +
           // The gear takes the trailing slot, so the count needs its own
           // margin-left:auto — .cnt's rule loses to the badge's inline style.
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt" style="margin-left:auto">' + adapters.length + "</span>") +
@@ -838,6 +844,7 @@ import { openTriggers } from './triggers-ui.js';
       items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
+      items.push({ label: "Sharing and approvals…", icon: ICONS.team, run: function(){ openSharing(pid, cid); } });
       items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
       // Pick the conversation up on another machine (#364): history and the agent's place go with it
       if (!isMain) items.push(c.movedTo
@@ -849,7 +856,13 @@ import { openTriggers } from './triggers-ui.js';
           var row = document.querySelector('.crow[data-chat="' + cid + '"]');
           var r = (row || document.body).getBoundingClientRect();
           openMenu(Math.round(r.left + 24), Math.round(r.bottom), [
-            { head: "When this chat's PR needs work" },
+            { head: "When this chat's PR or GitLab MR needs work" },
+            { label: "Attach PR / GitLab MR…", icon: ICONS.pr, run: function(){
+              askText("Pull request or GitLab merge request URL", { placeholder: "https://gitlab.com/group/project/-/merge_requests/1", ok: "Attach" }).then(function(pr){
+                if (!pr) return;
+                return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/prs", { method: "POST", body: JSON.stringify({ pr: pr }) }).then(function(){ toast("Feedback attached to this chat"); });
+              }).catch(function(e){ toast(e.message); });
+            } },
             { label: "Send CI failures back", icon: (c.prFeedback || "ci") === "ci" ? ICONS.check : ICONS.pr, hint: "default", run: function(){ setPrFeedback(pid, cid, "ci"); } },
             { label: "CI failures and reviews", icon: c.prFeedback === "ci+reviews" ? ICONS.check : ICONS.pr, hint: "from people with write access", run: function(){ setPrFeedback(pid, cid, "ci+reviews"); } },
             { label: "Off", icon: c.prFeedback === "off" ? ICONS.check : ICONS.x, run: function(){ setPrFeedback(pid, cid, "off"); } },
@@ -1033,6 +1046,7 @@ import { openTriggers } from './triggers-ui.js';
       var info = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
       if (info && info.error) { drawUnavailable(info); drawList(); return; }
       renderProject(pid, dmain, true);
+      publishSelection(pid, currentChat());
       drawList();
     }
     /**
@@ -1061,11 +1075,16 @@ import { openTriggers } from './triggers-ui.js';
     state.selectProject = select;
     state.setChat = setChat; // the palette jumps to a conversation by id
     /** The conversation you're in, per project, remembered across reloads. */
+    var liveChats = {};
     function currentChat(){
       if (!cur) return "main";
-      try { return localStorage.getItem("loomChat:" + cur) || "main"; } catch (e) { return "main"; }
+      try { return liveChats[cur] || (liveChats[cur] = localStorage.getItem("loomChat:" + cur) || "main"); } catch (e) { return "main"; }
     }
     function setChat(pidC, cid){
+      liveChats[pidC] = cid;
+      recordChat(pidC, cid);
+      saveTab(pidC, "thread");
+      publishSelection(pidC, cid);
       try { localStorage.setItem("loomChat:" + pidC, cid); } catch (e) {}
       // opening a conversation means reading it: land on Chat, not the tab the project was on
       if (state.tabByProject) delete state.tabByProject[pidC];

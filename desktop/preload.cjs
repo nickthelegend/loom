@@ -16,6 +16,8 @@ window.addEventListener("DOMContentLoaded", function () {
 // passthrough. The browser build just types the path instead.
 contextBridge.exposeInMainWorld("loomNative", {
   webview: true,
+  tray: function (enabled) { return ipcRenderer.invoke("loom:tray", enabled); },
+  popChat: function (url) { return ipcRenderer.invoke("loom:pop-chat", url); },
   pickFolder: function () {
     return ipcRenderer.invoke("loom:pick-folder");
   },
@@ -26,6 +28,9 @@ contextBridge.exposeInMainWorld("loomNative", {
   },
   // Native menu items (Loom ▸ New Orchestra…, Connect a Phone…, Settings…).
   // The page subscribes; the action is one of a fixed set of strings.
+  setShortcuts: function (bindings) {
+    return ipcRenderer.invoke("loom:shortcuts", bindings);
+  },
   onMenu: function (cb) {
     ipcRenderer.on("loom:menu", function (_e, action) {
       if (typeof action === "string") cb(action);

@@ -5,6 +5,10 @@ import type { RouteContext, WithRuntime } from './context.js';
 /** Register project-team routes in the order established by LoomDaemon.routes(). */
 export function registerProjectTeamRoutes(app: Express, ctx: Pick<RouteContext, "team">, withRuntime: WithRuntime): void {
 
+  app.get("/api/projects/:id/teammates", withRuntime(async (rt, _req, res) => {
+    res.json({ teammates: await ctx.team.teammates(rt) });
+  }));
+
   // ---- team policy in effect for a project (D37) ----
   app.get(
     "/api/projects/:id/team/policy",

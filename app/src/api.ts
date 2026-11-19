@@ -8,7 +8,7 @@ import { AppState, Platform, type AppStateStatus } from "react-native";
 import type { LiveSnapshot } from "./live-model";
 import { RelayClient, parseCloudFragment } from "./relay-client";
 import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
-import { activeMachine, credsOf, nextAfter, removeMachine, renameMachine, upsertMachine, type Machine } from "./machines-model";
+import { activeMachine, credsOf, forgetRevoked, nextAfter, removeMachine, renameMachine, upsertMachine, type Machine } from "./machines-model";
 import { supabaseRelayTransport } from "./relay-transport";
 
 // Credentials live in the device keychain on native; on web (Expo web, used for
@@ -53,6 +53,7 @@ export interface DaemonReachability {
 }
 
 export interface AgentStatus {
+  permissionIndicator?: string;
   id: string;
   kind: string;
   role: string;
@@ -104,6 +105,7 @@ export interface QuarantineEntry {
 export type QuarantineMap = Record<string, QuarantineEntry>;
 
 export interface Project {
+  presence?: Array<{ id: string; name: string; kind: string }>;
   id: string;
   name: string;
   holder: string | null;
@@ -548,6 +550,20 @@ export async function saveCreds(creds: Creds, name?: string): Promise<void> {
   await writeMachines(up.list, up.id);
 }
 
+/**
+ * Forget the pairing a 401 came back for — that computer and that token only. False when it's
+ * already gone (a second 401 for it, or it was paired again since) or it wasn't the active one:
+ * then nothing about the screen you're on changes.
+ */
+async function forgetUnauthorized(revoked: Creds): Promise<boolean> {
+  const { machines, activeId } = await listMachines();
+  const out = forgetRevoked(machines, activeId, revoked);
+  if (!out.removed) return false;
+  if (out.wasActive) connection.reset();
+  await writeMachines(out.list, out.activeId);
+  return out.wasActive;
+}
+
 /** This computer let go of the phone (revoked, or unpaired here): forget it; another paired one carries on. */
 export async function clearCreds(): Promise<void> {
   connection.reset();
@@ -915,7 +931,7 @@ export async function api<T>(
   }
   connection.sawDirect(creds);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  return settle<T>(res.status, json);
+  return settle<T>(creds, res.status, json);
 }
 
 async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
@@ -934,7 +950,7 @@ async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeo
     ...(timeoutMs ? { timeoutMs } : {}),
   });
   const json = (res.body && typeof res.body === "object" ? res.body : {}) as Record<string, unknown>;
-  return settle<T>(res.status, json);
+  return settle<T>(creds, res.status, json);
 }
 
 /**
@@ -948,12 +964,11 @@ export class ApiError extends Error {
   }
 }
 
-/** The shared tail of both routes: 401 unpairs, other errors carry the daemon's words. */
-async function settle<T>(status: number, json: Record<string, unknown>): Promise<T> {
+/** The shared tail of both routes: 401 unpairs the computer it came from, other errors carry the daemon's words. */
+async function settle<T>(creds: Creds, status: number, json: Record<string, unknown>): Promise<T> {
   if (status === 401) {
-    await clearCreds();
-    onUnauthorized?.();
-    throw new Error("unauthorized — pair again");
+    if (await forgetUnauthorized(creds)) onUnauthorized?.();
+    throw new ApiError("unauthorized — pair again", 401);
   }
   if (status < 200 || status >= 300) throw new ApiError(String(json.message ?? json.error ?? `HTTP ${status}`), status);
   return json as T;
@@ -970,10 +985,10 @@ export const createBranch = (c: Creds, id: string, chat: string, body: { fromEve
 export const activateBranch = (c: Creds, id: string, chat: string, branch: string, rewindFiles = false) =>
   api<{ active: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/branches/${encodeURIComponent(branch)}/activate`, { method: "POST", body: JSON.stringify(rewindFiles ? { rewindFiles: true } : {}) });
 /** My issues (#382): open issues assigned to you, and starting them as chats or Orchestra goals. */
-export interface IntakeIssue { source: "github" | "linear"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
-export const getIntake = (c: Creds, id: string, source: "github" | "linear", label?: string) =>
+export interface IntakeIssue { source: "github" | "linear" | "jira"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
+export const getIntake = (c: Creds, id: string, source: "github" | "linear" | "jira", label?: string) =>
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake?source=${source}${label ? `&label=${encodeURIComponent(label)}` : ""}`);
-export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
+export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear" | "jira"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake/start`, { method: "POST", body: JSON.stringify(body) });
 /** Files (#380): the project's own tree, read-only — the desktop's Explorer. */
 export interface FileEntry { name: string; path: string; dir: boolean }
@@ -998,8 +1013,8 @@ export const closeSide = (c: Creds, id: string, chat: string, sideId: string) =>
 export interface SetupAgent { kind: string; label: string; found: boolean; authed: boolean | null }
 export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/api/setup");
 /** A brand-new project under the computer's Loom projects folder: git, a README, a first commit. */
-export const createProject = (c: Creds, name: string, agents?: Array<{ kind: string; model?: string; count?: number }>) =>
-  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify(agents?.length ? { name, agents } : { name }) });
+export const createProject = (c: Creds, name: string, agents?: Array<{ kind: string; model?: string; count?: number }>, template?: string) =>
+  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify({ name, ...(agents?.length ? { agents } : {}), ...(template ? { template } : {}) }) });
 /** Your saved fleets (#406): named fleet specs that work as "@name" in any project. */
 export const getFleets = (c: Creds) => api<{ fleets: Array<{ name: string; spec: string }> }>(c, "/api/fleets");
 /** The demo project (#402): a small todo app with three scripted demo agents — no keys, no CLIs. Reused if it exists. */
@@ -1050,11 +1065,11 @@ export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
 
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
-export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
-  // `live`: replies being typed in this chat right now (newer daemons only)
+export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60, since?: number) =>
+  // `live`: replies being typed in this chat right now (newer daemons only; not with `since`)
   api<{ events: LoomEvent[]; live?: LiveSnapshot[] }>(
     c,
-    `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
+    `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}${since !== undefined ? `&since=${since}` : ""}`,
   );
 /** A chat from an agent's own history on the daemon's machine (core/chat-import.ts). */
 export interface ImportableChat {
@@ -1089,10 +1104,10 @@ export const deleteChat = (c: Creds, id: string, chat: string) =>
 /** Stage these paths, commit them, and (optionally) push — the desktop's Source control. */
 export const gitStage = (c: Creds, id: string, paths: string[]) =>
   api<unknown>(c, `/api/projects/${id}/git/stage`, { method: "POST", body: JSON.stringify({ paths }) });
-export const gitCommit = (c: Creds, id: string, message: string) =>
-  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message }) });
-export const gitPush = (c: Creds, id: string) =>
-  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: "{}" });
+export const gitCommit = (c: Creds, id: string, message: string, overrideSecrets = false) =>
+  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message, overrideSecrets }) });
+export const gitPush = (c: Creds, id: string, overrideSecrets = false) =>
+  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: JSON.stringify({ overrideSecrets }) });
 
 /** Save a picture to the project (.loom/attachments) for a message to point at. */
 export const uploadAttachment = (c: Creds, id: string, name: string, dataUrl: string) =>
@@ -1233,6 +1248,8 @@ export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
 /** One thing the project's agents remember (core/brain.ts). */
 export interface Memory {
+  pinned?: boolean; priority?: number; archived?: boolean; stale?: boolean;
+  scope?: { chat?: string; agent?: string; task?: string; crew?: string };
   id: string;
   kind: string;
   text: string;
@@ -1243,11 +1260,13 @@ export interface Memory {
   createdAt: number;
   updatedAt?: number;
 }
-export const getMemories = (c: Creds, id: string) =>
-  api<{ memories: Memory[] }>(c, `/api/projects/${id}/brain`);
-export const addMemory = (c: Creds, id: string, text: string, kind: string) =>
-  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind }) });
-export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string }) =>
+export const getMemories = async (c: Creds, id: string, query = "") => {
+  const result = await api<{ memories?: Memory[]; hits?: Array<{ memory: Memory }> }>(c, `/api/projects/${id}/brain${query}`);
+  return { memories: result.memories ?? result.hits?.map(h => h.memory) ?? [] };
+};
+export const addMemory = (c: Creds, id: string, text: string, kind: string, chat?: string) =>
+  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind, chat }) });
+export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string; pinned?: boolean; priority?: number; archived?: boolean; scope?: Memory["scope"] }) =>
   api<{ memory: Memory }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const forgetMemory = (c: Creds, id: string, mid: string, reason: string) =>
   api<{ forgot: boolean }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}?reason=${encodeURIComponent(reason)}`, { method: "DELETE" });
@@ -1289,6 +1308,7 @@ export const getSpans = (c: Creds, id: string, agentId?: string, limit = 200) =>
 /** Fleet health: one score per agent plus the overall, scored from their own spans. */
 /** One agent's record: turns and how often it finished — and, from what Loom checked, how often its "done" held up. */
 export interface Standing {
+  diff?: { added: number; removed: number; files: number };
   agentId: string;
   turns: number;
   successRate: number;
@@ -1463,6 +1483,10 @@ export interface OrchestraTaskHold {
 /** One unit of work a worker agent runs on its own branch. `chat` is its thread. */
 export interface OrchestraTask {
   id: string;
+  prompt?: string;
+  stalledAt?: number;
+  model?: string;
+  effort?: string;
   title: string;
   agent: string;
   kind: string;
@@ -1488,6 +1512,14 @@ export interface OrchestraReport { at: number; kind: "checkpoint" | "needs_input
 /** One orchestrator, many parallel workers, one integration branch. */
 export interface OrchestraRun {
   id: string;
+  budgetUsd?: number;
+  planOnly?: boolean;
+  planApprovedAt?: number;
+  kindLimits?: Record<string, number>;
+  stallMinutes?: number;
+  webhookUrl?: string;
+  webhookDelivery?: { at: number; state: "pending" | "sent" | "failed"; error?: string };
+  timeline?: Array<{ at: number; taskId: string; phase: string; attempt: number; text?: string }>;
   goal: string;
   orchestrator: { agent: string; kind: string };
   workers: string[];
@@ -1534,7 +1566,7 @@ export const getOrchestraRun = (c: Creds, id: string, runId: string) =>
 export const startOrchestra = (
   c: Creds,
   id: string,
-  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
+  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean } & import("./orchestra-options").RunOptions,
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
 
 /** Ask several (#377): the same prompt to each entrant (agent or agent@model×N), side by side; keep one. */
@@ -1635,6 +1667,7 @@ export const setAgentPermissions = (c: Creds, id: string, agentId: string, permi
 
 /** A tool call waiting on a human. `input` is the raw tool input (object) from GET. */
 export interface Approval {
+  expiresAt?: number;
   id: string;
   agent: string;
   tool: string;
@@ -1672,6 +1705,8 @@ export interface ProjectConfig {
   git: {
     delivery: GitDelivery;
     commitPerTurn?: boolean;
+    branchPerChat?: boolean;
+    messageModel?: string;
     branchPerTask?: boolean;
     worktreePerAgent?: boolean;
   };
@@ -1770,7 +1805,7 @@ export interface TeamFeedEvent {
     status?: string;
     [k: string]: unknown;
   };
-  content: { goal?: string; summary?: string; title?: string } | null;
+  content: { goal?: string; summary?: string; title?: string; text?: string } | null;
 }
 
 /** A file lease one orchestra task holds on a shared repo. Titles only, sealed to the team. */
@@ -2144,7 +2179,7 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
   let closed = false;
   let mode: "direct" | "cloud" | null = null;
   let ws: WebSocket | null = null;
-  let relay: RelayClient | null = null;
+  let closeRelay: (() => void) | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let chain: Promise<void> = Promise.resolve();
 
@@ -2157,8 +2192,9 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
       ws.close();
       ws = null;
     }
-    relay?.closeStream();
-    relay = null;
+    // only this reader's: the client is shared, and another screen may still be reading
+    closeRelay?.();
+    closeRelay = null;
     mode = null;
   };
 
@@ -2201,8 +2237,7 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
     try {
       const client = await connection.relayClient();
       if (closed || mode !== "cloud") return;
-      relay = client;
-      client.openStream(`Bearer ${creds.token}`, { onFrame }, projectId);
+      closeRelay = client.openStream(`Bearer ${creds.token}`, { onFrame }, projectId);
     } catch {
       mode = null;
       later(() => void pick(), 3000);
@@ -2315,6 +2350,7 @@ export const crewDiff = (c: Creds, id: string, crew: string) =>
 
 /** The computer's Loom against the newest release (GET /api/updates). */
 export interface UpdateStatus {
+  changelog?: { entries: Array<{ version: string; notes: string }>; available: boolean };
   version: string;
   latest: string | null;
   behindRelease: boolean;
@@ -2323,3 +2359,8 @@ export interface UpdateStatus {
 }
 export const getUpdates = (creds: Creds, refresh = false) =>
   api<UpdateStatus>(creds, `/api/updates${refresh ? "?refresh" : ""}`);
+
+export interface OrchestraRecipe { name: string; options: { goal: string } & import("./orchestra-options").RunOptions; savedAt: number }
+export interface StarterTemplate { name: string; description: string }
+export const getStarterTemplates = (c: Creds) => api<{ templates: StarterTemplate[] }>(c, "/api/init-templates");
+export const validateProjectConfig = (c: Creds, id: string) => api<{ valid: boolean; errors: Array<{ path: string; message: string }>; warnings: string[] }>(c, `/api/projects/${encodeURIComponent(id)}/config/validate`);

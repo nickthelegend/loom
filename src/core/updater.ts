@@ -42,6 +42,31 @@ export const RELEASES_REPO = process.env.LOOM_RELEASES_REPO || "nickthelegend/lo
 /** How long a release check is trusted, so a background poll can't hammer the API. */
 export const CHECK_TTL_MS = 6 * 60 * 60_000;
 
+export interface ChangelogEntry { version: string; notes: string }
+export interface UpdateChangelog { entries: ChangelogEntry[]; available: boolean }
+
+export function changelogBetween(markdown: string, installed: string, latest: string): ChangelogEntry[] {
+  const sections = [...markdown.matchAll(/^##[ \t]+\[?(v?\d+\.\d+\.\d+(?:-[\w.-]+)?)\]?(?:[ \t].*)?$/gm)];
+  return sections.flatMap((match, index) => {
+    const version = match[1]!.replace(/^v/, "");
+    if (!newerThan(version, installed) || newerThan(version, latest)) return [];
+    return [{ version, notes: markdown.slice(match.index! + match[0].length, sections[index + 1]?.index ?? markdown.length).trim() }];
+  });
+}
+
+/** The tagged changelog includes intermediate versions that /releases/latest omits. */
+export async function releaseChangelog(installed: string, release: Release, fetchImpl: typeof fetch = fetch, repo = RELEASES_REPO): Promise<UpdateChangelog> {
+  if (!newerThan(release.version, installed)) return { entries: [], available: true };
+  try {
+    const response = await fetchImpl(`https://raw.githubusercontent.com/${repo}/${encodeURIComponent(release.tag)}/CHANGELOG.md`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) return { entries: [], available: false };
+    const text = await response.text();
+    if (text.length > 2_000_000) return { entries: [], available: false };
+    const entries = changelogBetween(text, installed, release.version);
+    return { entries, available: entries.length > 0 };
+  } catch { return { entries: [], available: false }; }
+}
+
 /**
  * Semver-ish comparison, enough for `v0.2.10` > `v0.2.9` and prereleases
  * sorting under their release. Unknown shapes compare as equal, which means

@@ -31,7 +31,7 @@ export const AGE_OUT_MS = 90 * 24 * 60 * 60_000;
 
 /** D16: a failure or fact nobody has re-confirmed in ~90 days is out of briefings (canon never ages). */
 export function agedOut(m: TieredMemory, now = Date.now()): boolean {
-  if (m.tier === "canon") return false;
+  if (m.tier === "canon" || m.pinned) return false;
   if (m.kind !== "failure" && m.kind !== "fact") return false;
   return now - m.updatedAt > AGE_OUT_MS;
 }
@@ -55,12 +55,13 @@ export function retrieveTiered(pool: TieredMemory[], opts: RetrieveOpts & { now?
   const hits = raw
     .map((h) => {
       const m = byId.get(h.memory.id)!;
-      return { memory: m, score: h.score * TIER_WEIGHT[m.tier] };
+      return { ...h, memory: m, score: h.score * TIER_WEIGHT[m.tier] };
     })
     .sort((a, b) => b.score - a.score || b.memory.updatedAt - a.memory.updatedAt);
   const canon = hits.filter((h) => h.memory.tier === "canon");
   const rest = hits.filter((h) => h.memory.tier !== "canon");
-  return [...canon, ...rest].slice(0, limit);
+  const pins = hits.filter(h => h.memory.pinned).sort((a, b) => (b.memory.priority ?? 0) - (a.memory.priority ?? 0));
+  return [...pins, ...[...canon, ...rest].filter(h => !h.memory.pinned).slice(0, Math.max(0, limit - pins.length))];
 }
 
 function label(m: TieredMemory): string {
@@ -86,8 +87,10 @@ export function compileTieredBrief(hits: TieredHit[]): string {
     "## What your team has learned (relevant to the work at hand)",
     "Team canon is settled — follow it. Confirmed memories are reliable; a single teammate's proposal is useful but unverified.",
   ];
+  const pinned = hits.filter(h => h.memory.pinned).sort((a, b) => (b.memory.priority ?? 0) - (a.memory.priority ?? 0));
+  if (pinned.length) lines.push("", "### Pinned memories (in priority order)", ...pinned.map(h => `- ${h.memory.text}${label(h.memory) ? `  _(${label(h.memory)})_` : ""}`));
   for (const kind of ["constraint", "failure", "decision", "convention", "fact", "task"]) {
-    const items = hits.filter((h) => h.memory.kind === kind);
+    const items = hits.filter((h) => !h.memory.pinned && h.memory.kind === kind);
     if (!items.length) continue;
     lines.push("", `### ${KIND_TITLE[kind]}`);
     for (const h of items) {

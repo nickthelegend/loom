@@ -1,3 +1,15 @@
+import { registerWorkspaceR4Routes } from "./routes/workspace-r4.js";
+import { registerModelRoutingRoutes } from "./routes/model-routing.js";
+import { mondayScoreboard } from "../core/scoreboard-digest.js";
+import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
+import { registerOpsRoutes } from "./routes/ops.js";
+import { BackupScheduler } from "../core/backup-schedule.js";
+import { rotateDaemonLog } from "../core/ops.js";
+import { redactValue, redactText } from "../core/redact.js";
+import { safetyDecision } from "../core/safety.js";
+import { EmailDigest } from "./email-digest.js";
+import { registerEmailRoutes } from "./routes/email.js";
+import { DiscordRuns } from "./discord-runs.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -26,6 +38,7 @@ import {
   listProjects,
   loomHome,
   readDaemonConfig,
+  readProjectConfig,
   registerProject,
   unregisterProject,
   writeDaemonConfig
@@ -122,6 +135,7 @@ import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
+import { auditCsv } from "../core/team-sharing.js";
 import { auditTrail, searchSessions } from "./workspace-views.js";
 import { resources } from "../core/resources.js";
 import { registerReviewRoutes } from "./routes/review.js";
@@ -162,6 +176,8 @@ const TOOL_WRITES = [
 ];
 
 export class LoomDaemon {
+  private discordRuns = new DiscordRuns();
+  private emailDigest = new EmailDigest(id => this.runtime(id));
   private setupInstaller: SetupInstaller;
   private setupOptions: DaemonOptions["setup"];
   private app = express();
@@ -178,6 +194,7 @@ export class LoomDaemon {
   private readonly presence = new ChatPresenceTracker<WebSocket>((snapshot) =>
     this.broadcastFrame({ ...snapshot }, snapshot.projectId));
   /** In-flight self-heal recheck timers, cleared on close. */
+  private scoreboardTimer?: ReturnType<typeof setInterval>;
   private healTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Terminal shells — a real pty when node-pty loaded, else plain pipes. */
   private terminals = new TerminalManager({
@@ -219,6 +236,7 @@ export class LoomDaemon {
       /** The chat the asking turn is in — a guest decides only its own chat's. */
       chat?: string;
       createdAt: number;
+      expiresAt: number;
       settle: (d: ApprovalDecision, by?: string) => void;
     }
   >();
@@ -244,19 +262,35 @@ export class LoomDaemon {
     if (req.signal?.aborted) return { behavior: "deny", message: "The agent stopped waiting." };
     const rt = await this.runtime(req.project).catch(() => null);
     if (!rt) return { behavior: "deny", message: "project not open" };
+    const safety = rt.safetyPolicy();
+    const hard = safetyDecision(req.tool, (req.input ?? {}) as Record<string, unknown>, rt.info.dir, safety);
+    if (hard.deny) {
+      rt.log.append({ kind: "status", agentId: req.agent, payload: { state: "safety_denied", tool: req.tool, reason: hard.deny } });
+      return { behavior: "deny", message: hard.deny };
+    }
+    if (hard.allow) {
+      rt.log.append({ kind: "approval", agentId: req.agent, payload: { phase: "decided", tool: req.tool, behavior: "allow", by: "project allow rule" } });
+      return { behavior: "allow" };
+    }
+    const expiresAt = Date.now() + safety.approvalTimeoutMin * 60_000;
     const id = crypto.randomBytes(6).toString("hex");
     const tool = req.tool.slice(0, 120);
-    const preview = (req.summary ?? JSON.stringify(req.input ?? {})).slice(0, 4000);
+    const preview = redactText(req.summary ?? JSON.stringify(redactValue(req.input ?? {}))).slice(0, 4000);
     const chat = rt.chatOf(req.agent);
     rt.log.append({
       kind: "approval",
       agentId: req.agent,
       ...(chat ? { chat } : {}),
-      payload: { phase: "requested", approvalId: id, tool, input: preview, ...(req.sessionOption ? { sessionOption: true } : {}) },
+      payload: { phase: "requested", approvalId: id, tool, input: preview, expiresAt, ...(req.sessionOption ? { sessionOption: true } : {}) },
     });
     return new Promise<ApprovalDecision>((resolve) => {
       const abandoned = () => settle({ behavior: "deny", message: "The agent stopped waiting." });
       const settle = (d: ApprovalDecision, by?: string) => {
+        if (d.behavior === "allow") {
+          const current = safetyDecision(req.tool, (req.input ?? {}) as Record<string, unknown>, rt.info.dir, rt.safetyPolicy());
+          if (Date.now() >= expiresAt) d = { behavior: "deny", message: `No answer within ${safety.approvalTimeoutMin} minutes — denied.` };
+          else if (current.deny) d = { behavior: "deny", message: current.deny };
+        }
         clearTimeout(timer);
         req.signal?.removeEventListener("abort", abandoned);
         if (!this.approvals.delete(id)) return;
@@ -269,15 +303,16 @@ export class LoomDaemon {
         resolve(d);
       };
       const timer = setTimeout(
-        () => settle({ behavior: "deny", message: "No answer within 30 minutes — denied." }),
-        30 * 60_000,
+        () => settle({ behavior: "deny", message: `No answer within ${safety.approvalTimeoutMin} minutes — denied.` }),
+        Math.max(0, expiresAt - Date.now()),
       );
       this.approvals.set(id, {
         id,
         projectId: req.project,
         agent: req.agent,
         tool,
-        input: req.input ?? {},
+        input: redactValue(req.input ?? {}),
+        expiresAt,
         ...(req.sessionOption ? { sessionOption: true } : {}),
         ...(chat ? { chat } : {}),
         createdAt: Date.now(),
@@ -285,6 +320,7 @@ export class LoomDaemon {
       });
       // An agent whose turn ended has stopped waiting; don't hold the card open.
       req.signal?.addEventListener("abort", abandoned, { once: true });
+      if (req.signal?.aborted) abandoned();
     });
   }
 
@@ -317,6 +353,10 @@ export class LoomDaemon {
       projects: listProjects,
       ...opts.teamOptions,
       runtimes: () => [...this.runtimes.values()],
+      mention: (from, repo) => {
+        const tokens = (readDaemonConfig()?.clients ?? []).filter(c => !c.guest && !c.projects?.length && wantsPush(c.pushKinds, "questions")).flatMap(c => c.pushToken ? [c.pushToken] : []);
+        void sendExpoPush(tokens, { title: `${from} mentioned you`, body: `In ${repo} · open Loom Team to read it`, data: { screen: "team", kind: "mention" } });
+      },
       broadcast: (frame) => {
         this.delivery.publish(frame, { kind: "admin" });
       },
@@ -374,6 +414,7 @@ export class LoomDaemon {
       startCloud: (...args) => this.startCloud(...args),
       stopCloud: (...args) => this.stopCloud(...args),
       pushTokens: () => this.pushTokens(),
+      projectPresence: (id) => this.presence.project(id),
       revalidateSockets: () => this.revalidateSockets(),
       runtime: (...args) => this.runtime(...args),
       get specRunner() { return daemon.specRunner; },
@@ -421,7 +462,7 @@ export class LoomDaemon {
       const origin = req.headers.origin;
       if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
-        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key");
         // PUT and PATCH belong here: toggling a skill, switching an agent on or
         // off, and updating an MCP server all use them, and a cross-origin
         // client (the Expo web build, a paired browser on another port) had
@@ -568,6 +609,7 @@ export class LoomDaemon {
     registerProvidersRoutes(app);
     registerAccountsRoutes(app);
     registerScoreboardRoutes(app);
+    registerCliSettingsRoutes(app);
     registerAgentSkillsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
@@ -577,6 +619,12 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerWorkspaceR4Routes(app, ctx, withRuntime);
+    registerModelRoutingRoutes(app, withRuntime);
+    void mondayScoreboard().catch(() => {});
+    this.scoreboardTimer = setInterval(() => void mondayScoreboard().catch(() => {}), 60_000);
+    this.scoreboardTimer.unref();
+    registerOpsRoutes(app, ctx, withRuntime, this.backups);
     app.get("/api/projects/:id/chats/:chat/presence", withRuntime(async (rt, req, res) => {
       const chat = String(req.params.chat);
       if (!rt.chats().some((c) => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
@@ -584,7 +632,7 @@ export class LoomDaemon {
     }));
     registerObservabilityRoutes(app, withRuntime);
     registerAlertsRoutes(app, ctx);
-    registerMessagesRoutes(app, withRuntime);
+    registerMessagesRoutes(app, withRuntime, this.team);
     registerServersRoutes(app, withRuntime);
     registerTaskDeliveryRoutes(app, withRuntime);
     registerQueueRoutes(app, withRuntime);
@@ -610,6 +658,7 @@ export class LoomDaemon {
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
+    registerEmailRoutes(app, this.emailDigest);
     registerBridgeRoutes(app, this.bridges);
     // every session, every project (a scoped token: its own) — and the audit trail, owner only
     app.get("/api/search", (req, res) => {
@@ -623,16 +672,28 @@ export class LoomDaemon {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can see its processes" });
       void resources().then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
+    app.get("/api/audit.csv", async (req, res) => {
+      if ((req as Request & { projectScope?: string[] | null }).projectScope) return void res.status(403).json({ error: "audit export requires an owner or unscoped device" });
+      const since = req.query.since === undefined ? Date.now() - 7 * 86_400_000 : Number(req.query.since);
+      if (!Number.isFinite(since) || since < 0) return void res.status(400).json({ error: "invalid since timestamp" });
+      try {
+        res.setHeader("content-disposition", 'attachment; filename="loom-audit.csv"');
+        res.setHeader("cache-control", "no-store");
+        const csv = auditCsv(await auditTrail(since, this.runtimes, Infinity));
+        if (req.query.format === "json") { res.removeHeader("content-disposition"); res.json({ csv }); }
+        else res.type("text/csv").send(csv);
+      } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+    });
     app.get("/api/audit", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can read the audit trail" });
       const since = Number(req.query.since) || Date.now() - 7 * 86_400_000;
-      void auditTrail(since, this.runtimes).then((entries) => res.json({ entries })).catch((e) => res.status(500).json({ error: (e as Error).message }));
+      void auditTrail(since, this.runtimes, 500, req.query.risky === "true").then((entries) => res.json({ entries })).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
     registerReviewRoutes(app, withRuntime);
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
-    registerBrainRoutes(app, withRuntime);
+    registerBrainRoutes(app, withRuntime, this.auth);
     registerRoutingRoutes(app, withRuntime);
     registerTerminalsRoutes(app, ctx);
     registerBoardRoutes(app, ctx, withRuntime);
@@ -766,6 +827,7 @@ export class LoomDaemon {
       );
     }
     this.maybePush(projectId, event);
+    void this.discordRuns.deliver(projectId, event).catch(() => logbook.warn("discord", "Orchestra update pending; will retry"));
   }
 
   /**
@@ -836,19 +898,25 @@ export class LoomDaemon {
       // the phone opens this project (and goal, or chat) when the alert is tapped
       data: {
         projectId,
+        daemon: os.hostname(),
         kind: event.kind,
         category,
-        ...(approval ? { approvalId: event.payload.approvalId, daemon: os.hostname() } : {}),
+        ...(approval ? { approvalId: event.payload.approvalId } : {}),
         ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
         ...(typeof event.payload.crewId === "string" ? { crewId: event.payload.crewId } : {}),
         ...(event.chat ? { chat: event.chat } : {}),
       },
-    });
+    }, new Set((readDaemonConfig()?.clients ?? []).filter(c => c.platform === "android" && c.pushGroupByProject && c.pushToken).map(c => c.pushToken!)));
   }
 
   // -------------------------------------------------------------------------
   // Lifecycle
   // -------------------------------------------------------------------------
+
+  private backups = new BackupScheduler();
+  private opsTimer?: NodeJS.Timeout;
+  private pruneTimer?: NodeJS.Timeout;
+  private pruning?: Promise<void>;
 
   async listen(opts: { tailnet?: boolean } = {}): Promise<{ host: string; port: number }> {
     if (opts.tailnet) {
@@ -902,8 +970,32 @@ export class LoomDaemon {
     }
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
+    this.backups.start(err => logbook.warn("backup", "scheduled backup failed", String(err)));
+    this.opsTimer = setInterval(() => {
+      try { rotateDaemonLog(); } catch (err) { logbook.warn("logs", "rotation failed", String(err)); }
+    }, 1000);
+    this.opsTimer.unref();
+    const prune = () => {
+      if (this.pruning) return;
+      this.pruning = (async () => {
+        for (const project of listProjects()) {
+          if (!this.runtimes.has(project.id) && !readProjectConfig(project.dir)?.orchestra?.prune) continue;
+          try {
+            const rt = await this.runtime(project.id);
+            await rt.orchestra.sweep();
+          } catch (err) { logbook.warn("orchestra", "automatic pruning failed", String(err), project.id); }
+        }
+      })().catch(err => { logbook.warn("orchestra", "automatic pruning failed", String(err)); }).finally(() => { this.pruning = undefined; });
+    };
+    const firstPrune = setTimeout(prune, 30_000);
+    firstPrune.unref();
+    this.healTimers.add(firstPrune);
+    this.pruneTimer = setInterval(prune, 3_600_000);
+    this.pruneTimer.unref();
     this.watchReleases();
     this.triggers.start();
+    this.emailDigest.start();
+    this.discordRuns.start();
     // Resume PR watches even when no client has opened the project since restart.
     for (const project of listProjects()) {
       try {
@@ -1269,8 +1361,14 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    clearInterval(this.scoreboardTimer);
+    await this.backups.close();
+    if (this.opsTimer) clearInterval(this.opsTimer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.setupInstaller.close();
     this.presence.close();
+    await this.emailDigest.close();
+    await this.discordRuns.close();
     await this.closeProjects();
     this.triggers.stop();
     await this.bridges.stopAll().catch(() => { });
@@ -1286,6 +1384,7 @@ export class LoomDaemon {
     for (const t of this.healTimers) clearTimeout(t);
     if (this.releaseTimer) clearInterval(this.releaseTimer);
     this.healTimers.clear();
+    await this.pruning;
     this.unstreamLogs?.();
     this.unstreamLogs = null;
     this.specRunner.closeAll();

@@ -1,8 +1,11 @@
+import { createTray, allowedWorkspaceSender, popoutUrl } from "./tray.js";
+import { Tray, nativeImage } from "electron";
 // Loom desktop — a thin Electron shell around the daemon's web app.
 // Our own code: it starts the loom daemon and loads the same /app surface the
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 // BrowserView / webview-guard approach: Nuphos (Apache-2.0, © 2026 Zeabur Inc.).
 
+import { readShortcuts } from "./shortcuts.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +29,10 @@ app.setName("Loom Desktop");
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
 const BG = "#0a0a0a";
 let win = null;
+let appOrigin = null;
 let pet = null;
+let tray = null;
+const chatWindows = new Set();
 
 // Guard guests at creation, before their first navigation can begin.
 app.on("web-contents-created", (_event, contents) => {
@@ -113,8 +119,8 @@ async function createWindow() {
   win.webContents.on("will-attach-webview", attachGuard);
 
   if (saved?.maximized) win.maximize();
-  // the pet keeps a window open, so closing Loom's own has to mean quit off macOS
-  win.on("closed", () => { if (process.platform !== "darwin") app.quit(); });
+  // The tray and popped-out chats remain reachable after closing the main window.
+  win.on("closed", () => { if (process.platform !== "darwin" && !tray?.state().enabled && !chatWindows.size) app.quit(); });
   persistBounds(win);
   attachContextMenu(win.webContents);
 
@@ -142,6 +148,7 @@ async function createWindow() {
   await win.loadURL(startingPage(BG)).catch(() => {});
   try {
     const { url } = await prepareAppUrl();
+    appOrigin = new URL(url).origin;
     await win.loadURL(url);
   } catch (err) {
     await win.loadURL(failedPage(BG, err, { packaged: app.isPackaged, logPath: daemonLogPath() }));
@@ -154,10 +161,22 @@ async function createWindow() {
  * runs the same code the buttons do — the menu is a second door, not a second
  * implementation. Editing and windows use the OS's own roles.
  */
+let shortcutOverrides = {};
+ipcMain.handle("loom:shortcuts", (event, bindings) => {
+  const next = readShortcuts(bindings, event.senderFrame?.url, appOrigin);
+  if (!next) return false;
+  shortcutOverrides = next;
+  buildMenu();
+  return true;
+});
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const send = (action) => () => menuAction(action);
-  const item = (label, action, accelerator) => ({ label, click: send(action), ...(accelerator ? { accelerator } : {}) });
+  const item = (label, action, accelerator) => {
+    accelerator = Object.hasOwn(shortcutOverrides, action) ? shortcutOverrides[action] : accelerator;
+    return { label, click: send(action), ...(accelerator ? { accelerator } : {}) };
+  };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(isMac
@@ -287,7 +306,7 @@ function buildMenu() {
           item("Loom Cloud…", "cloud"),
         ],
       },
-      { role: "windowMenu" },
+      { role: "windowMenu", submenu: [item("Saved Layouts…", "r4:layouts"), item("Pop Chat Out", "r4:popout"), { type: "separator" }, { role: "minimize" }, { role: "zoom" }, { role: "front" }] },
       {
         role: "help",
         submenu: [
@@ -451,6 +470,14 @@ app.whenReady().then(() => {
     },
     onToggle: () => buildMenu(),
   });
+  tray = createTray({ app, Tray, Menu, nativeImage, icon: ICON, hasWindows: () => !!win && !win.isDestroyed() || chatWindows.size > 0,
+    daemon: () => { const c = readDaemonConfig(); return c ? { base: `http://${c.host}:${c.port}`, adminToken: c.adminToken } : null; },
+    actions: {
+      chat: openTrayChat,
+      mission: async () => { await openTrayChat(null); menuAction("r4:mission"); },
+      quick: async () => { if (!appOrigin) await openTrayChat(null); if (appOrigin) createChatWindow(appOrigin + "/app?pane=tray&quick=1#home", true); },
+    },
+  });
   if (petEnabled()) setTimeout(() => pet.show(), 1500);
   app.on("activate", () => {
     // the pet is a window too, so "no windows" isn't the test
@@ -459,5 +486,30 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && !tray?.state().enabled) app.quit();
+});
+
+async function openTrayChat(target) {
+  if (!win || win.isDestroyed()) await createWindow();
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
+  if (target) win.webContents.send("loom:notify-action", { kind: "open", project: target.project, chat: target.chat });
+}
+function createChatWindow(url, quick = false) {
+  const child = new BrowserWindow({ width: quick ? 480 : 820, height: quick ? 440 : 720, minWidth: 360, minHeight: 300,
+    title: quick ? "Quick send · Loom" : "Loom chat", backgroundColor: BG,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: PRELOAD } });
+  chatWindows.add(child); child.on("closed", () => { chatWindows.delete(child); if (process.platform !== "darwin" && !tray?.state().enabled && !chatWindows.size && (!win || win.isDestroyed())) app.quit(); });
+  child.webContents.setWindowOpenHandler(({ url }) => { try { const u = new URL(url); if (["https:", "http:"].includes(u.protocol)) void shell.openExternal(u.href); } catch {} return { action: "deny" }; });
+  for (const event of ["will-navigate", "will-redirect"]) child.webContents.on(event, (e, destination) => { try { const u = new URL(destination); if (u.origin !== appOrigin || u.pathname !== "/app") e.preventDefault(); } catch { e.preventDefault(); } });
+  attachContextMenu(child.webContents); void child.loadURL(url); return child;
+}
+ipcMain.handle("loom:tray", (event, value) => {
+  if (!allowedWorkspaceSender(event, appOrigin) || !tray) throw new Error("Not a Loom window");
+  return typeof value === "boolean" ? tray.setEnabled(value) : tray.state();
+});
+ipcMain.handle("loom:pop-chat", (event, value) => {
+  const url = popoutUrl(value, appOrigin);
+  if (!allowedWorkspaceSender(event, appOrigin) || !url) throw new Error("Invalid chat window");
+  createChatWindow(url); return true;
 });

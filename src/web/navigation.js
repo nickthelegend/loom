@@ -9,7 +9,8 @@ import { isDesktop,renderShell } from './shell.js';
 import { root,state } from './state.js';
 import { applyTheme } from './theme.js';
 import { ICONS } from './icons.js';
-import { KMOD } from './permissions.js';
+import { COMMANDS } from './commands.js';
+import { shortcutLabel,shortcutFor } from './shortcuts.js';
 import { esc } from './format.js';
 import { toast } from './notifications.js';
 import { isGuest,renderGuest } from './share-live.js';
@@ -67,34 +68,12 @@ import { isGuest,renderGuest } from './share-live.js';
   /** Every key Loom listens for, on one sheet (press ?). */
   function openShortcuts(){
     if (document.querySelector(".scrim")) return;
-    var K = KMOD;
     var rows = [
-      ["Anywhere", [
-        [K + "K", "Search everything — files, chats, commands"],
-        [K + "F", "Find in this chat"],
-        [K + ".", "Focus mode: hide the sidebar and panel"],
-        [K + "D / " + K + "⇧D", "Split: another view beside / below (drag a chat onto a pane's edge)"],
-        [K + "⇧V", "Prompts you’ve saved"],
-        ["Ctrl+\u0060", "Show or hide the terminal"],
-        ["N", "New task"], ["P", "New project"], ["[ / ]", "Your previous / next prompt in this chat"],
-        ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"],
-      ]],
-      ["In the composer", [
-        ["Enter", "Send"], ["⇧Enter", "New line"],
-        ["↑ / ↓", "Walk through what you sent here (empty box)"],
-        ["@", "Mention a file"], ["/", "Actions"],
-      ]],
+      ["Commands · this device", COMMANDS.filter(function(c){ return !!shortcutFor(c); }).map(function(c){ return [shortcutLabel(c), c.label]; })],
+      ["In the composer", [["Enter", "Send"], ["⇧Enter", "New line"], ["↑ / ↓", "Walk through what you sent here (empty box)"], ["@", "Mention a file"], ["/", "Actions"]]],
+      ["Navigation", [["N / P", "New task / New project (outside text fields)"], ["[ / ]", "Previous / next prompt"], ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"]]],
       ["Find", [["Enter / ⇧Enter", "Previous / next match"]]],
     ];
-    // The desktop app's menu bar adds its own; the browser keeps those keys for itself.
-    if (window.loomNative) rows.splice(1, 0, ["Desktop app", [
-      [K + "N", "New chat"], [K + "⇧N", "New task"], [K + "O", "Add a project"],
-      [K + "1 … " + K + "7", "Chat · Orchestra · Crew · Agents · Board · Memory · Insights"],
-      [K + "B", "Show or hide the sidebar"], ["⌥" + K + "B", "Show or hide the right panel"],
-      [K + "⇧A", "Choose the agent"], [K + "⇧M", "Plan mode"], [K + "⇧.", "Interrupt"],
-      [K + "⇧E", "Export this chat"], ["⌥" + K + "↑ / ↓", "Previous / next project"], [K + "⇧[ / ]", "Previous / next chat"],
-      [K + "⇧U", "Invite a teammate"], [K + "/", "This sheet"],
-    ]]);
     rows.push(["Right-click", [["Messages", "Copy, retry, quote, branch, save as a prompt"], ["Code blocks", "Copy code, put it in the composer"],
       ["Files", "Open, mention in chat, copy path" + (window.loomNative ? ", reveal" : "")], ["Projects & chats", "Settings, rename, pin, archive, export"]]]);
     var scrim = document.createElement("div");

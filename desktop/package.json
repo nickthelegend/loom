@@ -1,6 +1,6 @@
 {
   "name": "loom-desktop",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "Loom desktop \u2014 an Electron shell around the loom daemon's web app. See BUILD.md for why the build config looks like this.",
@@ -28,7 +28,11 @@
     },
     "files": [
       "main.js",
+      "tray.js",
+      "tray-host.js",
+      "build/icon.png",
       "webview-guard.js",
+      "shortcuts.js",
       "loom-app.js",
       "pages.js",
       "updater.js",

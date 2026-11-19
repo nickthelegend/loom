@@ -92,7 +92,7 @@ var KEY = "loomSplit:v1";
 /** { layout, panes: { [id]: { hash } }, focus } or null. */
 export function loadWorkspace() {
   try {
-    var w = JSON.parse(localStorage.getItem(KEY) || "null");
+    var w = JSON.parse(sessionStorage.getItem(KEY) || localStorage.getItem(KEY) || "null");
     if (!w || !w.layout || !w.panes) return null;
     var ids = leafIds(w.layout);
     if (!ids.length || ids.some(function(id){ return !w.panes[id]; })) return null;
@@ -101,7 +101,7 @@ export function loadWorkspace() {
 }
 
 export function saveWorkspace(w) {
-  try { if (w) localStorage.setItem(KEY, JSON.stringify(w)); else localStorage.removeItem(KEY); } catch (e) {}
+  try { if (w) { sessionStorage.setItem(KEY, JSON.stringify(w)); localStorage.setItem(KEY, JSON.stringify(w)); } else { sessionStorage.removeItem(KEY); localStorage.removeItem(KEY); } } catch (e) {}
 }
 
 var seq = 0;

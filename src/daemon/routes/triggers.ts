@@ -1,6 +1,9 @@
+import { triggerCalendar, webhookTemplates } from "../../core/integration-triggers.js";
+import { findProject } from "../../core/registry.js";
 import { intakeMode, intakeSource } from "../../core/intake.js";
 import type { Express, Request } from "express";
 import {
+  renderPrompt,
   newSecret,
   newTriggerId,
   nextFire,
@@ -29,6 +32,10 @@ const isOwnDevice = (req: Request) => {
 /** What a client may set on a trigger, checked; throws with a message a person can act on. */
 function patchFrom(b: Record<string, unknown>, kind: Trigger["kind"]): Partial<Trigger> {
   const out: Partial<Trigger> = {};
+  if (kind === "webhook" && b.githubCommand !== undefined) {
+    if (typeof b.githubCommand !== "boolean") throw new Error("githubCommand must be a boolean");
+    out.githubCommand = b.githubCommand;
+  }
   if (b.name !== undefined) out.name = String(b.name).trim().slice(0, 80) || "trigger";
   if (b.prompt !== undefined) {
     const p = String(b.prompt).trim();
@@ -57,6 +64,37 @@ function patchFrom(b: Record<string, unknown>, kind: Trigger["kind"]): Partial<T
 
 /** Triggers: schedules and webhooks that start a turn on their own (core/triggers.ts). */
 export function registerTriggerRoutes(app: Express, withRuntime: WithRuntime, runner: TriggerRunner): void {
+  app.post("/api/projects/:id/triggers/calendar-link", withRuntime(async (rt, req, res) => {
+    const data = readTriggers(rt.info.dir);
+    if (!data.calendarSecret || req.body?.rotate === true) { data.calendarSecret = newSecret(); writeTriggers(rt.info.dir, data); }
+    res.json({ path: `/api/webhooks/calendar/${rt.info.id}/${data.calendarSecret}` });
+  }));
+  app.delete("/api/projects/:id/triggers/calendar-link", withRuntime(async (rt, _req, res) => {
+    const data = readTriggers(rt.info.dir); delete data.calendarSecret; writeTriggers(rt.info.dir, data); res.json({ revoked: true });
+  }));
+  app.get("/api/webhooks/calendar/:pid/:secret", (req, res) => {
+    const project = findProject(String(req.params.pid));
+    if (!project) return void res.sendStatus(404);
+    const data = readTriggers(project.dir);
+    if (!data.calendarSecret || !verifyDelivery(data.calendarSecret, Buffer.alloc(0), { "x-loom-secret": String(req.params.secret) })) return void res.sendStatus(404);
+    res.setHeader("Cache-Control", "no-store");
+    res.type("text/calendar").send(triggerCalendar(project.id, data.triggers));
+  });
+  app.get("/api/projects/:id/triggers/calendar", withRuntime(async (rt, req, res) => {
+    const calendar = triggerCalendar(rt.info.id, readTriggers(rt.info.dir).triggers);
+    if (req.query.format === "json") return void res.json({ calendar });
+    res.setHeader("Content-Disposition", 'attachment; filename="loom-schedules.ics"');
+    res.setHeader("Cache-Control", "no-store");
+    res.type("text/calendar").send(calendar);
+  }));
+  app.get("/api/projects/:id/triggers/templates", withRuntime(async (_rt, _req, res) => {
+    res.json({ templates: webhookTemplates });
+  }));
+  app.post("/api/projects/:id/triggers/preview", withRuntime(async (_rt, req, res) => {
+    const b = req.body ?? {};
+    if (typeof b.prompt !== "string" || b.prompt.length > 20_000) return void res.status(400).json({ error: "prompt must be at most 20000 characters" });
+    res.json({ prompt: renderPrompt(b.prompt, b.payload ?? {}, String(b.event ?? ""), { name: String(b.name ?? "Preview"), firedAt: Date.now() }) });
+  }));
   app.get("/api/projects/:id/triggers", withRuntime(async (rt, _req, res) => {
     const { triggers, runs } = readTriggers(rt.info.dir);
     res.json({ triggers: triggers.map((t) => ({ ...publicTrigger(t), nextAt: nextFire(t) })), runs: runs.slice(-50).reverse() });

@@ -12,6 +12,7 @@
  * caught fault is written where `loom up` is pointing (~/.loom/daemon.log).
  */
 
+import { writeCrashReport } from "../core/crash-report.js";
 import { logbook } from "../core/logbook.js";
 
 /**
@@ -32,7 +33,10 @@ function report(kind: string, detail: unknown): void {
  */
 export function installCrashGuards(): () => void {
   const onRejection = (reason: unknown): void => report("unhandled rejection", reason);
-  const onException = (err: Error): void => report("uncaught exception", err);
+  const onException = (err: Error): void => {
+    try { writeCrashReport("uncaught exception", err); } catch { /* Reporting must not throw into the crash handler. */ }
+    report("uncaught exception", err);
+  };
   process.on("unhandledRejection", onRejection);
   process.on("uncaughtException", onException);
   return () => {

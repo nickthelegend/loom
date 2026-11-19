@@ -1,21 +1,23 @@
 /**
  * Working-tree inspection — the data behind "what code changed, per prompt".
- * Read-only git plumbing; every function degrades to empty results outside
- * a git repo.
+ * Leaves the checkout and its index alone; snapshots use disposable indexes.
+ * Every function degrades to empty results outside a git repo.
  */
 
 import { execFile } from "./process.js";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const PATCH_EVENT_LIMIT = 12_000; // per-turn patch stored in the event log
 const PATCH_VIEW_LIMIT = 64_000; // full working-tree patch served to apps
 
-function git(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
-      resolve(err ? "" : stdout),
+function git(args: string[], cwd: string, env?: NodeJS.ProcessEnv, strict = false, input?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile("git", args, { cwd, maxBuffer: 8 * 1024 * 1024, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, stdout) =>
+      err && strict ? reject(err) : resolve(err ? "" : stdout),
     );
+    if (input !== undefined) child.stdin?.end(input);
   });
 }
 
@@ -36,6 +38,25 @@ export async function porcelainStatus(dir: string): Promise<string> {
   return (await git(["status", "--porcelain", "-uall"], dir)).trimEnd();
 }
 
+/** Snapshot contents through a disposable index, including files not yet tracked. */
+export async function contentSnapshot(dir: string): Promise<string> {
+  const gitDir = (await git(["rev-parse", "--absolute-git-dir"], dir)).trim();
+  if (!gitDir) return "unavailable";
+  const index = path.join(gitDir, `loom-turn-${randomUUID()}.index`);
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    const head = (await git(["rev-parse", "--verify", "HEAD"], dir)).trim();
+    await git(head ? ["read-tree", "HEAD"] : ["read-tree", "--empty"], dir, env, true);
+    const paths = (await git(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], dir, undefined, true))
+      .split("\0").filter(file => file && !isLoomState(file));
+    await git(["rm", "-r", "--cached", "--ignore-unmatch", "--", ".loom"], dir, env, true);
+    if (paths.length) await git(["--literal-pathspecs", "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"], dir, env, true, paths.join("\0") + "\0");
+    const tree = (await git(["write-tree"], dir, env, true)).trim();
+    return tree ? `tree:${tree}` : "unavailable";
+  } catch { return "unavailable"; }
+  finally { fs.rmSync(index, { force: true }); }
+}
+
 export interface TurnDiff {
   files: ChangedFile[];
   added: number;
@@ -48,8 +69,8 @@ export interface TurnDiff {
 const isLoomState = (path: string) => path === ".loom" || path.startsWith(".loom/");
 
 /**
- * Changes attributable to one turn: files whose porcelain line differs from
- * the pre-turn snapshot, with a patch limited to those files.
+ * Changes attributable to one turn, compared by contents rather than status.
+ * Porcelain snapshots from older callers still use their status comparison.
  *
  * `.loom/` is not one of them. The event log, the prompt queue and the
  * adapters' session state live there and change while a turn runs; a project
@@ -57,6 +78,30 @@ const isLoomState = (path: string) => path === ".loom" || path.startsWith(".loom
  * telling you the agent had edited files it never touched.
  */
 export async function diffSinceSnapshot(dir: string, before: string): Promise<TurnDiff | null> {
+  if (before === "unavailable") return null;
+  if (before.startsWith("tree:")) {
+    const after = await contentSnapshot(dir);
+    if (!after.startsWith("tree:") || before === after) return null;
+    const refs = [before.slice(5), after.slice(5)];
+    const names = (await git(["diff", "--no-renames", "--name-status", "-z", ...refs, "--", ".", ":(exclude).loom"], dir)).split("\0");
+    const files: ChangedFile[] = [];
+    for (let i = 0; i + 1 < names.length; i += 2) {
+      if (names[i] && names[i + 1]) files.push({ status: names[i] === "A" ? "??" : ` ${names[i]}`, path: names[i + 1]! });
+    }
+    if (!files.length) return null;
+    const paths = files.map(f => f.path);
+    const numstat = await git(["diff", "--numstat", ...refs, "--", ...paths], dir);
+    let added = 0;
+    let removed = 0;
+    for (const line of numstat.split("\n")) {
+      const [a, r] = line.split("\t");
+      added += Number(a) || 0;
+      removed += Number(r) || 0;
+    }
+    const patch = await git(["diff", ...refs, "--", ...paths], dir);
+    const truncated = patch.length > PATCH_EVENT_LIMIT;
+    return { files, added, removed, patch: truncated ? patch.slice(0, PATCH_EVENT_LIMIT) + "\n… (truncated)" : patch, truncated };
+  }
   const after = await porcelainStatus(dir);
   const beforeSet = new Set(before.split("\n").filter(Boolean));
   const changedLines = after

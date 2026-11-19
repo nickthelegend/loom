@@ -8,6 +8,7 @@
  * with the reason instead of a switch that lies.
  */
 
+import { permissionIndicator } from "./safety-model";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import {
@@ -92,14 +93,22 @@ export function PermissionChip(props: {
   const [pending, setPending] = useState<{ agent: string; mode: PermissionMode } | null>(null);
 
   const agent = props.agent;
-  const profile = agent ? profiles?.[agent.kind] : undefined;
+  const profile: PermissionProfile = (agent ? profiles?.[agent.kind] : undefined) ?? {
+    default: "auto", modes: {
+      bypass: { flags: "", label: "Bypass — no approval prompts" },
+      auto: { flags: "", label: "Auto — the agent's own defaults" },
+      ask: { flags: "", label: "Ask — requests approval where supported" },
+    },
+  };
   useEffect(() => {
     if (pending && agent && (agent.id !== pending.agent || agent.permissions === pending.mode)) setPending(null);
   }, [agent, pending]);
-  if (!agent || !profile) return null;
+  if (!agent) return <Text style={{ color: T.dim, fontSize: 12 }}>Auto routing · per-agent permissions</Text>;
 
   const current: PermissionMode =
     pending?.agent === agent.id ? pending.mode : (agent.permissions ?? profile.default);
+
+  const indicator = pending ? permissionIndicator(agent.kind, current) : agent.permissionIndicator ?? permissionIndicator(agent.kind, current);
 
   const pick = async (mode: PermissionMode) => {
     if (mode === current || busy) return setOpen(false);
@@ -126,7 +135,7 @@ export function PermissionChip(props: {
         }}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityLabel={`Permissions: ${MODE_NAME[current]}. Change`}
+        accessibilityLabel={`Permissions: ${indicator}. Change`}
         style={{
           flexDirection: "row",
           alignItems: "center",
@@ -140,7 +149,7 @@ export function PermissionChip(props: {
         }}
       >
         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: MODE_COLOR[current] }} />
-        <Text style={{ color: T.text, fontSize: 12, fontWeight: "600" }}>{MODE_NAME[current]}</Text>
+        <Text style={{ color: T.text, fontSize: 12, fontWeight: "600" }}>{indicator}</Text>
         <Text style={{ color: T.dim, fontSize: 10 }}>▼</Text>
       </TouchableOpacity>
 

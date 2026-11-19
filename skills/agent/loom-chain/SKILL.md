@@ -5,7 +5,7 @@ description: Run and merge Loom goals sequentially across several projects with 
 
 # Chain goals across projects
 
-Require Loom ≥ 2.0.0.
+Require Loom ≥ 2.1.0.
 
 A chain starts one orchestra per line, waits for it, scans its diff for secrets,
 and merges it into that project's branch before starting the next line.
@@ -38,6 +38,10 @@ On the shell, quote a value containing spaces. Replace MODEL_ID with an availabl
 model and inspect the expanded workers in each project's preflight result.
 Saved fleets are machine-wide, while best-model selection uses each project's
 30-day history and falls back to its roster if evidence is insufficient.
+Owner-managed model aliases also resolve in fleet model fields; inspect
+`loom models:config` before relying on a machine-wide alias. Planner previews,
+kind limits and stall controls belong to `orchestrate`; do not add those flags to
+chain lines, whose accepted options remain the list above.
 See [loom-orchestrate](../loom-orchestrate/SKILL.md) for fleet selection and limits.
 
 ## Check before a long run

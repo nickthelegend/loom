@@ -138,16 +138,16 @@ describe("command palette", () => {
 });
 
 describe("tui views", () => {
-  it("cycleView wraps through the four tabs", () => {
-    expect(VIEWS).toEqual(["thread", "board", "brain", "diff"]);
+  it("cycleView wraps through the five tabs", () => {
+    expect(VIEWS).toEqual(["thread", "board", "brain", "diff", "scoreboard"]);
     expect(cycleView("thread")).toBe("board");
-    expect(cycleView("diff")).toBe("thread"); // wraps
-    expect(cycleView("thread", -1)).toBe("diff");
+    expect(cycleView("scoreboard")).toBe("thread"); // wraps
+    expect(cycleView("thread", -1)).toBe("scoreboard");
   });
 
-  it("renderTabs shows all four labels", () => {
+  it("renderTabs shows all five labels", () => {
     const tabs = stripAnsi(renderTabs("brain"));
-    for (const label of ["1 Thread", "2 Board", "3 Brain", "4 Diff"]) expect(tabs).toContain(label);
+    for (const label of ["1 Thread", "2 Board", "3 Brain", "4 Diff", "5 Scoreboard"]) expect(tabs).toContain(label);
   });
 
   it("formatBrain groups by kind — failures before facts — and dims low confidence", () => {
