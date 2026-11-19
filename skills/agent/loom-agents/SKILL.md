@@ -5,7 +5,7 @@ description: Add Loom agent sessions and accounts, select chat/message models an
 
 # Configure agents
 
-Require Loom ≥ 2.0.0.
+Require Loom ≥ 2.1.0.
 
 Run project commands inside the target Loom project. Inspect before changing:
 
@@ -65,6 +65,32 @@ turn. Send's `--model` and `--effort` override only that message, including when
 Effort is adapter-dependent; use supported values. Pinning a chat does not take
 the write baton. Inspect the returned roster after bulk additions.
 
+## Model routing and options
+
+```sh
+loom models:config
+loom models:config model-routing.json
+loom models:effort high
+loom models --health
+loom agents:options builder
+loom agents:options builder '{"effort":"high"}'
+loom scoreboard --window 7d --csv
+loom digest --scoreboard
+```
+
+Read existing routing settings before replacing them from a JSON file. Owner-managed
+model aliases work in model fields and fleet specs; the same settings hold daily
+USD/token caps and the optional Monday digest. Caps aggregate recorded usage across
+projects, warn at 80%, refuse subsequent turns at 100%, and reset at midnight UTC.
+The project effort default accepts low, medium, high or default (clear); explicit
+agent/chat/turn choices take precedence. Health sends bounded one-token probes to
+configured provider models, reporting latency and the last error.
+
+Agent options accept validated JSON, including extraArgs, supported typed options,
+effort and model-agent fallbacks. Inspect before changing; invalid updates leave
+valid settings intact. Model-agent fallbacks handle 402/429 responses, while CLI
+agents retain their quota relay. CSV exports standings; the digest covers seven days.
+
 ## Connect ACP
 
 ```sh
@@ -114,6 +140,24 @@ and others do not support it. Read the profile before relying on it for unattend
 `bypass` means no sandbox: the agent can run commands, commit, push, and use the
 network as the user. Only choose `loom agents:mode builder bypass` when that access
 is authorized. Never use it as an automatic fix for denied network or git writes.
+
+## Project safety rules
+
+```sh
+loom safety
+loom safety --file safety-policy.json
+loom safety --preset strict
+loom audit --risky --since 7d --json
+```
+
+Policy JSON supports allow, deny, protectedPaths, shellDeny and approvalTimeoutMin.
+Deny rules win over allows in every mode. Protected paths also cover symlink and
+hard-link aliases; shell or opaque tools are refused when protection cannot be
+guaranteed. Adapters unable to intercept tools refuse hard policies.
+Presets are strict, normal and trusting; they change modes and deadlines together,
+respect team policy, and refuse changes during active work. Apply only the requested
+policy. Approval deadlines auto-deny; a late answer cannot release an expired call.
+Use the risky audit to inspect tool calls, approvals, denials and secret overrides.
 
 ## Defaults and instructions
 

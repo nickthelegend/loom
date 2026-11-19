@@ -8,14 +8,15 @@
  */
 
 import type { IntakeMode, IntakeSource } from "./intake.js";
+import type { AutomationFields, AutomationKind } from "./auto-r4/model.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export interface Trigger {
+export interface Trigger extends AutomationFields {
   id: string;
   name: string;
-  kind: "schedule" | "webhook" | "intake";
+  kind: "schedule" | "webhook" | "intake" | AutomationKind;
   /** intake: assigned issue source, optional label, and how to start work. No prompt needed. */
   intake?: { source: IntakeSource; label?: string; mode: IntakeMode };
   /** schedule: 5-field cron (minute hour day-of-month month day-of-week), local time. */
@@ -30,6 +31,10 @@ export interface Trigger {
   chat?: string;
   /** webhook: the shared secret (HMAC-SHA256 of the body, or sent as-is in a header). */
   secret?: string;
+  /** Only trusted GitHub issue comments beginning with /loom start new chats. */
+  githubCommand?: boolean;
+  /** Successful command deliveries survive restarts. */
+  commandIds?: string[];
   /** webhook: ignore deliveries closer together than this (a flood guard; answered 200 so senders don't retry). */
   minIntervalSec?: number;
   enabled: boolean;
@@ -46,6 +51,7 @@ export interface TriggerRun {
 }
 
 interface TriggerFile {
+  calendarSecret?: string;
   triggers: Trigger[];
   runs: TriggerRun[];
 }
@@ -56,7 +62,7 @@ const file = (dir: string) => path.join(dir, ".loom", "triggers.json");
 export function readTriggers(dir: string): TriggerFile {
   try {
     const raw = JSON.parse(fs.readFileSync(file(dir), "utf8")) as Partial<TriggerFile>;
-    return { triggers: Array.isArray(raw.triggers) ? raw.triggers : [], runs: Array.isArray(raw.runs) ? raw.runs : [] };
+    return { ...(typeof raw.calendarSecret === "string" ? { calendarSecret: raw.calendarSecret } : {}), triggers: Array.isArray(raw.triggers) ? raw.triggers : [], runs: Array.isArray(raw.runs) ? raw.runs : [] };
   } catch {
     return { triggers: [], runs: [] };
   }
@@ -65,7 +71,7 @@ export function readTriggers(dir: string): TriggerFile {
 export function writeTriggers(dir: string, data: TriggerFile): void {
   fs.mkdirSync(path.dirname(file(dir)), { recursive: true });
   const tmp = `${file(dir)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ triggers: data.triggers, runs: data.runs.slice(-MAX_RUNS) }, null, 2) + "\n", { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify({ ...(data.calendarSecret ? { calendarSecret: data.calendarSecret } : {}), triggers: data.triggers, runs: data.runs.slice(-MAX_RUNS) }, null, 2) + "\n", { mode: 0o600 });
   fs.renameSync(tmp, file(dir));
 }
 
@@ -168,6 +174,7 @@ export function parseEvery(s: string): number {
   if (!m) throw new Error(`"${s}" isn't an interval — try 15m, 2h or 1d`);
   const n = Number(m[1]) * ({ h: 60, d: 1440 }[(m[2] ?? "m").toLowerCase()] ?? 1);
   if (n < 1) throw new Error("the shortest interval is 1 minute");
+  if (!Number.isSafeInteger(n)) throw new Error("the interval must be a finite whole number of minutes");
   return n;
 }
 
@@ -181,7 +188,7 @@ export function parseEvery(s: string): number {
  * X-Loom-Secret / ?token= for senders that can't sign. Constant-time throughout.
  */
 export function verifyDelivery(secret: string, raw: Buffer, headers: Record<string, string | string[] | undefined>, token?: string): boolean {
-  const eq = (a: string, b: string) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const eq = (a: string, b: string) => Buffer.byteLength(a) === Buffer.byteLength(b) && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   const sig = String(headers["x-hub-signature-256"] ?? headers["x-loom-signature"] ?? "");
   if (sig) {
     const want = "sha256=" + crypto.createHmac("sha256", secret).update(raw).digest("hex");
@@ -196,11 +203,11 @@ export function verifyDelivery(secret: string, raw: Buffer, headers: Record<stri
  * X-*-Event header; {{trigger.name}}, {{trigger.firedAt}}.
  */
 export function renderPrompt(prompt: string, body: unknown, event = "", trigger?: { name: string; firedAt: number }): string {
-  const get = (p: string) => p.split(".").reduce<unknown>((v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined), body);
+  const get = (p: string) => p.split(".").reduce<unknown>((v, k) => (v && typeof v === "object" && Object.hasOwn(v, k) ? (v as Record<string, unknown>)[k] : undefined), body);
   const show = (v: unknown) => (v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
   return prompt
-    .replace(/\{\{\s*event\s*\}\}/g, event)
-    .replace(/\{\{\s*trigger\.name\s*\}\}/g, trigger?.name ?? "")
+    .replace(/\{\{\s*event\s*\}\}/g, () => event)
+    .replace(/\{\{\s*trigger\.name\s*\}\}/g, () => trigger?.name ?? "")
     .replace(/\{\{\s*trigger\.firedAt\s*\}\}/g, trigger ? new Date(trigger.firedAt).toISOString() : "")
     .replace(/\{\{\s*(?:body|payload)\.([\w.-]+)\s*\}\}/g, (_m, p: string) => show(get(p)))
     .replace(/\{\{\s*(?:body|payload)\s*\}\}/g, () => show(body).slice(0, 20_000));

@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld("loomNative", {
   },
   // Native menu items (Loom ▸ New Orchestra…, Connect a Phone…, Settings…).
   // The page subscribes; the action is one of a fixed set of strings.
+  setShortcuts: function (bindings) {
+    return ipcRenderer.invoke("loom:shortcuts", bindings);
+  },
   onMenu: function (cb) {
     ipcRenderer.on("loom:menu", function (_e, action) {
       if (typeof action === "string") cb(action);

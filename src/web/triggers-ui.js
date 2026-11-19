@@ -5,6 +5,8 @@
  * Approach credit: Nuphos (Apache-2.0, © Zeabur Inc.).
  */
 
+import { mountAutomation } from "./auto-r4.js";
+import { copyText } from "./clipboard.js";
 import { api } from "./connection.js";
 import { esc } from "./format.js";
 import { ICONS, LOADER } from "./icons.js";
@@ -23,15 +25,20 @@ export function openTriggers(pid, projectName) {
   document.getElementById("trx").onclick = close;
   var body = document.getElementById("trbody");
   var base = "/api/projects/" + encodeURIComponent(pid) + "/triggers";
+  var templates = [];
   var reveal = null; // { id, secret, path } just after a webhook is made
 
   function when(t) {
     if (t.kind === "webhook") return "webhook";
+    if (t.kind === "file") return "changes in " + t.onChange;
+    if (t.kind === "event") return t.on;
+    if (t.kind === "branch") return "commits on " + t.onCommit;
+    if (t.kind === "url") return "watch " + t.watchUrl;
     return t.cron ? "cron " + t.cron : "every " + (t.everyMin % 1440 === 0 ? t.everyMin / 1440 + "d" : t.everyMin % 60 === 0 ? t.everyMin / 60 + "h" : t.everyMin + "m");
   }
 
   function load() {
-    api(base).then(draw).catch(function(e){ body.innerHTML = '<div class="phmsg">' + esc(e.message) + "</div>"; });
+    Promise.all([api(base), api(base + "/templates")]).then(function(r){ templates = r[1].templates; draw(r[0]); }).catch(function(e){ body.innerHTML = '<div class="phmsg">' + esc(e.message) + "</div>"; });
   }
 
   function draw(j) {
@@ -48,7 +55,11 @@ export function openTriggers(pid, projectName) {
         (mine.length ? '<div class="trruns">' + mine.map(function(r){ return '<span class="' + (r.ok ? "ok" : "skip") + '">' + (r.ok ? "✓" : "·") + " " + esc(new Date(r.at).toLocaleTimeString()) + " " + esc(r.note) + "</span>"; }).join("") + "</div>" : "") +
         '<div class="pillrow"><button class="btn ghost sm" data-fire>Run now</button><button class="btn ghost sm" data-toggle>' + (t.enabled ? "Pause" : "Resume") + '</button><button class="btn ghost sm" data-rm>Remove</button></div></div>';
     });
+    h += '<button class="btn ghost sm" id="trcalendar">Export schedules (.ics)</button><button class="btn ghost sm" id="trsubscribe">Copy calendar feed URL</button><button class="btn ghost sm" id="trrevoke">Revoke feed URL</button><p class="hintx">Next 100 occurrences per schedule, up to one year. Calendar downloads require your Loom session.</p>';
     h += '<details class="tradd"' + (list.length ? "" : " open") + '><summary>Add a trigger</summary><div class="cloudin">' +
+      '<div class="field"><label>Webhook template</label><select id="trtemplate"><option value="">Custom</option>' + templates.map(function(t){ return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>'; }).join("") + '</select></div>' +
+      '<label class="trsw"><input type="checkbox" id="trgithub"> GitHub /loom comments (trusted collaborators only; one new chat per comment)</label>' +
+      '<div class="field"><label>Sample payload (JSON)</label><textarea id="trpayload" rows="3">{}</textarea></div><div class="field"><label>Event</label><input id="trevent"></div><button class="btn ghost sm" id="trpreview">Preview prompt</button><pre class="trprompt" id="trpreviewout" aria-live="polite"></pre>' +
       '<div class="field"><label>What the agent should do</label><textarea id="trprompt" rows="3" placeholder="Summarise yesterday\'s merged PRs. For a webhook: {{body.some.field}}, {{event}}"></textarea></div>' +
       '<div class="field"><label>When</label><select id="trkind"><option value="every">Every…</option><option value="cron">On a schedule (cron)</option><option value="webhook">When a webhook arrives</option></select></div>' +
       '<div class="field" id="trwhenf"><label id="trwhenl">Every</label><input id="trwhen" value="1h" spellcheck="false" placeholder="30m, 2h, 1d"></div>' +
@@ -56,7 +67,33 @@ export function openTriggers(pid, projectName) {
       '<div class="field"><label>Agent <span class="opt">optional — default: whoever holds the baton</span></label><input id="tragent" spellcheck="false"></div>' +
       '</div><div class="pillrow"><button class="btn primary sm" id="tradd">Add trigger</button></div></details>';
     body.innerHTML = h;
+    mountAutomation(body, pid, load);
     reveal = null;
+    document.getElementById("trsubscribe").onclick = function(){ api(base + "/calendar-link", { method: "POST", body: "{}" }).then(function(r){ return copyText(location.origin + r.path); }).then(function(){ toast("Private calendar URL copied — anyone holding it can read schedule names"); }).catch(function(e){ toast(e.message); }); };
+    document.getElementById("trrevoke").onclick = function(){ api(base + "/calendar-link", { method: "DELETE" }).then(function(){ toast("Calendar URL revoked"); }).catch(function(e){ toast(e.message); }); };
+    document.getElementById("trcalendar").onclick = function(){
+      api(base + "/calendar?format=json").then(function(r){
+        var url = URL.createObjectURL(new Blob([r.calendar], { type: "text/calendar" })), a = document.createElement("a");
+        a.href = url; a.download = "loom-schedules.ics"; a.click(); setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+      }).catch(function(e){ toast(e.message); });
+    };
+    document.getElementById("trpreview").onclick = function(){
+      var out = document.getElementById("trpreviewout"), payload;
+      try { payload = JSON.parse(document.getElementById("trpayload").value); } catch (e) { out.textContent = "Enter valid JSON for the sample payload."; return; }
+      api(base + "/preview", { method: "POST", body: JSON.stringify({ prompt: document.getElementById("trprompt").value, payload: payload, event: document.getElementById("trevent").value }) })
+        .then(function(r){ out.textContent = r.prompt; }).catch(function(e){ out.textContent = e.message; });
+    };
+    document.getElementById("trtemplate").onchange = function(){
+      var t = templates.find(function(t){ return t.id === this.value; }, this);
+      if (!t) return;
+      document.getElementById("trprompt").value = t.prompt;
+      document.getElementById("trpayload").value = JSON.stringify(t.payload, null, 2);
+      document.getElementById("trevent").value = t.event;
+      kind.value = "webhook"; kind.onchange();
+    };
+    document.getElementById("trgithub").onchange = function(){
+      if (this.checked) { kind.value = "webhook"; kind.onchange(); document.getElementById("trprompt").value = "{{body.comment.body}}"; }
+    };
     var kind = document.getElementById("trkind");
     kind.onchange = function(){
       var k = kind.value, f = document.getElementById("trwhenf");
@@ -70,13 +107,14 @@ export function openTriggers(pid, projectName) {
       var k = kind.value, w = document.getElementById("trwhen").value.trim();
       var name = document.getElementById("trname").value.trim(), agent = document.getElementById("tragent").value.trim();
       var req = { kind: k === "webhook" ? "webhook" : "schedule", prompt: prompt };
+      if (k === "webhook") req.githubCommand = document.getElementById("trgithub").checked;
       if (k === "every") req.every = w; else if (k === "cron") req.cron = w;
       if (name) req.name = name;
       if (agent) req.agent = agent;
       api(base, { method: "POST", body: JSON.stringify(req) }).then(function(r){
         if (r.secret) reveal = { id: r.trigger.id, secret: r.secret, path: r.path };
         toast("trigger added");
-        api(base).then(draw);
+        Promise.all([api(base), api(base + "/templates")]).then(function(r){ templates = r[1].templates; draw(r[0]); });
       }).catch(function(e){ toast(e.message); });
     };
     Array.prototype.forEach.call(body.querySelectorAll("[data-t]"), function(row){

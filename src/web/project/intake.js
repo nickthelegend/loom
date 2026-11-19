@@ -20,7 +20,7 @@ export function openIntake(pid){
   scrim.innerHTML = '<div class="modal intakemodal">' +
     '<div class="modalhead">My issues<button class="iconbtn" id="ikx" aria-label="close">' + ICONS.x + "</button></div>" +
     '<div class="modalbody">' +
-      '<div class="ikbar"><div class="seg" id="iksrc"><button data-src="github" class="on">GitHub</button><button data-src="linear">Linear</button></div>' +
+      '<div class="ikbar"><div class="seg" id="iksrc"><button data-src="github" class="on">GitHub</button><button data-src="linear">Linear</button><button data-src="jira">Jira</button></div>' +
         '<input id="iklabel" placeholder="label (optional)" spellcheck="false" autocomplete="off"><button class="btn ghost sm" id="ikload">Refresh</button></div>' +
       '<div class="iklist" id="iklist">' + LOADER + "</div>" +
       '<div class="ikopts"><span>Start each as</span><div class="seg" id="ikmode"><button data-mode="chat" class="on">a chat</button><button data-mode="orchestra">an Orchestra goal</button></div>' +
