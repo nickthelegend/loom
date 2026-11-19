@@ -54,7 +54,8 @@ export function makeProjectDir(config?: Partial<ProjectConfig>): string {
  */
 export async function waitUntil(
   predicate: () => Promise<boolean> | boolean,
-  { timeoutMs = 20_000, intervalMs = 40 } = {},
+  // Windows CI runners are several times slower at jsdom and process start-up
+  { timeoutMs = process.platform === "win32" ? 60_000 : 20_000, intervalMs = 40 } = {},
 ): Promise<void> {
   // Hosted Windows runners stall for tens of seconds while the suite starts
   // real Git/Node children (synchronous spawns there block the in-process hub
