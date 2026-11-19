@@ -10,7 +10,7 @@ import { mcpRequest, mcpTools } from "../src/core/mcp-server.js";
 import { writeLoomMcpSession, loomToolScope } from "../src/core/loom-tools.js";
 import { lintSkill } from "../src/core/agentic-r4/skills.js";
 import { waitForTarget } from "../src/core/agentic-r4/wait.js";
-import { runHook } from "../src/core/agentic-r4/hooks.js";
+import { listHooks, runHook } from "../src/core/agentic-r4/hooks.js";
 import { agenticAction, loadAgenticView } from "../src/cli/tui-r4.js";
 import { EchoAdapter } from "../src/adapters/echo.js";
 import { registerAgentKind } from "../src/adapters/index.js";
@@ -223,7 +223,16 @@ describe("consultation, hooks, skills and waits", () => {
   });
   it("keeps hooks off, requires owner consent (including phones), sends JSON and kills overruns", async () => {
     const hooks = path.join(dir, ".loom/hooks"); fs.mkdirSync(hooks, { recursive: true });
-    for (const name of ["turn-finished", "needs-you", "run-completed"]) fs.writeFileSync(path.join(hooks, name), '#!/bin/sh\ncat >> hook-events.jsonl\necho hook-output\n', { mode: 0o755 });
+    for (const name of ["turn-finished", "needs-you", "run-completed"]) {
+      fs.writeFileSync(path.join(hooks, name), '#!/usr/bin/env node\nlet input = ""; process.stdin.on("data", c => input += c); process.stdin.on("end", () => { require("node:fs").appendFileSync("hook-events.jsonl", input); console.log("hook-output"); });\n', { mode: 0o755 });
+    }
+    // Exercise a real batch hook as well as extensionless Node hooks on Windows.
+    if (process.platform === "win32") {
+      fs.renameSync(path.join(hooks, "turn-finished"), path.join(hooks, "turn-finished.cjs"));
+      // A shared checkout can contain both a POSIX hook and its Windows sibling.
+      fs.writeFileSync(path.join(hooks, "turn-finished"), "#!/bin/sh\nexit 99\n");
+      fs.writeFileSync(path.join(hooks, "turn-finished.cmd"), `@echo off\r\n"${process.execPath}" "%~dp0turn-finished.cjs"\r\n`);
+    }
     expect((await client.api<any>("GET", P("/r4/hooks"))).enabled).toBe(false);
     await expect(client.api("POST", P("/r4/hooks/test"), { event: "turn-finished" })).rejects.toThrow("disabled");
     await expect(scoped.api("PUT", P("/r4/hooks"), { enabled: true })).rejects.toThrow("owner");
@@ -242,7 +251,7 @@ describe("consultation, hooks, skills and waits", () => {
       const events = fs.readFileSync(path.join(dir, "hook-events.jsonl"), "utf8");
       return events.includes('"event":"needs-you"') && events.includes('"event":"run-completed"');
     });
-    fs.writeFileSync(path.join(hooks, "needs-you"), '#!/bin/sh\nsleep 10\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(hooks, "needs-you"), '#!/usr/bin/env node\nsetTimeout(() => {}, 10000);\n', { mode: 0o755 });
     expect((await runHook(project, dir, "needs-you", {}, 30)).timedOut).toBe(true);
     await phone.api("PUT", P("/r4/hooks"), { enabled: false });
     expect((await cli(["hooks", "enable", "--project", project])).code).toBe(0);
@@ -250,10 +259,18 @@ describe("consultation, hooks, skills and waits", () => {
     expect(JSON.parse((await cli(["hooks", "test", "turn-finished", "--project", project])).stdout).code).toBe(0);
     expect((await cli(["hooks", "disable", "--project", project])).code).toBe(0);
   }, 90_000);
+  it("does not discover hooks through a directory link outside the project", () => {
+    const local = tmpDir("hook-project"), outside = tmpDir("hook-outside");
+    fs.mkdirSync(path.join(local, ".loom"));
+    fs.writeFileSync(path.join(outside, "turn-finished"), "#!/usr/bin/env node\n", { mode: 0o755 });
+    fs.symlinkSync(outside, path.join(local, ".loom", "hooks"), process.platform === "win32" ? "junction" : "dir");
+    expect(listHooks(project, local).hooks.find(h => h.event === "turn-finished")?.executable).toBe(false);
+  });
   it("drafts an editable disabled skill, refuses overwrite and lints front matter", async () => {
+    await call("send", { project, text: "Steps to save as a skill", agent: "plannerbot", wait: true });
     const draft = await phone.api<any>("POST", P("/r4/skills/from-chat"), { chat: "main", name: "saved-steps" });
     expect(draft).toMatchObject({ draft: true, enabled: false });
-    expect(fs.readFileSync(draft.file, "utf8")).toContain("automatic hook");
+    expect(fs.readFileSync(draft.file, "utf8")).toContain("Steps to save as a skill");
     expect(lintSkill(draft.dir)).toEqual({ valid: true, errors: [] });
     const saved = await cli(["skill:from-chat", "main", "cli-saved", "--project", project]);
     expect(saved.code, saved.stderr).toBe(0); expect(JSON.parse(saved.stdout).enabled).toBe(false);

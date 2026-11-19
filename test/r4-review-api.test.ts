@@ -69,7 +69,7 @@ it("hands real merge conflicts to echo with both sides and leaves HEAD unchanged
 });
 it("reviews GitHub PR diffs with echo and saves editable comments without posting", async () => {
   const bin = tmpDir("r4-gh"), oldPath = process.env.PATH;
-  fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\n[ "$1 $2" = "pr diff" ] || exit 9\nprintf "diff --git a/remote.ts b/remote.ts\\n--- a/remote.ts\\n+++ b/remote.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n"\n', { mode: 0o755 }); process.env.PATH = bin + path.delimiter + oldPath;
+  fs.writeFileSync(path.join(bin, "gh"), '#!/usr/bin/env node\nif (process.argv[2] !== "pr" || process.argv[3] !== "diff") process.exit(9);\nprocess.stdout.write("diff --git a/remote.ts b/remote.ts\\n--- a/remote.ts\\n+++ b/remote.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n");\n', { mode: 0o755 }); process.env.PATH = bin + path.delimiter + oldPath;
   try {
     const r = await json("/review/pr", { pr: "https://github.com/example/repo/pull/12", agents: ["reviewer"] });
     await waitUntil(async () => (await json("/review/pr/" + r.review.reviewId)).review.status === "done");

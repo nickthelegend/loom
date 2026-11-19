@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { fileCommand, spawnContained, stopWindowsTree } from "../process.js";
 import { readSettings } from "./state.js";
 import type { ProjectRuntime } from "../../daemon/runtime.js";
 import type { LoomEvent } from "../../types.js";
@@ -10,9 +10,13 @@ export const HOOK_EVENTS = ["turn-finished", "needs-you", "run-completed"] as co
 export type HookEvent = typeof HOOK_EVENTS[number];
 function hookFile(dir: string, event: string) {
   if (!HOOK_EVENTS.includes(event as HookEvent)) throw new Error("unknown hook event");
-  const root = fs.realpathSync(dir), file = path.join(root, ".loom", "hooks", event);
+  const root = fs.realpathSync(dir), base = path.join(root, ".loom", "hooks", event);
+  const file = process.platform === "win32"
+    ? [...[".exe", ".com", ".cmd", ".bat", ".js", ".cjs", ".mjs"].map(ext => base + ext), base].find(file => fs.existsSync(file)) ?? base
+    : base;
   const real = fs.realpathSync(file);
-  if (!real.startsWith(root + path.sep) || !fs.statSync(real).isFile()) throw new Error("hook must be a file inside the project");
+  const relative = path.relative(root, real);
+  if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative) || !fs.statSync(real).isFile()) throw new Error("hook must be a file inside the project");
   fs.accessSync(real, fs.constants.X_OK);
   return real;
 }
@@ -26,19 +30,26 @@ export async function runHook(project: string, dir: string, event: string, paylo
   if (!readSettings(project).hooks) throw new Error("project hooks are disabled");
   const file = hookFile(dir, event);
   return new Promise<{ code: number | null; timedOut: boolean; output: string }>((resolve, reject) => {
-    const child = spawn(file, [], { cwd: dir, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+    // Batch hooks need cmd.exe; Node shebangs and JS hooks are resolved by
+    // spawnContained's commandInvocation without interpreting script arguments.
+    const { command, args, ...options } = process.platform === "win32" && /\.(cmd|bat)$/i.test(file)
+      ? fileCommand("{file}", file) : { command: file, args: [] };
+    const child = spawnContained(command, args, { ...options, cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", timedOut = false;
+    let stopping: Promise<void> | undefined;
     const collect = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-16_000); };
     child.stdout.on("data", collect); child.stderr.on("data", collect);
     child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify({ event, project, payload }) + "\n");
     const timer = setTimeout(() => {
       timedOut = true;
-      try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); } catch { /* Already exited. */ }
+      if (process.platform === "win32") { stopping = stopWindowsTree(child); void stopping.catch(reject); }
+      else { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* Already exited. */ } }
     }, timeoutMs);
     child.once("error", error => { clearTimeout(timer); reject(error); });
-    child.once("close", code => {
+    child.once("close", async code => {
       clearTimeout(timer);
+      try { await (stopping ?? (process.platform === "win32" ? stopWindowsTree(child) : undefined)); } catch (error) { reject(error); return; }
       logbook.add(code === 0 ? "info" : "warn", "hooks", `${event}: ${timedOut ? "timed out" : `exit ${code}`}`, output, project);
       resolve({ code, timedOut, output });
     });

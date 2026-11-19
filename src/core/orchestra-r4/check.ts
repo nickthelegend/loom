@@ -1,16 +1,20 @@
 import { captureTaskFiles } from "./results.js";
-import { spawn } from "node:child_process";
-import { stopWindowsTree } from "../process.js";
+import { shellInvocation, spawnContained, stopWindowsTree } from "../process.js";
 
 /** The shell is intentional: this is the command the run's author asked to check. */
 export function doneCheck(command: string, cwd: string, signal: AbortSignal): Promise<{ ok: boolean; output: string }> {
-  return new Promise(resolve => {
-    const child = spawn(command, { cwd, shell: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-    let output = "", ended = false;
+  return new Promise((resolve, reject) => {
+    const launch = shellInvocation(command);
+    const child = spawnContained(launch.command, launch.args, { windowsVerbatimArguments: launch.windowsVerbatimArguments, cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "", ended = false, stopped = false;
+    let stopping: Promise<void> | undefined;
     const append = (data: Buffer) => { output = (output + data.toString()).slice(-16000); };
     child.stdout.on("data", append); child.stderr.on("data", append);
     const stop = () => {
-      try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else void stopWindowsTree(child); } catch { /* Already exited. */ }
+      if (stopped) return;
+      stopped = true;
+      if (process.platform === "win32") { stopping = stopWindowsTree(child); void stopping.catch(reject); }
+      else { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* Already exited. */ } }
     };
     const timer = setTimeout(stop, 5 * 60_000);
     signal.addEventListener("abort", stop, { once: true });
@@ -21,7 +25,10 @@ export function doneCheck(command: string, cwd: string, signal: AbortSignal): Pr
       resolve({ ok, output: (output + error).slice(-16000) });
     };
     child.on("error", e => finish(false, e.message));
-    child.on("close", code => finish(code === 0 && !signal.aborted, code === 0 ? "" : `\nCheck exited ${code ?? "after interruption"}`));
+    child.on("close", async code => {
+      try { await (stopping ?? (process.platform === "win32" ? stopWindowsTree(child) : undefined)); } catch (error) { reject(error); return; }
+      finish(code === 0 && !stopped && !signal.aborted, code === 0 ? "" : `\nCheck exited ${code ?? "after interruption"}`);
+    });
   });
 }
 

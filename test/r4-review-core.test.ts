@@ -36,7 +36,7 @@ describe("hunks", () => {
     await expect(changeHunk(r.dir, { action: "discard", path: "a.txt", id: h.hunks[0]!.id, version: h.version })).rejects.toThrow("refresh");
     const fresh = await hunks(r.dir, "a.txt"); await changeHunk(r.dir, { action: "discard", path: "a.txt", id: fresh.hunks[0]!.id, version: fresh.version }); r.write("a.txt", "new work\n");
     await expect(changeHunk(r.dir, { action: "undo" })).rejects.toThrow("changed since");
-    await expect(hunks(r.dir, "../outside")).rejects.toThrow(); fs.symlinkSync(tmpDir("r4-out"), path.join(r.dir, "link")); await expect(hunks(r.dir, "link/file")).rejects.toThrow("symlink");
+    await expect(hunks(r.dir, "../outside")).rejects.toThrow(); fs.symlinkSync(tmpDir("r4-out"), path.join(r.dir, "link"), process.platform === "win32" ? "junction" : "dir"); await expect(hunks(r.dir, "link/file")).rejects.toThrow("symlink");
     await expect(hunks(r.dir, ".git/config")).rejects.toThrow();
   });
   it("supports a project nested in a repository without touching its siblings", async () => {
@@ -141,13 +141,18 @@ it("reviews 120000 in added, removed and context lines as ordinary hunks", async
   r.git("reset", "--", "a.txt"); const fresh = await hunks(r.dir, "a.txt");
   await changeHunk(r.dir, { path: "a.txt", id: fresh.hunks[0]!.id, version: fresh.version, action: "discard" }); expect(r.read("a.txt")).toContain("timeout: 60000");
   await changeHunk(r.dir, { action: "undo" }); expect(r.read("a.txt")).toContain("timeout: 120000");
-  r.git("config", "core.filemode", "true"); fs.chmodSync(path.join(r.dir, "a.txt"), 0o755);
-  await expect(hunks(r.dir, "a.txt")).rejects.toThrow("mode changes");
+  // chmod cannot change executable bits on Windows; keep the hunk assertions above.
+  if (process.platform !== "win32") {
+    r.git("config", "core.filemode", "true"); fs.chmodSync(path.join(r.dir, "a.txt"), 0o755);
+    await expect(hunks(r.dir, "a.txt")).rejects.toThrow("mode changes");
+  }
 });
 it("does not read untracked symlinks, special files or oversized files while summarizing and proposing", async () => {
-  const r = repo(); fs.symlinkSync(tmpDir("r4-link"), path.join(r.dir, "node_modules"));
+  const r = repo(); fs.symlinkSync(tmpDir("r4-link"), path.join(r.dir, "node_modules"), "dir");
   const large = path.join(r.dir, "huge.dump"), fd = fs.openSync(large, "w"); fs.ftruncateSync(fd, 3_000_000_000); fs.closeSync(fd);
-  execFileSync("mkfifo", [path.join(r.dir, "pipe")]); r.write("new.ts", "hello\n");
+  // Windows has no filesystem FIFOs; the symlink/large-file checks still run.
+  if (process.platform !== "win32") execFileSync("mkfifo", [path.join(r.dir, "pipe")]);
+  r.write("new.ts", "hello\n");
   const read = vi.spyOn(fs, "readFileSync");
   try {
     const patch = await workingPatch(r.dir); expect(patch).toContain("Binary files differ");

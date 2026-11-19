@@ -18,11 +18,23 @@ it('validates edited plans and limits without accepting duplicate ids, cycles or
   for (const options of [{ check: '' }, { checkRounds: -1 }, { checkRounds: 1.5 }, { taskMinutes: NaN }, { taskMinutes: Infinity }, { taskMinutes: 0 }]) expect(() => validateControls(options)).toThrow();
 });
 it('kills an interrupted check process group and keeps only bounded output', async () => {
-  const dir = tmpDir('r4-check'), ctl = new AbortController();
-  const check = doneCheck('printf started; sleep 10; echo late > late.txt', dir, ctl.signal);
-  setTimeout(() => ctl.abort(), 100);
-  expect((await check).ok).toBe(false); expect(fs.existsSync(path.join(dir, 'late.txt'))).toBe(false);
-  const output = await doneCheck(`${process.execPath} -e "process.stdout.write('x'.repeat(20000))"`, dir, new AbortController().signal);
+  const dir = path.join(tmpDir('r4-check'), 'path with spaces'), ctl = new AbortController();
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'child.cjs'), `const fs = require('node:fs');
+    fs.writeFileSync('child.pid', String(process.pid));
+    setTimeout(() => fs.writeFileSync('late.txt', 'late'), 10000);`);
+  fs.writeFileSync(path.join(dir, 'check.cjs'), `require('node:child_process').spawn(process.execPath, ['child.cjs'], { stdio: 'ignore' });
+    setInterval(() => {}, 1000);`);
+  const check = doneCheck(`"${process.execPath}" "${path.join(dir, 'check.cjs')}"`, dir, ctl.signal);
+  try {
+    // Abort only once a real descendant exists, including on slow Windows CI.
+    await waitUntil(() => fs.existsSync(path.join(dir, 'child.pid')));
+  } finally { ctl.abort(); }
+  expect((await check).ok).toBe(false);
+  const pid = Number(fs.readFileSync(path.join(dir, 'child.pid'), 'utf8'));
+  await waitUntil(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
+  expect(fs.existsSync(path.join(dir, 'late.txt'))).toBe(false);
+  const output = await doneCheck(`"${process.execPath}" -e "process.stdout.write('x'.repeat(20000))"`, dir, new AbortController().signal);
   expect(output.ok).toBe(true); expect(output.output.length).toBe(16000);
 });
 it('skip waits for startup and keeps its slot occupied until cleanup settles', async () => {

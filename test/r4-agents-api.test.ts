@@ -86,7 +86,9 @@ it("keeps environment values daemon-only, redacts echoed values, and preserves n
   expect(JSON.stringify((await client.chatEvents(id, "main")).events)).not.toContain(secret);
   expect(JSON.stringify(await json(project("/agents/execbot/options")))).not.toContain(secret);
   const files = fs.readdirSync(path.join(process.env.LOOM_HOME!, "agent-environment"));
-  expect(files.length).toBeGreaterThan(0); expect(fs.statSync(path.join(process.env.LOOM_HOME!, "agent-environment", files[0]!)).mode & 0o777).toBe(0o600);
+  expect(files.length).toBeGreaterThan(0);
+  // Windows does not expose POSIX owner-only mode bits.
+  if (process.platform !== "win32") expect(fs.statSync(path.join(process.env.LOOM_HOME!, "agent-environment", files[0]!)).mode & 0o777).toBe(0o600);
   await daemon.close(); daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 }); await daemon.listen(); client = new DaemonClient(readDaemonConfig()!); token = readDaemonConfig()!.adminToken;
   expect((await json(project("/agents/execbot/env"))).names).toContain("R4_SECRET");
   expect((await cli(["agents:env", "execbot", "unset", "R4_SECRET"])).code).toBe(0);

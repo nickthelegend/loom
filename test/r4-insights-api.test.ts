@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { setImmediate } from 'node:timers/promises';
 import { execFileSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -169,7 +170,13 @@ describe('R4 full project API', () => {
   it('compares full digest periods even when the narrative event limit is exceeded', async () => {
     const now = Date.now();
     rt.log.append({ kind: 'run_complete', ts: now - 90 * 60_000, agentId: 'historical', payload: { durationMs: 100, costUsd: 2 } });
-    for (let i = 0; i < 4001; i++) rt.log.append({ kind: 'status', payload: { state: 'fixture' } });
+    for (let i = 0; i < 4001; i++) {
+      rt.log.append({ kind: 'status', payload: { state: 'fixture' } });
+      // Thousands of synchronous disk writes starve the in-process HTTP server
+      // on Windows. Let socket close/keep-alive timers run while seeding data.
+      if (i % 25 === 0) await setImmediate();
+    }
+    await setImmediate();
     const result = await req(`/digest?since=${now - 60 * 60_000}`);
     expect(result.comparison.previous.turns).toBe(1); expect(result.lines[0].text).toContain('vs previous:');
   });

@@ -117,7 +117,7 @@ it('compares two saved runs and exports a complete Markdown report', async () =>
   expect((await api(`${base()}/compare?a=missing&b=${next.id}`)).status).toBe(404);
 });
 it('runs checks in worker worktrees, feeds failure output back and integrates only after a passing check', async () => {
-  const check = 'if test -f .checked; then exit 0; else touch .checked; printf "repair me"; exit 1; fi';
+  const check = `"${process.execPath}" -e "const fs=require('node:fs');if(!fs.existsSync('.checked')){fs.writeFileSync('.checked','');console.log('repair me');process.exit(1)}"`;
   const run = await preview('write:checked.txt', { check, checkRounds: 1 }); await post(run, 'approve-plan');
   await waitUntil(async () => (await get(run)).tasks[0]!.status === 'done');
   const task = (await get(run)).tasks[0]!; expect(task.attempts).toBe(2); expect(task.checkFailures).toBe(1); expect(task.result).toContain('repair me');
@@ -125,7 +125,7 @@ it('runs checks in worker worktrees, feeds failure output back and integrates on
   expect(runRecipeOptions(await get(run))).toMatchObject({ check, checkRounds: 1 });
 });
 it('exhausts check rounds into needs-you without merging failed work', async () => {
-  const run = await preview('write:not-integrated.txt', { check: 'printf "still broken"; exit 1', checkRounds: 1 }); await post(run, 'approve-plan');
+  const run = await preview('write:not-integrated.txt', { check: `"${process.execPath}" -e "console.log('still broken');process.exit(1)"`, checkRounds: 1 }); await post(run, 'approve-plan');
   await waitUntil(async () => (await get(run)).tasks[0]!.status === 'needs_input');
   const current = await get(run); expect(current.tasks[0]!.attempts).toBe(2); expect(current.status).toBe('waiting_human'); expect(current.tasks[1]!.attempts).toBe(0);
   expect(current.tasks[0]!.checkOutput).toContain('still broken'); expect(fs.existsSync(path.join(run.dir, 'not-integrated.txt'))).toBe(false);
