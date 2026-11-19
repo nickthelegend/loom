@@ -239,7 +239,7 @@ describe("#430.1 Explorer's Open in terminal", () => {
     const err = execFileSync("/bin/sh", ["-c", `${typed} 2>&1 >/dev/null; true`], { cwd: tmpDir("r3-sh"), encoding: "utf8" });
     expect(err).not.toContain("LOOM_QUOTING_PROOF");
     expect(m.errors.join("\n")).toBe("");
-  }, 40_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,7 +272,7 @@ describe("#430.2 a config-written agent avatar", () => {
     const pics = [...m.window.document.querySelectorAll("#psbody img.psav")] as HTMLImageElement[];
     expect(pics.map((i) => i.getAttribute("src"))).toEqual([GOOD_AVATAR]);
     expect((m.window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
-  }, 40_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@ describe("#430.6 Source Control redraws", () => {
     click($(m, '.railbar .rvbtn[data-view="explorer"]'));
     click($(m, '.railbar .rvbtn[data-view="scm"]'));
     expect(($(m, "#gmsg") as HTMLTextAreaElement).value).toBe("half a thought");
-  }, 40_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ describe("#430.3 loom send --wait to a busy agent", () => {
     const r = await runCli(["send", "--wait", "--json", "-a", "solo", "second"], cliDir);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out)).toMatchObject({ status: "ok", agent: "solo", reply: "echo(solo): second" });
-  }, 40_000);
+  });
 
   it("reads a queued turn from its turn_started (an edited item runs as <id>:edit:<ts>)", () => {
     let n = 100;
@@ -351,7 +351,7 @@ describe("#430.4 loom route that failed at start", () => {
     const r = await runCli(["route", "capped", "do the thing"], routeDir, 20_000);
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/could not start/);
-  }, 40_000);
+  });
 
   it("a route that ends between starting it and subscribing is caught by its state", async () => {
     const started = { id: "r1", status: "running" } as RouteState;
