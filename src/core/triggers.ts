@@ -8,14 +8,15 @@
  */
 
 import type { IntakeMode, IntakeSource } from "./intake.js";
+import type { AutomationFields, AutomationKind } from "./auto-r4/model.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export interface Trigger {
+export interface Trigger extends AutomationFields {
   id: string;
   name: string;
-  kind: "schedule" | "webhook" | "intake";
+  kind: "schedule" | "webhook" | "intake" | AutomationKind;
   /** intake: assigned issue source, optional label, and how to start work. No prompt needed. */
   intake?: { source: IntakeSource; label?: string; mode: IntakeMode };
   /** schedule: 5-field cron (minute hour day-of-month month day-of-week), local time. */
@@ -173,6 +174,7 @@ export function parseEvery(s: string): number {
   if (!m) throw new Error(`"${s}" isn't an interval — try 15m, 2h or 1d`);
   const n = Number(m[1]) * ({ h: 60, d: 1440 }[(m[2] ?? "m").toLowerCase()] ?? 1);
   if (n < 1) throw new Error("the shortest interval is 1 minute");
+  if (!Number.isSafeInteger(n)) throw new Error("the interval must be a finite whole number of minutes");
   return n;
 }
 

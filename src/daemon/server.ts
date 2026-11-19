@@ -138,6 +138,7 @@ import { registerProofRoutes } from "./routes/proof.js";
 import { registerShiftRoutes } from "./routes/shift.js";
 import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
+import { registerAutomationRoutes } from "./routes/auto-r4.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
 import { auditCsv } from "../core/team-sharing.js";
@@ -667,6 +668,7 @@ export class LoomDaemon {
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
+    registerAutomationRoutes(app, withRuntime, this.triggers, ctx);
     registerEmailRoutes(app, this.emailDigest);
     registerBridgeRoutes(app, this.bridges);
     // every session, every project (a scoped token: its own) — and the audit trail, owner only

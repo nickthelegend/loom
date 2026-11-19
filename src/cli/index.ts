@@ -4,6 +4,7 @@ import { registerR4Insights } from "./r4-insights.js";
 import { registerCostCommands } from "./r4-cost.js";
 import { registerR4Orchestra } from "./r4-orch.js";
 import { registerR4Review } from "./r4-review.js";
+import { registerAutomationCli } from "./r4-auto.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 import { registerR4Brain } from "./r4-brain.js";
 /**
@@ -5494,6 +5495,7 @@ registerR4Brain(program, ensureDaemon, currentProject);
 registerCostCommands(program, ensureDaemon);
 registerR4Orchestra(program, ensureDaemon, currentProject);
 registerR4Review(program);
+registerAutomationCli(program, ensureDaemon, currentProject);
 
 async function main() {
   const args = process.argv.slice(2);
