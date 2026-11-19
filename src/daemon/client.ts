@@ -100,6 +100,7 @@ export interface OnboardJobView {
 export class DaemonClient {
   readonly onboard = new OnboardClient((method, route, body) => this.request(method, route, body));
   r4Orchestra<T>(id: string, route: string, body?: Record<string, unknown>): Promise<T> { return this.request(body === undefined ? "GET" : "POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${route}`, body); }
+  teamsR4(id: string, route: string, body?: Record<string, unknown>): Promise<Record<string, any>> { return this.request(body ? "POST" : "GET", `/api/projects/${encodeURIComponent(id)}/teams-r4${route}`, body); }
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

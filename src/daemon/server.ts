@@ -2,6 +2,7 @@ import { registerHelpRoutes } from "./routes/help.js";
 import { registerCostRoutes } from "./routes/cost-r4.js";
 import { registerOrchestraR4Routes } from "./routes/orchestra-r4.js";
 import { registerReviewR4Routes } from "./routes/review-r4.js";
+import { registerTeamsR4Public } from "./routes/teams-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -482,6 +483,7 @@ export class LoomDaemon {
       next();
     });
     registerAssetsRoutes(app);
+    registerTeamsR4Public(app, ctx, this.presence);
     registerPublicRoutes(app, ctx);
     registerPreviewPublic(app);
 
@@ -1137,6 +1139,7 @@ export class LoomDaemon {
       // Terminal input comes back up this socket: a tty needs a round-trip per
       // keystroke, which a POST each time can't carry. Only a socket scoped to
       // a project may drive that project's terminals.
+      this.presence.attach(ws);
       ws.on("message", (raw) => {
         let msg: { type?: string; term?: string; data?: string; cols?: number; rows?: number; chat?: unknown; typing?: unknown };
         try {

@@ -39,20 +39,20 @@ export function openSharing(pid, chat, run){
   var body = dialog('Sharing and approvals'); if (!body) return;
   var base = '/api/projects/' + encodeURIComponent(pid);
   body.innerHTML = '<label class="slfield">Link expiry<select data-expiry-preset><option value="1h">1 hour</option><option value="1d" selected>1 day</option><option value="7d">7 days</option></select></label>' +
-    '<button class="btn" data-create-share>Create read-only ' + (run ? 'run' : 'chat') + ' link</button><div data-share-result></div><div data-links></div>' +
+    '<label class="slfield">Passcode (optional)<input type="password" data-share-passcode maxlength="128"></label><label><input type="checkbox" data-first-open> Notify me on first open</label><button class="btn" data-create-share>Create read-only ' + (run ? 'run' : 'chat') + ' link</button><div data-share-result></div><div data-links></div>' +
     '<details><summary>Who may approve tool calls</summary><div data-roles>Loading…</div></details>' +
     '<button class="btn outline" data-audit>Export audit CSV</button>';
   body.querySelector('[data-audit]').onclick = exportAudit;
   function links(){
     api(base + '/shares').then(function(r){
-      body.querySelector('[data-links]').innerHTML = (r.shares || []).map(function(s){ return '<div class="sharing-row"><span>' + esc(s.title) + ' · <span data-expiry="' + esc(s.expiresAt) + '">' + esc(timeLeft(s.expiresAt)) + '</span></span><button class="btn ghost" data-revoke="' + esc(s.id) + '">Revoke</button></div>'; }).join('');
+      body.querySelector('[data-links]').innerHTML = (r.shares || []).map(function(s){ return '<div class="sharing-row"><span>' + esc(s.title) + ' · ' + esc(s.views || 0) + ' views · ' + esc(s.lastOpenedAt ? new Date(s.lastOpenedAt).toLocaleString() : 'Never opened') + (s.passcodeProtected ? ' · Passcode' : '') + ' · <span data-expiry="' + esc(s.expiresAt) + '">' + esc(timeLeft(s.expiresAt)) + '</span></span><button class="btn ghost" data-revoke="' + esc(s.id) + '">Revoke</button></div>'; }).join('');
       body.querySelectorAll('[data-revoke]').forEach(function(b){ b.onclick = function(){ api(base + '/shares/' + encodeURIComponent(b.dataset.revoke), { method: 'DELETE' }).then(links).catch(function(e){ toast(e.message); }); }; });
     }).catch(function(e){ body.querySelector('[data-links]').textContent = e.message; });
   }
   links();
   body.querySelector('[data-create-share]').onclick = function(){
     var b = this; b.disabled = true;
-    api(base + (run ? '/orchestra/' + encodeURIComponent(run) : '/chats/' + encodeURIComponent(chat || 'main')) + '/share', { method: 'POST', body: JSON.stringify({ preset: body.querySelector('[data-expiry-preset]').value }) }).then(function(r){
+    api(base + '/teams-r4/shares', { method: 'POST', body: JSON.stringify({ chat: chat || 'main', run: run, preset: body.querySelector('[data-expiry-preset]').value, passcode: body.querySelector('[data-share-passcode]').value, notifyFirstOpen: body.querySelector('[data-first-open]').checked }) }).then(function(r){
       body.querySelector('[data-share-result]').innerHTML = '<input aria-label="Read-only share link" readonly value="' + esc(r.url) + '"><button class="btn ghost" data-copy-link>Copy</button><p data-expiry="' + esc(r.expiresAt) + '">' + esc(timeLeft(r.expiresAt)) + '</p>';
       body.querySelector('[data-copy-link]').onclick = function(){ copyText(r.url); }; links();
     }).catch(function(e){ toast(e.message); }).finally(function(){ b.disabled = false; });
