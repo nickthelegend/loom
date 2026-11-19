@@ -2,6 +2,7 @@ import { registerProjectHelp } from "./help/settings.js";
 import { renderAgenticTools } from "./agentic-r4.js";
 import { mountAppearance } from "./workspace-r4/appearance.js";
 import { mountSessionSettings } from "./agents-r4.js";
+import { dismissStartupDialogs, openStartupDialog } from './startup-dialogs.js';
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -1156,15 +1157,20 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     }
     drawNav();
     render();
+    return function(){ if (scrim.isConnected) close(); };
   }
 
   // The sidebar foot and the first-run nudge open Settings on its Setup section.
-  function openSetupModal(){ openSettingsModal("setup"); }
+  function openSetupModal(automatic){
+    if (automatic === true) openStartupDialog(function(){ return openSettingsModal("setup"); });
+    else openSettingsModal("setup");
+  }
 
 
   // Per-project settings: toggle agents on/off and set each agent's role. Every
   // change lands on .loom/config.json and re-renders the fleet everywhere.
   function openProjectSettings(pid){
+    dismissStartupDialogs();
     if (document.querySelector(".scrim")) return;
     var scrim = document.createElement("div"); scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal psetmodal"><div class="modalhead">Project settings<button class="iconbtn" id="psx" aria-label="close">' + ICONS.x + '</button></div><div class="modalbody" id="psbody"><div class="loader"><i></i><i></i><i></i><i></i></div></div></div>';

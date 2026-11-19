@@ -102,7 +102,7 @@ import { openTriggers } from './triggers-ui.js';
       // ...unless this window was opened to walk through the demo, which ends at Setup anyway.
       if (!localStorage.getItem(SETUP_SEEN_KEY) && !(state.demoTourWanted && state.demoTourWanted())) {
         localStorage.setItem(SETUP_SEEN_KEY, "1");
-        setTimeout(openSetupModal, 400);
+        setTimeout(function(){ openSetupModal(true); }, 400);
       }
     } catch (e) {
       // private mode, no storage — the button still works

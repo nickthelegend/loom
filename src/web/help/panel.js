@@ -3,6 +3,7 @@ import { esc, mdToHtml } from '../format.js';
 import { state } from '../state.js';
 import { toast } from '../notifications.js';
 import { startFeatureTour, tourProgress } from './tours.js';
+import { openStartupDialog } from '../startup-dialogs.js';
 
 // Capture prior use before this startup writes its own setup/tour preferences.
 var usedBefore = false;
@@ -12,7 +13,7 @@ export function helpDialog(title) {
   var previous = document.activeElement;
   var scrim = document.createElement('div'); scrim.className = 'scrim r4help';
   scrim.innerHTML = '<section class="modal" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><div class="modalhead">' + esc(title) + '<button class="iconbtn" aria-label="Close help">×</button></div><div class="modalbody r4body"></div></section>';
-  function close() { scrim.remove(); document.removeEventListener('keydown', key, true); if (previous && previous.isConnected) previous.focus(); }
+  function close() { var connected = scrim.isConnected; scrim.remove(); document.removeEventListener('keydown', key, true); if (connected && previous && previous.isConnected) previous.focus(); }
   function key(e) {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     if (e.key === 'Tab') {
@@ -50,12 +51,14 @@ export function openHelp(topic) {
   var search = dlg.body.querySelector('[data-help-search]'); search.oninput = function() { draw(search.value); }; search.focus();
 }
 export function openWhatsNew(release) {
-  return (release ? Promise.resolve(release) : api('/api/help/whatsnew')).then(function(r) {
-    var dlg = helpDialog('What’s new · Loom ' + r.version);
-    dlg.body.innerHTML = r.highlights.map(function(h, i) { return '<article><p>' + esc(h.text) + '</p><button class="btn sm" data-highlight="' + i + '">Show me</button></article>'; }).join('');
-    dlg.body.querySelectorAll('[data-highlight]').forEach(function(b) { b.onclick = function() { var h = r.highlights[Number(b.dataset.highlight)]; dlg.close(); openHelp(h.topic); }; });
-    try { localStorage.setItem('loomReleaseSeen', r.version); } catch (e) {}
-  }).catch(function(e) { toast(e.message); });
+  return (release ? Promise.resolve(release) : api('/api/help/whatsnew')).then(showWhatsNew).catch(function(e) { toast(e.message); });
+}
+function showWhatsNew(r) {
+  var dlg = helpDialog('What’s new · Loom ' + r.version);
+  dlg.body.innerHTML = r.highlights.map(function(h, i) { return '<article><p>' + esc(h.text) + '</p><button class="btn sm" data-highlight="' + i + '">Show me</button></article>'; }).join('');
+  dlg.body.querySelectorAll('[data-highlight]').forEach(function(b) { b.onclick = function() { var h = r.highlights[Number(b.dataset.highlight)]; dlg.close(); openHelp(h.topic); }; });
+  try { localStorage.setItem('loomReleaseSeen', r.version); } catch (e) {}
+  return dlg.close;
 }
 export function checkWhatsNew() {
   return api('/api/help/whatsnew').then(function(r) {
@@ -65,8 +68,7 @@ export function checkWhatsNew() {
     if (!previous && usedBefore) previous = '2.1.0';
     if ((!previous && !usedBefore) || previous === r.version) { localStorage.setItem('loomReleaseSeen', r.version); return; }
     function show() {
-      if ((state.demoTourWanted && state.demoTourWanted()) || document.querySelector('.scrim,#tourcard')) { setTimeout(show, 1000); return; }
-      openWhatsNew(r);
+      if ((state.demoTourWanted && state.demoTourWanted()) || !openStartupDialog(function(){ return showWhatsNew(r); })) setTimeout(show, 1000);
     }
     show();
   }).catch(function() {});

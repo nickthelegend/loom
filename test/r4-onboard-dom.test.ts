@@ -23,7 +23,7 @@ beforeAll(async () => {
 });
 afterEach(() => { while (mounted.length) { const m = mounted.pop()!; m.close(); expect(m.errors).toEqual([]); } });
 afterAll(async () => { await daemon.close(); if (provider) await new Promise<void>(r => provider.close(() => r())); });
-function mount(hash = `#p/${project}`, release = "2.1.0", opts: { fresh?: boolean; simple?: boolean; releaseVersion?: string } = {}) {
+function mount(hash = `#p/${project}`, release = "2.1.0", opts: { fresh?: boolean; simple?: boolean; releaseVersion?: string; beforeFetch?: (path: string) => Promise<void> } = {}) {
   const errors: string[] = [], sockets: WebSocket[] = [];
   const vc = new VirtualConsole(); vc.on("jsdomError", e => errors.push(e.message));
   let closed = false; const never = new Promise<never>(() => {});
@@ -31,7 +31,10 @@ function mount(hash = `#p/${project}`, release = "2.1.0", opts: { fresh?: boolea
     w.scrollTo = () => {}; w.HTMLElement.prototype.scrollTo = () => {}; w.HTMLElement.prototype.scrollIntoView = () => {};
     w.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof w.ResizeObserver;
     w.matchMedia = ((q: string) => ({ matches: /min-width/.test(q), media: q, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false })) as typeof w.matchMedia;
-    w.fetch = ((input: string, init?: RequestInit) => closed ? never : opts.releaseVersion && String(input).includes('/api/help/whatsnew') ? Promise.resolve(new Response(JSON.stringify({ version: opts.releaseVersion, highlights: [{ text: 'New features', topic: 'getting-started' }] }), { headers: { 'content-type': 'application/json' } })) : fetch(new URL(String(input), client.baseUrl), init).then(r => closed ? never : r)) as typeof w.fetch;
+    w.fetch = (async (input: string, init?: RequestInit) => {
+      if (opts.beforeFetch) await opts.beforeFetch(new URL(String(input), client.baseUrl).pathname);
+      return closed ? never : opts.releaseVersion && String(input).includes('/api/help/whatsnew') ? new Response(JSON.stringify({ version: opts.releaseVersion, highlights: [{ text: 'New features', topic: 'getting-started' }] }), { headers: { 'content-type': 'application/json' } }) : fetch(new URL(String(input), client.baseUrl), init).then(r => closed ? never : r);
+    }) as typeof w.fetch;
     w.WebSocket = class extends WebSocket { constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); sockets.push(this); } } as unknown as typeof w.WebSocket;
     w.localStorage.setItem("loomClientToken", token);
     if (!opts.fresh) { w.localStorage.setItem("loomDevMode", opts.simple ? "0" : "1"); w.localStorage.setItem("loomSetupSeen", "1"); w.localStorage.setItem("loomTourDone", "1"); }
@@ -67,6 +70,48 @@ it("shows an update once per device and records the installed version", async ()
   await waitUntil(() => !!w.document.querySelector('[data-highlight]'));
   expect(w.localStorage.getItem('loomReleaseSeen')).toBe('2.1.0'); click(w, '.r4help .iconbtn');
   expect(w.document.querySelector('[data-highlight]')).toBeNull();
+});
+it.each(['Setup', 'What’s new'])("opens project agent settings when automatic %s rendered before the sidebar", async (dialog) => {
+  let releaseProjects!: () => void;
+  const projectsReady = new Promise<void>(resolve => { releaseProjects = resolve; });
+  const w = mount(undefined, dialog === 'Setup' ? '' : '2.0.0', {
+    fresh: dialog === 'Setup',
+    beforeFetch: p => p === '/api/projects' ? projectsReady : Promise.resolve(),
+  });
+  await waitUntil(() => !!w.document.querySelector(dialog === 'Setup' ? '#setpane' : '[data-highlight]'));
+  releaseProjects();
+  await waitUntil(() => !!w.document.querySelector<HTMLButtonElement>(`[data-pset="${project}"]`)?.onclick);
+  click(w, `[data-pset="${project}"]`);
+  expect(w.document.querySelector('#psbody')).not.toBeNull();
+  await waitUntil(() => w.document.querySelectorAll('#psbody .psrow [data-avatar]').length === 2);
+  expect(w.document.querySelectorAll('.scrim')).toHaveLength(1);
+  expect(w.document.querySelector('#setpane,[data-highlight]')).toBeNull();
+  // The displaced dialog must also release its Escape handler.
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(w.document.querySelector('.scrim')).toBeNull();
+});
+it("keeps project settings when the release check finishes after the click", async () => {
+  let releaseCheck!: () => void;
+  const checkReady = new Promise<void>(resolve => { releaseCheck = resolve; });
+  let checking = false;
+  const w = mount(undefined, '2.0.0', {
+    beforeFetch: p => { if (p === '/api/help/whatsnew') { checking = true; return checkReady; } return Promise.resolve(); },
+  });
+  await waitUntil(() => checking && !!w.document.querySelector<HTMLButtonElement>(`[data-pset="${project}"]`)?.onclick);
+  click(w, `[data-pset="${project}"]`);
+  await waitUntil(() => w.document.querySelectorAll('#psbody .psrow [data-avatar]').length === 2);
+  releaseCheck();
+  // Allow the real response and the existing deferred startup check to run.
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  expect(w.document.querySelectorAll('.scrim')).toHaveLength(1);
+  expect(w.document.querySelector('[data-highlight]')).toBeNull();
+  click(w, '#psx');
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  expect(w.document.querySelector('.scrim')).toBeNull();
+  // Suppressing an automatic suggestion does not disable the explicit action.
+  click(w, '[data-open-help]');
+  click(w, '[data-whatsnew]');
+  await waitUntil(() => !!w.document.querySelector('[data-highlight]'));
 });
 it("records the legacy release without treating the same version as an update or blocking Setup", async () => {
   const w = mount('#home', "", { releaseVersion: "2.1.0" });
