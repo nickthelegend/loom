@@ -97,6 +97,7 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  teamsR4(id: string, route: string, body?: Record<string, unknown>): Promise<Record<string, any>> { return this.request(body ? "POST" : "GET", `/api/projects/${encodeURIComponent(id)}/teams-r4${route}`, body); }
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

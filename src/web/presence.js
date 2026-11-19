@@ -23,9 +23,9 @@ export function presenceHtml(people, self){
   var others = (people || []).filter(function(p){ return p.id !== self && p.name !== self; });
   if (!others.length) return "";
   var typing = others.filter(function(p){ return p.typing; });
-  return '<span class="pres" role="status" aria-label="' + esc(others.map(function(p){ return p.name + (p.typing ? " (typing)" : ""); }).join(", ") + " in this chat") + '">' +
+  return '<span class="pres" role="status" aria-label="' + esc(others.map(function(p){ return p.name + (p.typing ? " (typing)" : p.following ? " (following your view)" : ""); }).join(", ") + " in this chat") + '">' +
     others.slice(0, 5).map(function(p){
-      return '<span class="presav' + (p.typing ? " typing" : "") + (p.kind === "guest" ? " guest" : "") + '" title="' + esc(p.name + (p.kind === "guest" ? " · guest" : p.kind === "device" ? " · your device" : "") + (p.typing ? " · typing…" : "")) + '" style="--ph:' + hueOf(p.name) + '">' + esc(initials(p.name)) + "</span>";
+      return '<span class="presav' + (p.typing ? " typing" : "") + (p.kind === "guest" ? " guest" : "") + '" title="' + esc(p.name + (p.kind === "guest" ? " · guest" : p.kind === "device" ? " · your device" : "") + (p.typing ? " · typing…" : p.following ? " · following your view" : "")) + '" style="--ph:' + hueOf(p.name) + '">' + esc(initials(p.name)) + "</span>";
     }).join("") +
     (others.length > 5 ? '<span class="presav more">+' + (others.length - 5) + "</span>" : "") +
     (typing.length ? '<span class="prestyping">' + esc(typing.length === 1 ? typing[0].name + " is typing…" : typing.length + " are typing…") + "</span>" : "") +
@@ -36,11 +36,22 @@ export function presenceHtml(people, self){
  * Keep the daemon told: which chat this socket is viewing (chatOf() is read every beat, so a switch
  * is picked up), and typing while `box` has fresh input. Returns stop().
  */
-export function trackPresence(ws, chatOf, box){
-  var typing = false, idle = null, stopped = false;
+export function trackPresence(ws, chatOf, box, extra){
+  var typing = false, idle = null, stopped = false, followingChat = null, observedChat = chatOf();
   function send(t){
     if (stopped || !ws || ws.readyState !== 1) return;
-    try { ws.send(JSON.stringify(t === undefined ? { type: "presence", chat: chatOf() } : { type: "presence", chat: chatOf(), typing: t })); } catch (e) {}
+    try {
+      var frame = { type: "presence", chat: chatOf(), ...(t === undefined ? {} : { typing: t }) };
+      if (frame.chat !== observedChat) { observedChat = frame.chat; followingChat = null; }
+      if (extra) Object.assign(frame, extra());
+      else if (followingChat === frame.chat) {
+        var pane = document.getElementById('pane-thread'), dock = document.querySelector('#dockpane.open'), tab = document.querySelector('#docktabs .dtab.on');
+        var file = dock && tab && /^[fad]:/.test(tab.getAttribute('data-dtab') || '') ? tab.getAttribute('title') || '' : '';
+        var preview = file ? Array.from(document.querySelectorAll('#pane-changes .filepreview .lc')).map(el => el.textContent).join('\n').slice(0, 20000) : '';
+        frame.view = { scroll: pane && pane.scrollHeight > pane.clientHeight ? pane.scrollTop / (pane.scrollHeight - pane.clientHeight) : 1, ...(file ? { file, preview } : {}) };
+      }
+      ws.send(JSON.stringify(frame));
+    } catch (e) {}
   }
   function setTyping(t){ if (t === typing) return; typing = t; send(t); }
   function onInput(){
@@ -49,12 +60,27 @@ export function trackPresence(ws, chatOf, box){
     if (idle) clearTimeout(idle);
     if (has) idle = setTimeout(function(){ setTyping(false); }, TYPING_IDLE_MS);
   }
+  function onPresence(event){
+    try {
+      var snapshot = JSON.parse(event.data);
+      if (snapshot.type !== 'presence' || snapshot.chat !== chatOf()) return;
+      if (snapshot.chat !== observedChat) { observedChat = snapshot.chat; followingChat = null; }
+      var wasFollowing = followingChat === snapshot.chat;
+      followingChat = (snapshot.people || []).some(p => p.kind === 'guest' && p.following === true) ? snapshot.chat : null;
+      if (!extra && !wasFollowing && followingChat) send();
+    } catch (e) {}
+  }
+  ws.addEventListener('message', onPresence);
   send(false);
   var beat = setInterval(function(){ send(); }, HEARTBEAT_MS);
+  var viewTimer = null;
+  function viewChanged(){ if (!viewTimer) viewTimer = setTimeout(function(){ viewTimer = null; send(); }, 250); }
+  document.addEventListener('scroll', viewChanged, true);
+  document.addEventListener('click', viewChanged);
   if (box) { box.addEventListener("input", onInput); box.addEventListener("blur", function(){ setTyping(false); }); }
   return {
     /** Say so now (a chat switch, or a send that emptied the box). */
     poke: function(){ typing = false; send(false); },
-    stop: function(){ stopped = true; clearInterval(beat); if (idle) clearTimeout(idle); if (box) box.removeEventListener("input", onInput); },
+    stop: function(){ stopped = true; ws.removeEventListener('message', onPresence); clearInterval(beat); if (viewTimer) clearTimeout(viewTimer); document.removeEventListener("scroll", viewChanged, true); document.removeEventListener("click", viewChanged); if (idle) clearTimeout(idle); if (box) box.removeEventListener("input", onInput); },
   };
 }

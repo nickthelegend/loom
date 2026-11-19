@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Repo prompt templates (#456).** `loom shared templates publish <name>` writes `.loom/shared/templates/<name>.md`; web and phone Team libraries show validated Team entries alongside personal templates, with variable rendering.
+- **Repo Orchestra recipes (#456).** `loom shared recipes publish <name>` writes `.loom/shared/recipes/<name>.json`; CLI, web and phone can explicitly run a shared recipe, with actionable errors for fleet entries unavailable locally.
+- **Pass a chat (#456).** `loom pass @login --chat <id> --note "…"` and web/phone Pass actions deliver an expiring read-only hand-off with a summary, branch and open questions through the existing encrypted teammate mention. Links use a reachable address when available and explain when a teammate needs Share-live or network access.
+- **Team standup (#456).** `loom team standup --since 1d [--post slack|discord]` and web/phone Team cards group starts, merges and waiting work by person using the existing feed, presence and local history; posting is POST-only and requires the owner or a bridge bound to that project.
+- **Review requests (#456).** `loom share --review @login` and web/phone review actions share a changes snapshot through a mention. Visitors can approve or request changes with a note; verdicts appear as chat annotations and never enter agent input.
+- **Shared-chat comments (#456).** Read-only visitors can comment on a message with a self-reported name. Links cap lifetime submissions at 100; owners can reply or remove annotations on web and phone, including after revocation. Dollar sequences in comments and transcript labels remain literal.
+- **Share changes (#456).** `loom share --changes`, Source Control's Share changes button and phone sharing create expiring read-only file lists and redacted per-file diff snapshots, including new files.
+- **Share-link controls (#456).** Optional passcodes, successful-open counts, last-opened times and an opt-in first-open desktop/web/phone notification extend existing read-only links. Passcodes are hashed and visitor grants expire with the link. Stored payloads are cleared on revocation or expiry cleanup, annotations are retained for 30 days after expiry, and link reads are cached.
+- **Follow in Share live (#456).** Guests can follow the owner's scroll position and open-file preview in their shared chat; presence shows who is following. File previews are sent only while a guest follows, with immediate updates on entry and chat switches. Following pauses when the owner leaves the shared chat and never opens a private chat.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

@@ -1,3 +1,4 @@
+import { R4ChatAnnotations } from "./r4-teams";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -2107,6 +2108,7 @@ export function ProjectScreen(props: {
             })()}
             <ModelEstimateLine creds={creds} projectId={project.id} agentId={selectedAgent?.id} chat={chatId} text={text} model={chats.find(c => c.id === chatId)?.model || selectedAgent?.model} />
             <AttachBar items={attach.items} onRemove={attach.remove} />
+            <R4ChatAnnotations creds={creds} projectId={project.id} chat={chatId} />
             <TeammateMentions creds={creds} projectId={project.id} text={text} onChange={setText} />
             <View
               style={{

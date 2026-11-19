@@ -5,6 +5,7 @@
  * kept on disk, so the shares file alone opens nothing. ~/.loom/shares.json.
  */
 
+import { dropLinkPayload, linkStats } from "./teams-r4/links.js";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -53,7 +54,7 @@ export function openShare(token: string, now = Date.now()): Share | null {
 }
 
 export function listShares(now = Date.now()): Share[] {
-  return load().filter((s) => s.expiresAt > now).sort((a, b) => b.createdAt - a.createdAt);
+  return load().filter((s) => s.expiresAt > now).map(s => ({ ...s, ...linkStats(s.id) })).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Revoke by id; true when there was one. */
@@ -62,5 +63,6 @@ export function revokeShare(id: string): boolean {
   const left = all.filter((s) => s.id !== id);
   if (left.length === all.length) return false;
   save(left);
+  dropLinkPayload(id);
   return true;
 }

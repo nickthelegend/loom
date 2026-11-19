@@ -1,12 +1,13 @@
+import { R4ProjectSharing } from "./r4-teams";
 import { useEffect, useState } from "react";
 import { ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system";
 import { api, type Creds } from "./api";
 import { T, spacing } from "./theme";
-import { expiryPresets, shareCountdown, mentionQuery, insertMention } from "./sharing-model";
+import { expiryPresets, shareCountdown, mentionQuery, insertMention, shareOpenLabel } from "./sharing-model";
 
-type Link = { id: string; url?: string; title?: string; expiresAt: number };
+type Link = { views?: number; lastOpenedAt?: number; passcodeProtected?: boolean; id: string; url?: string; title?: string; expiresAt: number };
 type Fleet = { name: string; spec: string };
 type Roles = { mode: "everyone" | "selected"; approvers: string[]; canApprove: boolean; devices: Array<{ id: string; name: string; owner: boolean }> };
 function Action({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
@@ -26,6 +27,7 @@ async function exportAudit(creds: Creds) {
 }
 
 export function ProjectSharing({ creds, projectId, chat }: { creds: Creds; projectId: string; chat: string }) {
+  const [passcode, setPasscode] = useState(""), [notifyFirstOpen, setNotifyFirstOpen] = useState(false);
   const [preset, setPreset] = useState("1d"), [link, setLink] = useState<Link | null>(null);
   const [links, setLinks] = useState<Link[]>([]), [runs, setRuns] = useState<Array<{ id: string; goal: string }>>([]);
   const [roles, setRoles] = useState<Roles | null>(null), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
@@ -39,16 +41,19 @@ export function ProjectSharing({ creds, projectId, chat }: { creds: Creds; proje
   }, [creds, projectId]);
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); setErr(""); try { await fn(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
   const create = (path: string) => void act(async () => {
-    setLink(await api<Link>(creds, base + path + "/share", { method: "POST", body: JSON.stringify({ preset }) })); await loadLinks();
+    setLink(await api<Link>(creds, base + "/teams-r4/shares", { method: "POST", body: JSON.stringify({ preset, passcode, notifyFirstOpen, chat, ...(path.startsWith("/orchestra/") ? { run: decodeURIComponent(path.slice(11)) } : {}) }) })); await loadLinks();
   });
   return <ScrollView contentContainerStyle={{ padding: spacing.md, gap: 12 }}>
     <Text style={{ color: T.text, fontWeight: "700", fontSize: 18 }}>Read-only sharing</Text>
     <View style={{ flexDirection: "row", gap: 8 }}>{expiryPresets.map(p => <Action key={p.value} label={`${preset === p.value ? "✓ " : ""}${p.label}`} onPress={() => setPreset(p.value)} />)}</View>
+    <TextInput accessibilityLabel="Passcode (optional)" placeholder="Passcode (optional)" placeholderTextColor={T.faint} style={inputStyle} secureTextEntry value={passcode} onChangeText={setPasscode} />
+    <Action label={`${notifyFirstOpen ? "✓ " : ""}Notify on first open`} onPress={() => setNotifyFirstOpen(!notifyFirstOpen)} />
+    <R4ProjectSharing creds={creds} projectId={projectId} chat={chat} />
     <Action label="Share this chat" disabled={busy} onPress={() => create(`/chats/${encodeURIComponent(chat)}`)} />
     {runs.map(r => <Action key={r.id} disabled={busy} label={`Share run: ${r.goal}`} onPress={() => create(`/orchestra/${encodeURIComponent(r.id)}`)} />)}
     {link?.url && <View style={{ gap: 8 }}><Text selectable style={{ color: T.text }}>{link.url}</Text><Text accessibilityRole="timer" style={{ color: T.dim }}>{shareCountdown(link.expiresAt, now)}</Text>
       <Action label="Copy link" onPress={() => void act(() => Clipboard.setStringAsync(link.url!))} /><Action label="Send link" onPress={() => void act(() => Share.share({ message: link.url! }))} /></View>}
-    {links.map(s => <View key={s.id} style={{ gap: 6 }}><Text style={{ color: T.dim }}>{s.title} · {shareCountdown(s.expiresAt, now)}</Text><Action label="Revoke link" disabled={busy} onPress={() => void act(async () => { await api(creds, base + `/shares/${s.id}`, { method: "DELETE" }); if (link?.id === s.id) setLink(null); await loadLinks(); })} /></View>)}
+    {links.map(s => <View key={s.id} style={{ gap: 6 }}><Text style={{ color: T.dim }}>{s.title} · {shareCountdown(s.expiresAt, now)} · {shareOpenLabel(s)}</Text><Action label="Revoke link" disabled={busy} onPress={() => void act(async () => { await api(creds, base + `/shares/${s.id}`, { method: "DELETE" }); if (link?.id === s.id) setLink(null); await loadLinks(); })} /></View>)}
     {roles && <View style={{ gap: 8 }}><Text style={{ color: T.text, fontWeight: "700" }}>Who may approve tool calls</Text><Text style={{ color: T.dim }}>Owner devices always may approve.</Text>
       <Action label={roles.mode === "everyone" ? "Everyone with existing approval access ✓" : "Selected approvers ✓"} onPress={() => setRoles({ ...roles, mode: roles.mode === "everyone" ? "selected" : "everyone" })} />
       {roles.mode === "selected" && roles.devices.map(d => <Action key={d.id} disabled={d.owner} label={`${d.owner || roles.approvers.includes(d.id) ? "✓ " : ""}${d.name}${d.owner ? " · owner device" : ""}`} onPress={() => setRoles({ ...roles, approvers: roles.approvers.includes(d.id) ? roles.approvers.filter(id => id !== d.id) : [...roles.approvers, d.id] })} />)}
