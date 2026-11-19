@@ -1,3 +1,4 @@
+import { mountR4Orchestra, r4Options, r4Plan } from './orchestra-r4.js';
 import { openSharing } from '../sharing.js';
 import { agentGlyph,agentLabel,agentSub,kindOf,labelOf } from '../agents.js';
 import { api } from '../connection.js';
@@ -292,6 +293,7 @@ export function createOrchestra(view) {
         '<label><input data-ooption="planOnly" type="checkbox"' + (opts.planOnly ? " checked" : "") + '>Approve plan before workers start</label>' +
         kinds.map(function(k){ return '<label>Max ' + esc(k) + ' at once<input data-kind-limit="' + esc(k) + '" type="number" min="1" max="100" placeholder="Run limit" value="' + esc((opts.kindLimits || {})[k] || "") + '"></label>'; }).join("") +
         '<div data-orchestra-recipes></div></details>');
+      r4Options(el, opts, function(){ saveOrchCfg(c); });
       el.querySelectorAll("[data-ooption]").forEach(function(input){ input.onchange = function(){
         var key = input.getAttribute("data-ooption");
         opts[key] = input.type === "checkbox" ? input.checked : input.type === "number" ? (input.value ? Number(input.value) : undefined) : (input.value || undefined);
@@ -753,7 +755,7 @@ export function createOrchestra(view) {
       // A wait names a teammate's goal, and its title is in the team view.
       if (!state.team && !state.teamErr && (run.tasks || []).some(function(t){ return (t.hold && t.hold.runId) || /^wait:/.test(t.overlap || ""); })) loadTeam();
       var list = '<div class="oruns"><div class="orunh">Runs</div>' + view.orch.runs.map(function(r){
-        var s = ORCH_RUN_ST[r.status] || ["", "off"];
+        var s = r.held && !["completed", "failed", "aborted", "moved"].includes(r.status) ? ["Held", "warn"] : ORCH_RUN_ST[r.status] || ["", "off"];
         var done = (r.tasks || []).filter(function(t){ return t.status === "done"; }).length;
         return '<div class="orun" data-run="' + esc(r.id) + '"' + (r.id === run.id ? ' data-current="true"' : "") + ">" +
           '<span class="org">' + esc(r.goal) + "</span>" +
@@ -898,7 +900,7 @@ export function createOrchestra(view) {
       var canMove = !run.moving && ["running", "reviewing", "completed"].indexOf(run.status) >= 0 && onlineRunners(view.pid, true).length > 0;
       var h = '<div class="ocard">' +
         '<div class="ogoal">' + esc(run.goal) + "</div>" +
-        '<div class="ometa">' + orchPill(run.status) +
+        '<div class="ometa">' + (run.held && !["completed", "failed", "aborted", "moved"].includes(run.status) ? '<span class="opill warn">Held</span>' : orchPill(run.status)) +
           (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + (run.compare ? " Ask several" : " Race") + "</span></span>"
             : '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>") +
           '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){
@@ -1225,11 +1227,12 @@ export function createOrchestra(view) {
     }
 
     function wireOrchDetail(el, run){
+      mountR4Orchestra(el, run, view.pid, orchAction);
       var copy = el.querySelector("#ographcopy");
       if (copy) copy.onclick = function(){ api("/api/projects/" + view.pid + "/orchestra/" + encodeURIComponent(run.id) + "/graph")
         .then(function(j){ return navigator.clipboard.writeText(j.mermaid); }).then(function(){ toast("Mermaid copied"); }).catch(function(e){ toast(e.message); }); };
       var approve = el.querySelector("#oapproveplan");
-      if (approve) approve.onclick = function(){ orchAction(run, "approve-plan", {}, approve); };
+      if (approve) approve.onclick = function(){ var plan = r4Plan(view.pid, run.id); orchAction(run, plan ? "approve" : "approve-plan", plan ? { plan: plan } : {}, approve); };
       var budget = el.querySelector("#obudget");
       if (budget) budget.onclick = function(){ askText("Run budget in USD", { required: true, ok: "Set budget" }).then(function(value){
         if (value) orchAction(run, "budget", { maxUsd: Number(value) }, budget);

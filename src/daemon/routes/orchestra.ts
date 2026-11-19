@@ -9,6 +9,15 @@ import { recordRecent } from "../../core/prompts.js";
 import { subagents } from "../../core/subagents.js";
 import type { CompareOptions } from "../../core/orchestra.js";
 import type { WithRuntime } from './context.js';
+export const owner = (req: express.Request, res: express.Response): boolean => {
+  // The admin, or one of the owner's own unscoped devices (the rule accounts, terminals and
+  // editors use). Project-scoped tokens and share-live guests are refused.
+  const who = req as express.Request & { isAdmin?: boolean; projectScope?: string[] | null; guest?: unknown };
+  if (who.isAdmin || (!who.projectScope && !who.guest)) return true;
+  res.status(403).json({ error: "only the owner can change Orchestra recipes, webhooks or run settings" });
+  return false;
+};
+
 /** Register orchestra routes in the order established by LoomDaemon.routes(). */
 export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -36,15 +45,6 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   // workerDetails. The started event includes it; task events include selections.
   const orchestraError = (res: express.Response, err: unknown) =>
     void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-
-  const owner = (req: express.Request, res: express.Response): boolean => {
-    // The admin, or one of the owner's own unscoped devices (the rule accounts, terminals and
-    // editors use). Project-scoped tokens and share-live guests are refused.
-    const who = req as express.Request & { isAdmin?: boolean; projectScope?: string[] | null; guest?: unknown };
-    if (who.isAdmin || (!who.projectScope && !who.guest)) return true;
-    res.status(403).json({ error: "only the owner can change Orchestra recipes, webhooks or run settings" });
-    return false;
-  };
 
   app.get("/api/orchestra-recipes", (req, res) => {
     if (owner(req, res)) res.json({ recipes: listOrchestraRecipes() });
@@ -86,7 +86,7 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
         const id = String(req.params.runId), run = rt.orchestra.get(id);
         if (!run) return void res.status(404).json({ error: "no such run" });
         if (action === "recipe") res.json({ recipe: saveOrchestraRecipe(req.body?.name, runRecipeOptions(run)) });
-        else res.json({ run: action === "budget" ? rt.orchestra.setBudget(id, req.body?.maxUsd) : await rt.orchestra.approvePlan(id) });
+        else res.json({ run: action === "budget" ? rt.orchestra.setBudget(id, req.body?.maxUsd) : await rt.orchestra.control(id, "approve", { plan: req.body?.plan }) });
       } catch (err) { orchestraError(res, err); }
     }));
   }
@@ -163,6 +163,9 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
     "/api/projects/:id/orchestra",
     withRuntime(async (rt, req, res) => {
       const b = (req.body ?? {}) as {
+        check?: string;
+        checkRounds?: number;
+        taskMinutes?: number;
         goal?: string;
         orchestrator?: string;
         workers?: unknown;
@@ -183,11 +186,13 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
       };
       // Any paired client may start a run; only the owner may point it at an outbound webhook.
       if (b.webhookUrl !== undefined && !owner(req, res)) return;
+      if (b.check !== undefined && !owner(req, res)) return;
       if (typeof b.goal !== "string" || !b.goal.trim()) return void res.status(400).json({ error: "missing goal" });
       const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
       try {
         const run = await rt.orchestra.start({
           goal: b.goal,
+          check: b.check, checkRounds: b.checkRounds, taskMinutes: b.taskMinutes,
           ...(b.chat ? { chat: String(b.chat) } : {}),
           ...(b.orchestrator ? { orchestrator: String(b.orchestrator) } : {}),
           ...(workers?.length ? { workers } : {}),
