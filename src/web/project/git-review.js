@@ -1,3 +1,4 @@
+import { r4Html, bindR4Panel } from "./review-r4.js";
 import { api } from '../connection.js';
 import { esc } from '../format.js';
 import { toast } from '../notifications.js';
@@ -14,11 +15,12 @@ export function gitReviewHtml(pid, chat){
     '<button class="btn sm" id="gitchangelog">Suggest CHANGELOG</button>' +
     '<label>Message model (Claude; empty uses template)<input id="gitmessagemodel" value="' + esc(form.gitmessagemodel || "") + '" placeholder="e.g. haiku"></label>' +
     '<button class="btn sm" id="gitsavemodel">Save message model</button>' +
-    '<div id="gitdraft">' + (drafts.has(pid + '/' + chat) ? draftHtml(drafts.get(pid + '/' + chat)) : '') + '</div></details>';
+    '<div id="gitdraft">' + (drafts.has(pid + '/' + chat) ? draftHtml(drafts.get(pid + '/' + chat)) : '') + '</div></details>' + r4Html(pid, chat);
 }
 
 export function bindGitReview(pid, chat){
   var root = document.getElementById("gitreview");
+  if (root) bindR4Panel(root.parentElement, pid, chat);
   if (!root) return;
   var context = pid + "/" + chat; root.dataset.context = context;
   root.ontoggle = function(){ if (root.open) opened.add(context); else opened.delete(context); };

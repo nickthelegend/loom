@@ -1,5 +1,6 @@
 import { R4ProjectTools } from "./r4-onboard";
 import { R4CostMenu } from "./r4-cost";
+import { R4Inbox } from "./r4-review";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -730,6 +731,7 @@ export function BoardScreen(props: {
           }}
         />
 
+        <R4Inbox creds={props.creds} />
         {/* projects — and + Project, which starts or clones one on the computer (#371) */}
         <View>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>

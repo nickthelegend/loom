@@ -1,5 +1,6 @@
 import { installHelp } from "./help/index.js";
 import { installCostUI } from "./cost-r4.js";
+import { installR4Review } from "./project/review-r4.js";
 /** Browser main module. See README.md for ownership and startup. */
 import { isGuest } from './share-live.js';
 import { restoreWorkspace,installSelectionSync } from './session.js';
@@ -210,3 +211,4 @@ import { isSplitShortcut } from './splits.js';
 
 installHelp();
 installCostUI();
+installR4Review();

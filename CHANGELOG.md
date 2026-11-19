@@ -52,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extend existing worker timeout support with `--task-minutes`: tasks exceeding their per-turn limit need a human to Extend, Reassign or Skip, available through API and web/phone (#453).
 - Broadcast notes with `orchestra:say` and web/phone Note to all: current workers receive live steering or a queued follow-up, and later worker briefings retain the note (#453).
 
+- **Review inbox (#454).** `loom review:inbox`, the scoped API, a Home card and the phone inbox collect unreviewed chat and run changes, including unmerged run task branches. Loaded projects share cached event projections; unopened projects are reported without starting agents, and clients refresh once a minute or on request.
+- **Keep or discard a hunk (#454).** Web and phone diffs can stage or discard a version-checked hunk, with Undo for the last discard and protection for unrelated staged files and project boundaries.
+- **Loom line attribution (#454).** `loom blame <file>[:line]` and “Who wrote this?” trace recorded line edits to their chat, turn, agent and prompt, remapping line offsets through later turns.
+- **Change summaries (#454).** Extends the existing review triage with per-file plain-language summaries, lockfile and large-change flags, `loom review:summary`, and web and phone review panels.
+- **Resolve conflicts with an agent (#454).** `loom git:resolve` and web/phone controls hand both sides and the base to the selected agent, including conflicts prepared from an Apply or landing branch; Visible conflict actions open the review panel; failed hand-offs abort only merges they prepared. Holds are local to the project checkout, clear after an external commit or abort, and can be released explicitly.
+- **Verify before commit (#454).** Owner-configured project commands run asynchronously after existing secret checks and before manual, automatic and split commits in that checkout. Verification defaults to ten minutes (`verifyTimeoutMs` is configurable); failures and timeouts hold the commit, retain output, and can be sent to an agent from CLI, web or phone.
+- **Split commits (#454).** `loom git:split [--apply]` proposes offline file groups by directory and type, optionally refined by a model; web and phone editors can adjust groups before committing through existing hooks and safety checks.
+- **Pull request review (#454).** `loom review:pr <number|url> [agents…]` extends existing read-only reviewers to GitHub and GitLab diffs, with saved editable comment drafts on web and phone for users to copy and post themselves. Scoped callers can fetch only the project origin repository; owners may review other repositories.
+- **Viewed files (#454).** Versioned per-chat and per-run markers show review progress on web and phone; subsequent file changes invalidate viewed state and return changes to the inbox.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

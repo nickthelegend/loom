@@ -1,3 +1,4 @@
+import { R4ReviewPanel } from "./r4-review";
 import { gitDraftRequest, type GitDraftKind } from "./git-review-model";
 import { useEffect, useState } from "react";
 import { Alert, Text, TextInput, View } from "react-native";
@@ -41,6 +42,7 @@ export function GitReviewPanel(props: { creds: Creds; id: string; chat: string; 
   }
   const input = { color: T.text, backgroundColor: T.raised, padding: 10, borderRadius: 8 };
   return <View style={{ gap: 8 }}>
+    <R4ReviewPanel creds={creds} id={id} chat={chat} agent={props.agent} />
     <Text style={{ color: T.text, fontWeight: "700" }}>Git and review</Text>
     {!!error && <Sys text={error} />}
     <Btn label="Generate commit message" disabled={busy} onPress={() => void run(() => makeDraft("message"))} />

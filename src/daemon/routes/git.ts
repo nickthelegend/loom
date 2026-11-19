@@ -1,3 +1,4 @@
+import { afterHumanReview, saveReviewSettings, VerifyError } from "../../core/review-r4/verify.js";
 import { SecretScanError, withSecretOverride } from "../../core/git-safety.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -35,6 +36,7 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
         if (body.overrideSecrets) rt.log.append({ kind: "status", payload: { state: "secret_override", operation: req.path } });
         res.json(result);
       } catch (err) {
+        if (err instanceof VerifyError) return void res.status(409).json({ error: err.message, code: "verify_failed", verify: err.result });
         if (err instanceof SecretScanError) return void res.status(409).json({ error: err.message, code: "secrets_detected", findings: err.findings });
         // git's own words, not ours: "nothing to commit, working tree clean"
         // beats anything we'd invent about an exit code.
@@ -81,7 +83,7 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
 
   app.post(
     "/api/projects/:id/git/commit",
-    gitWrite((dir, b) => gitCommit(dir, String(b.message ?? ""))),
+    gitWrite((dir, b) => afterHumanReview(async () => { const result = await gitCommit(dir, String(b.message ?? "")); saveReviewSettings(dir, { hold: false }); return result; })),
   );
 
   // init / push / checkout — all write, all through the same error surface.
