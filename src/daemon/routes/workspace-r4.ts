@@ -146,8 +146,8 @@ export function registerWorkspaceR4Routes(app: Express, ctx: Context, withRuntim
     const run = rt.orchestra.list().find(r => !["completed", "failed", "aborted", "moved"].includes(r.status) && (r.chat === chat || r.tasks.some(t => t.chat === chat)));
     const crew = rt.crews.list().find(c => c.state.channel === chat || Object.values(c.state.threads).includes(chat));
     if (!live && !run && !crew) { res.json(await rt.steerMessage(text.data, undefined, { chat })); return; }
-    // Isolated workers use the adapter's main session; the engine stamps their Loom chat on events.
-    const nativeChat = crew && rt.continuity ? chat : "main";
+    // Orchestra workers receive task.chat; the orchestrator still uses its main session.
+    const nativeChat = run?.tasks.some(t => t.chat === chat) || (crew && rt.continuity) ? chat : "main";
     if (live?.capabilities.steer && live.steer && await live.steer(nativeChat, text.data)) {
       rt.log.append({ kind: "message", chat, payload: { text: text.data, author: "user", steer: true } });
       res.json({ steered: true }); return;

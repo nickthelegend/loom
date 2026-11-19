@@ -42,7 +42,7 @@ import {
 import type { SideView } from "../core/side-chats.js";
 import type { Memory, MemoryKind, MemoryPatch, MemoryHistoryEntry } from "../core/brain.js";
 import type { BoardData } from "./board.js";
-import { BUILD_REV, DEFAULT_PORT } from "./server.js";
+import { BUILD_REV, DEFAULT_PORT } from "./system.js";
 import { VERSION } from "../version.js";
 import type { NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "../core/project-creation.js";
 import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";

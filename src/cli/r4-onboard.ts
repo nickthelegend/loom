@@ -3,8 +3,6 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { DaemonClient } from "../daemon/client.js";
 import { helpGuides, whatsNew } from "../core/help/catalog.js";
-import { applyExternalTemplate } from "../core/help/templates.js";
-import { starterTemplates } from "../core/starter-templates.js";
 import { lessons, scenarioNames } from "../core/help/scenarios.js";
 import { saveTutorialProgress, tutorialProgress } from "../core/help/tutorial.js";
 
@@ -40,7 +38,10 @@ export function registerR4Onboard(program: Command, deps: Dependencies) {
   if (templateOption) templateOption.description = "bundled starter name, Git URL or directory";
   init?.hook("preAction", async command => {
     const source = command.opts().template;
-    if (!source || starterTemplates().some(t => t.name === source)) return;
+    if (!source) return;
+    const { starterTemplates } = await import("../core/starter-templates.js");
+    if (starterTemplates().some(t => t.name === source)) return;
+    const { applyExternalTemplate } = await import("../core/help/templates.js");
     await applyExternalTemplate(process.cwd(), source);
     command.setOptionValue("template", undefined);
   });

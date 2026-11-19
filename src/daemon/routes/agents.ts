@@ -63,7 +63,10 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       if (!knownAgentKinds().includes(kind)) return void res.status(400).json({ error: `unknown agent kind "${kind}"` });
       const { models, source } = await listModelsForKind(kind);
       const choices = [...Object.keys(readModelRouting().aliases), ...models];
-      res.json({ kind, count: choices.length, models: choices, source });
+      // Profiles are owner metadata; keep model suggestions available to scoped callers.
+      const caller = req as typeof req & { projectScope?: unknown; guest?: unknown };
+      res.json({ kind, count: choices.length, models: choices, source,
+        ...(!caller.projectScope && !caller.guest ? { profiles: profiles().filter(p => p.kind === kind).map(p => ({ name: p.name, model: p.model })) } : {}) });
     }),
   );
 

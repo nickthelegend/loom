@@ -161,7 +161,10 @@ it("starts PR learning at upgrade and stops failed reads after three attempts ac
   await new Promise(resolve => setImmediate(resolve)); stop();
   expect(read).toHaveBeenCalledTimes(3);
   expect(read.mock.calls.every(args => String(args[0]).endsWith("/2"))).toBe(true);
-  expect(brain.knowledge.events("pr_learning_started")).toHaveLength(1);
+  // Watcher initialization must not consume a conversation event ID.
+  expect(brain.knowledge.events("pr_learning_started")).toHaveLength(0);
+  const reopened = new Brain(log); closes.unshift(() => reopened.close());
+  expect(reopened.knowledge.startPrLearning(dir)).toBe(fresh.id - 1);
   expect(brain.knowledge.events("pr_learn_failed").map(e => e.payload.count)).toEqual([1, 2, 3]);
 });
 

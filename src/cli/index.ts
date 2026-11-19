@@ -68,7 +68,7 @@ import {
   holdWaiting,
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
-import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
+import { DEFAULT_PORT } from "../daemon/system.js";
 import { ensureLoomHome, findProject, loomHome, readDaemonConfig } from "../core/registry.js";
 import { formatEvent as formatProgress, runEvents, type ProgressEvent } from "./run-progress.js";
 import { VERSION } from "../version.js";
@@ -218,6 +218,7 @@ program
     }
     const token = readRunnerToken();
     if (readRunnerConfig().enabled && token && !process.env.GH_TOKEN) process.env.GH_TOKEN = token;
+    const { LoomDaemon } = await import("../daemon/server.js");
     const daemon = new LoomDaemon({ host: opts.host, port });
     let bound: { host: string; port: number };
     try {
@@ -266,7 +267,7 @@ program
       return;
     }
     if (running) {
-      const { BUILD_REV } = await import("../daemon/server.js");
+      const { BUILD_REV } = await import("../daemon/system.js");
       const health = (await fetch(`http://${running.host}:${running.port}/api/health`)
         .then((r) => r.json())
         .catch(() => ({}))) as { rev?: string };
@@ -761,7 +762,7 @@ program
   .command("version")
   .description("CLI build vs the daemon's — the mismatch loom up --restart fixes")
   .action(async () => {
-    const { BUILD_REV } = await import("../daemon/server.js");
+    const { BUILD_REV } = await import("../daemon/system.js");
     console.log(`cli     ${BUILD_REV}`);
     try {
       const client = await ensureDaemon();
@@ -3345,6 +3346,7 @@ program
       if (a === "exec") {
         // Inside a runner's container: run one claimed job, then exit (D70).
         if (!opts.job || !opts.team) throw new Error("runner exec needs --job and --team");
+        const { LoomDaemon } = await import("../daemon/server.js");
         const daemon = new LoomDaemon({ host: "127.0.0.1", port: 0, runnerExec: { teamId: opts.team, jobId: opts.job, done: (ok) => process.exit(ok ? 0 : 1) } });
         await daemon.listen();
         return;

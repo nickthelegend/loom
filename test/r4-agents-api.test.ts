@@ -158,12 +158,17 @@ it("accepts owner devices, confines scoped project tokens, and rejects share-liv
   for (const who of [token, phone]) {
     expect((await api(project("/agents"), "POST", { profile: "reviewer" }, who)).status).toBe(200);
     expect((await api("/api/profiles", "GET", undefined, who)).status).toBe(200);
+    const suggestions = await api(project("/agents/models?kind=echo"), "GET", undefined, who);
+    expect((await suggestions.json()).profiles).toContainEqual({ name: "reviewer", model: "echo-2" });
     expect((await api(project("/agents/execbot/env"), "PUT", { key: "PHONE", value: "private" }, who)).status).toBe(200);
   }
   for (const route of ["/session-settings", "/agents/execbot/env", "/chats?all=1"]) expect((await api(project(route), "GET", undefined, scoped)).status).toBe(200);
   expect((await api(project("/agents/execbot/limits"), "PUT", { retries: { count: 2, waitSeconds: 1 } }, scoped)).status).toBe(200);
   expect((await api(project("/agents/execbot/env"), "PUT", { key: "X", value: "x" }, scoped)).status).toBe(403);
   expect((await api("/api/profiles", "GET", undefined, scoped)).status).toBe(403);
+  const suggestions = await api(project("/agents/models?kind=echo"), "GET", undefined, scoped);
+  expect(suggestions.status).toBe(200);
+  expect(await suggestions.json()).not.toHaveProperty("profiles");
   for (const profile of ["reviewer", "missing-profile"]) {
     const denied = await api(project("/agents"), "POST", { profile }, scoped);
     expect(denied.status).toBe(403);

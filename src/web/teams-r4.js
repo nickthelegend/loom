@@ -100,10 +100,10 @@ export function registerTeamsR4(){
     var presence = document.getElementById('presence');
     if (presence && !document.getElementById('r4-chat-actions')) {
       var actions = document.createElement('span'); actions.id = 'r4-chat-actions'; actions.className = 'r4-chat-actions';
-      actions.innerHTML = '<button class="btn ghost xs" data-pass>Pass</button><button class="btn ghost xs" data-review>Review</button><button class="btn ghost xs" data-library>Team library</button>';
+      actions.innerHTML = '<button class="btn ghost xs" data-pass>Pass</button><button class="btn ghost xs" data-team-review>Review</button><button class="btn ghost xs" data-library>Team library</button>';
       presence.after(actions);
       actions.querySelector('[data-pass]').onclick = () => openR4Share(state.pid, state.chat, 'pass');
-      actions.querySelector('[data-review]').onclick = () => openR4Share(state.pid, state.chat, 'review');
+      actions.querySelector('[data-team-review]').onclick = () => openR4Share(state.pid, state.chat, 'review');
       actions.querySelector('[data-library]').onclick = () => openTeamLibrary(state.pid);
     }
     var scm = document.querySelector('.scmcommit');

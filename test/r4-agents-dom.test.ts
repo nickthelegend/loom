@@ -34,7 +34,7 @@ function mount() {
       const never = new Promise<never>(() => {});
       w.fetch = ((input: string, init?: RequestInit) => {
         if (closed) return never;
-        if (String(input).includes("/agents/models")) return Promise.resolve(new Response(JSON.stringify({ models: ["test/model"] })));
+        if (String(input).includes("/agents/models")) return Promise.resolve(new Response(JSON.stringify({ models: ["test/model"], profiles: [{ name: "test-model", model: "test/model" }] })));
         return fetch(new URL(String(input), client.baseUrl), init).then(r => closed ? never : r);
       }) as any;
       w.WebSocket = class extends WebSocket { constructor(url: string, protocols?: string | string[]) { super(url, protocols); sockets.push(this); } } as any;

@@ -69,8 +69,7 @@ export function watchMergedPrs(owner: Brain | (() => Brain), log: EventJournal, 
   const start = () => {
     if (closed) return;
     const knowledge = currentBrain().knowledge;
-    if (knowledge.prLearningStarted() === undefined) knowledge.record("pr_learning_started", {});
-    started = knowledge.prLearningStarted()!;
+    started = knowledge.startPrLearning(dir);
     for (const event of log.list({ kinds: ["status"], since: started })) receive(event);
   };
   // ProjectRuntime constructs briefings before assigning its Brain.

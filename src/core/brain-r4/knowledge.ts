@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { LoomEvent } from "../../types.js";
 import type { Brain, BrainExport, Memory, MemoryPatch, NewMemory } from "../brain.js";
 import type { EventJournal } from "../eventlog.js";
@@ -78,7 +80,24 @@ export class BrainKnowledge {
   }
 
   sourcePatterns(): string[] { return [...this.state().sources]; }
-  prLearningStarted(): number | undefined { return this.state().prStarted; }
+  private prStart: number | undefined;
+  prLearningStarted(): number | undefined { return this.state().prStarted ?? this.prStart; }
+  /** A watcher checkpoint is bookkeeping, not a new conversation event. */
+  startPrLearning(dir: string): number {
+    const file = path.join(dir, ".loom", "pr-learning-start.json");
+    if (this.prLearningStarted() !== undefined) return this.prLearningStarted()!;
+    try {
+      const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("invalid PR learning checkpoint");
+      this.prStart = value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      this.prStart = this.log.lastId();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(this.prStart) + "\n", { flag: "wx", mode: 0o600 });
+    }
+    return this.prStart;
+  }
   hasLearnedPr(url: string): boolean { return this.state().prLearned.has(url); }
   prFailures(url: string): number { return this.state().prFailures.get(url) ?? 0; }
 

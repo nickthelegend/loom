@@ -9,7 +9,7 @@ export function addAgents(pid, kind){
     scrim.className = "scrim cfscrim";
     scrim.innerHTML = '<form class="modal cfmodal" role="dialog" aria-modal="true" aria-label="Add agents">' +
       '<div class="cft">Add ' + esc(kind) + '</div>' +
-      '<label class="cflab" for="addprofile">Profile<select class="cfin" id="addprofile"><option value="">Custom settings</option></select></label>' +
+      '<label class="cflab" for="addprofile" id="addprofilerow" hidden>Profile<select class="cfin" id="addprofile"></select></label>' +
       '<label class="cflab" for="addmodel">Model<input class="cfin" id="addmodel" list="addmodels" placeholder="' +
         (kind === "model" ? 'provider/model' : 'Default model') + '" autocomplete="off" spellcheck="false"' + (kind === "model" ? ' required' : '') + '>' +
         '<datalist id="addmodels"></datalist></label>' +
@@ -52,6 +52,12 @@ export function addAgents(pid, kind){
     };
     api("/api/projects/" + pid + "/agents/models?kind=" + encodeURIComponent(kind))
       .then(function(j){
+        var choices = j.profiles || [], picker = scrim.querySelector("#addprofile");
+        if (choices.length) {
+          picker.innerHTML = '<option value="">Custom settings</option>' + choices.map(function(p){ return '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>'; }).join("");
+          scrim.querySelector("#addprofilerow").hidden = false;
+          picker.onchange = function(){ var p = choices.find(function(p){ return p.name === picker.value; }); if (p) model.value = p.model || ""; };
+        }
         scrim.querySelector("#addmodels").innerHTML = (j.models || []).map(function(m){ return '<option value="' + esc(m) + '"></option>'; }).join("");
       })
       .catch(function(){ /* Free text still works when suggestions are unavailable. */ });
@@ -64,12 +70,6 @@ export function addAgents(pid, kind){
         scrim.querySelector("#addaccountrow").style.display = "";
       }).catch(function(){});
     }
-    api("/api/profiles").then(function(j){
-      var choices = j.profiles.filter(function(p){ return p.kind === kind; });
-      var picker = scrim.querySelector("#addprofile");
-      picker.innerHTML += choices.map(function(p){ return '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>'; }).join("");
-      picker.onchange = function(){ var p = choices.find(function(p){ return p.name === picker.value; }); if (p) model.value = p.model || ""; };
-    }).catch(function(){});
     model.focus();
   });
 }

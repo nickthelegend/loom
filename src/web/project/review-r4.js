@@ -130,9 +130,12 @@ export function mountReviewDiff(host, pid, chat, options){
   });
 }
 export function installR4Review(){
-  var queued = false;
+  var queued = false, host = document.getElementById('root');
+  if (!host) return;
   function scan(){
     queued = false;
+    // A queued scan can outlive its document when a window closes.
+    if (!host.isConnected) { observer.disconnect(); return; }
     if (!state.token) return;
     document.querySelectorAll('[data-r4-panel]:not([data-bound])').forEach(function(panel){ bindR4Panel(panel, panel.dataset.pid, panel.dataset.chat); });
     var home = document.querySelector('.homegrid') || (!state.pid && document.getElementById('list'));
@@ -148,6 +151,7 @@ export function installR4Review(){
       card.querySelector('button').onclick = refresh; refresh();
     }
   }
-  new MutationObserver(function(){ if (!queued) { queued = true; queueMicrotask(scan); } }).observe(document.getElementById('root'), { childList: true, subtree: true });
+  var observer = new MutationObserver(function(){ if (!queued) { queued = true; queueMicrotask(scan); } });
+  observer.observe(host, { childList: true, subtree: true });
   scan();
 }

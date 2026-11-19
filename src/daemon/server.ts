@@ -3,6 +3,7 @@ import { registerCostRoutes } from "./routes/cost-r4.js";
 import { registerOrchestraR4Routes } from "./routes/orchestra-r4.js";
 import { registerReviewR4Routes } from "./routes/review-r4.js";
 import { registerTeamsR4Public } from "./routes/teams-r4.js";
+import { attachHooks } from "../core/agentic-r4/hooks.js";
 import { registerAgenticRoutes } from "./routes/agentic-r4.js";
 import { registerWorkspaceR4Routes } from "./routes/workspace-r4.js";
 import { registerAgentsR4 } from "./routes/agents-r4.js";
@@ -763,6 +764,7 @@ export class LoomDaemon {
 
   private async openRuntime(info: ProjectInfo): Promise<ProjectRuntime> {
     const rt = await ProjectRuntime.open(info);
+    attachHooks(rt);
     rt.sides.onEvent(frame => {
       this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
     });

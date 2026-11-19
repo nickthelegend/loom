@@ -8,17 +8,12 @@ import { attachHooks, listHooks, runHook, HOOK_EVENTS } from "../../core/agentic
 import { draftChatSkill } from "../../core/agentic-r4/skills.js";
 import { recentToolCalls } from "../../core/agentic-r4/call-log.js";
 import { consult } from "../../core/agentic-r4/consult.js";
-import { findProject, listProjects } from "../../core/registry.js";
+import { listProjects } from "../../core/registry.js";
 import { bearerToken } from "../auth.js";
 
 export function registerAgenticRoutes(app: Express, ctx: RouteContext, withRuntime: WithRuntime, toolWrites: RegExp[]) {
   toolWrites.push(/^\/r4\/(consult|log|retry)$/, /^\/queue$/, /^\/reviews$/);
   const owner = (req: Request) => !(req as Request & { projectScope?: string[] | null; guest?: unknown }).projectScope && !(req as Request & { guest?: unknown }).guest;
-  app.use("/api/projects/:id", (req, _res, next) => {
-    const project = findProject(String(req.params.id));
-    if (!project) return void next();
-    void ctx.runtime(project.id).then(rt => { attachHooks(rt); next(); }, () => next());
-  });
   // Enabled projects are attached at startup even when their first work is a scheduled run.
   for (const p of listProjects()) if (readSettings(p.id).hooks) void ctx.runtime(p.id).then(attachHooks).catch(() => {});
 

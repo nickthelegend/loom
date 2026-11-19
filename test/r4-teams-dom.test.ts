@@ -76,7 +76,7 @@ it("passes and requests review through the UI and shows the standup in the Team 
   const m = mount(); await m.click('[data-pass]'); await m.fill('[data-login]', '@bob'); await m.fill('[data-note]', 'Please continue'); await m.click('[data-create]');
   await waitUntil(() => !!m.q('[aria-label="Share link"]'));
   const link = (m.q('[aria-label="Share link"]') as HTMLInputElement).value; expect(await (await fetch(link)).text()).toContain('Please continue');
-  await m.click('[data-close]'); await m.click('[data-review]'); await m.fill('[data-login]', '@bob'); await m.click('[data-create]');
+  await m.click('[data-close]'); await m.click('[data-team-review]'); await m.fill('[data-login]', '@bob'); await m.click('[data-create]');
   await waitUntil(() => !!m.q('[aria-label="Share link"]')); expect(await (await fetch((m.q('[aria-label="Share link"]') as HTMLInputElement).value)).text()).toContain('Review requested from @bob');
   await m.click('[data-close]'); await m.click('.tab[data-tab="team"]');
   await waitUntil(() => (m.q('[data-report]')?.textContent || '').includes('Browser task')); expect(m.errors).toEqual([]);

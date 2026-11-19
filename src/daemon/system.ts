@@ -10,7 +10,7 @@ import { codexBin } from "../providers/codex/adapter.js";
 import { grokBin } from "../adapters/grok.js";
 import { allModels } from "../core/providers.js";
 import { type ServerConfig } from "../core/servers.js";
-import { ProjectRuntime } from "./runtime.js";
+import type { ProjectRuntime } from "./runtime.js";
 
 export const DEFAULT_PORT = 7420;
 
