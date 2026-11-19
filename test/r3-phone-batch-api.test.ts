@@ -82,8 +82,10 @@ it("sends project grouping keys to Expo while preserving every notification's ro
     const registration = await api("/api/push/register", "POST", { token: "ExponentPushToken[group421]", platform: "android", groupByProject: true });
     expect(registration.status).toBe(200);
     await client.send(id, "Grouped Android background push", "execbot");
-    await waitUntil(() => received.some(r => r.to === "ExponentPushToken[group421]"));
-    const android = received.find(r => r.to === "ExponentPushToken[group421]")!;
+    // an earlier test's turn on the same agent may finish now and push to this device too: find this send's push
+    const ours = (r: Record<string, any>) => r.to === "ExponentPushToken[group421]" && String(r.data?.loomBody ?? "").includes("Grouped Android background push");
+    await waitUntil(() => received.some(ours));
+    const android = received.find(ours)!;
     expect(android.title).toBeUndefined(); expect(android.body).toBeUndefined();
     expect(android.priority).toBe("high"); expect(android.data.loomTitle).toContain("done");
     expect(android.data.loomBody).toContain("Grouped Android background push");
