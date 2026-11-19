@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ProjectCreationError } from "./project-creation.js";
 
-const starters = [
+const starters: Array<{ name: string; description: string; files: Record<string, string> }> = [
   { name: "web", description: "A dependency-free HTML and JavaScript page", files: {
     "index.html": '<!doctype html>\n<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>My app</title><body><h1>Hello, Loom</h1><button id="hello">Say hello</button><script type="module" src="./main.js"></script></body></html>\n',
     "main.js": 'document.querySelector("#hello").onclick = () => { document.querySelector("h1").textContent = "Ready to build"; };\n',
@@ -17,6 +18,16 @@ const starters = [
     "index.test.js": 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { greet } from "./index.js";\ntest("greets by name", () => assert.equal(greet("Loom"), "Hello, Loom"));\n',
   } },
 ];
+
+for (const [name, description] of [
+  ["api", "A JSON API with health and not-found tests"],
+  ["cli", "A command-line tool with argument tests"],
+  ["static", "An accessible static site with a content check"],
+  ["python", "A dependency-free Python module and unit tests"],
+]) {
+  const dir = fileURLToPath(new URL(`../../templates/${name}/`, import.meta.url));
+  starters.push({ name: name!, description: description!, files: Object.fromEntries(fs.readdirSync(dir).map(f => [f, fs.readFileSync(path.join(dir, f), "utf8")])) });
+}
 
 export const starterTemplates = () => starters.map(({ name, description }) => ({ name, description }));
 export function starterTemplate(name: unknown) {

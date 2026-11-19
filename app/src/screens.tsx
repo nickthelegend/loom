@@ -1,3 +1,4 @@
+import { R4ProjectTools } from "./r4-onboard";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -1617,6 +1618,7 @@ export function ProjectScreen(props: {
 
       {err && <Sys color={T.err} text={err} />}
 
+      <R4ProjectTools creds={creds} projectId={project.id} tab={tab} empty={!events.some(e => e.kind === "message")} onPrompt={setText} />
       {tab === "thread" ? (
         <>
           {/* chats — the desktop's sidebar list, so you can read previous chats */}

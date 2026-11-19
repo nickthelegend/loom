@@ -1,3 +1,4 @@
+import { registerWalkthroughEngine } from "./help/tours.js";
 /** Browser navigation module. See README.md for ownership and startup. */
 import { signInGate } from './signin.js';
 import { applyMode,setDevMode } from './mode.js';
@@ -166,18 +167,20 @@ import { isGuest,renderGuest } from './share-live.js';
       return sessionStorage.getItem("loomDemoTour") === "1";
     } catch (e) { return false; }
   }
-  function startDemoTour(waited){
+  function startDemoTour(waited, options){
+    options = options || {};
+    var steps = options.steps || DEMO_TOUR, offset = options.offset || 0;
     // Something modal is up (a first-run dialog, a confirm): wait for it rather than lose the tour.
-    if ((document.querySelector(".scrim") || document.getElementById("tourcard")) && (waited || 0) < 20) {
-      return void setTimeout(function(){ startDemoTour((waited || 0) + 1); }, 500);
+    if (((!options.steps && document.querySelector(".scrim")) || document.getElementById("tourcard")) && (waited || 0) < 20) {
+      return void setTimeout(function(){ startDemoTour((waited || 0) + 1, options); }, 500);
     }
-    try {
+    if (!options.steps) try {
       sessionStorage.removeItem("loomDemoTour");
       // drop ?tour=1 so a reload doesn't start it again
       if (/[?&]tour=1/.test(location.search)) history.replaceState(null, "", location.pathname + location.hash);
       localStorage.setItem("loomTourDone", "1");
     } catch (e) {}
-    if (document.querySelector(".scrim") || document.getElementById("tourcard")) return;
+    if ((!options.steps && document.querySelector(".scrim")) || document.getElementById("tourcard")) return;
     var i = 0;
     var shade = document.createElement("div"); shade.className = "tourshade"; shade.id = "tourshade";
     var card = document.createElement("div"); card.className = "tourcard demotour"; card.id = "tourcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-live", "polite");
@@ -190,14 +193,14 @@ import { isGuest,renderGuest } from './share-live.js';
       for (var n = el; n && n.nodeType === 1; n = n.parentNode) if (getComputedStyle(n).display === "none") return false;
       return true;
     }
-    function target(){ var el = document.querySelector(DEMO_TOUR[i].sel); return shown(el) ? el : null; }
+    function target(){ var el = document.querySelector(steps[i].sel); return shown(el) ? el : null; }
     // the page keeps moving under the card (replies stream in, the composer grows): follow it
     var follow = setInterval(function(){ if (!card.isConnected) return clearInterval(follow); place(); }, 400);
     function done(){ clearInterval(follow); shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place); }
     function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
     function next(){
-      do { i++; } while (i < DEMO_TOUR.length && !target());
-      if (i >= DEMO_TOUR.length) done(); else show();
+      do { i++; } while (i < steps.length && !target());
+      if (i >= steps.length) done(); else show();
     }
     function place(){
       var el = target(); if (!el) return;
@@ -243,9 +246,9 @@ import { isGuest,renderGuest } from './share-live.js';
       next();
     }
     function show(){
-      var s = DEMO_TOUR[i];
+      var s = steps[i];
       if (s.prefill && !s.act) type(s.prefill);
-      card.innerHTML = '<div class="tourstep">Try Loom \u00b7 ' + (i + 1) + " of " + DEMO_TOUR.length + "</div>" +
+      card.innerHTML = '<div class="tourstep">' + esc(options.label || "Try Loom") + ' \u00b7 ' + (offset + i + 1) + " of " + (offset + steps.length) + "</div>" +
         '<div class="tourt">' + esc(s.title) + '</div><div class="tourb">' + esc(s.body) + "</div>" +
         (s.prefill ? '<div class="tourpre"><span>\u201c' + esc(s.prefill) + '\u201d</span></div>' : "") +
         '<div class="toura"><button type="button" class="btn xs ghost" id="tourskip">' + (s.last ? "Finish" : "End tour") + "</button>" +
@@ -267,6 +270,7 @@ import { isGuest,renderGuest } from './share-live.js';
   state.startDemoTour = startDemoTour;
   state.demoTourWanted = demoTourWanted;
   state.startTour = startTour;
+  registerWalkthroughEngine(function(options) { startDemoTour(0, options); });
   state.openShortcuts = openShortcuts;
   function setFocusMode(on){
     document.documentElement.classList.toggle("focusmode", on);

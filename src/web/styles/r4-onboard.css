@@ -1,0 +1,16 @@
+.r4help .modal{max-width:720px;max-height:85vh;display:flex;flex-direction:column}
+.r4body{overflow:auto;display:flex;flex-direction:column;gap:14px;padding:20px}
+.r4body label{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.r4body input,.r4body select,.r4examples select{padding:9px;border:1px solid var(--input);border-radius:var(--radius-sm);background:var(--background);color:var(--foreground)}
+.r4body details,.r4body article,.r4examples article{padding:12px 0;border-bottom:1px solid var(--border)}
+.r4body summary{cursor:pointer;font-weight:600;padding:8px 0}
+pre.r4guide{white-space:pre-wrap}
+.r4guide{overflow-wrap:anywhere;font:13px/1.65 var(--font-sans);margin:12px 0;color:var(--foreground)}
+.r4actions{display:flex;flex-wrap:wrap;gap:8px}
+.r4readiness{border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:16px}
+.r4readiness h3,.r4examples h3{font-size:15px;margin:0 0 10px}
+.r4readiness ul{padding-left:18px;font-size:13px;line-height:1.65}
+.r4examples p{font-size:13px;line-height:1.6;color:var(--muted-foreground)}
+.r4examples{grid-column:1/-1;padding:20px}
+.r4help button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+@media(max-width:600px){.r4help{padding:10px}.r4body{padding:14px}.r4actions button{min-height:44px}}
