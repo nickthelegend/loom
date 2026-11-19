@@ -751,6 +751,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  if (e.kind === "status" && p.state === "memory_injection") return <View style={{ padding: 8, gap: 4 }}><Text style={{ color: T.dim }}>Why was this injected? · Turn {String(p.turn)}</Text>{(p.memories as Array<{ id: string; text: string; score: number; reason: string }> ?? []).map(m => <Text key={m.id} style={{ color: T.dim, fontSize: 12 }}>{m.text} · score {m.score.toFixed(3)} · {m.reason}</Text>)}</View>;
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
   if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;

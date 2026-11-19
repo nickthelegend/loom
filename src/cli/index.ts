@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerR4Brain } from "./r4-brain.js";
 /**
  * loom — one CLI for all your coding agents.
  *
@@ -1152,11 +1153,16 @@ program
   .command("brain:search <query...>")
   .description("retrieval, exactly as a briefing would see it — scores and all")
   .option("--explain", "show the arithmetic per hit (bm25, entity, fuzzy, dense, recency)")
-  .action(async (words: string[], opts: { explain?: boolean }) => {
+  .option("--kind <kind>", "filter memory kind")
+  .option("--agent <id>", "filter the agent who learned it")
+  .option("--since <date>", "created on or after this ISO date")
+  .option("--until <date>", "created on or before this ISO date")
+  .option("--chat <id>", "include memories scoped to this chat")
+  .action(async (words: string[], opts: { explain?: boolean; kind?: string; agent?: string; since?: string; until?: string; chat?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const { hits } = await client.searchBrain(project.id, words.join(" "), {
-      explain: Boolean(opts.explain),
+      ...opts, agent: undefined, author: opts.agent, explain: Boolean(opts.explain),
     });
     if (!hits.length) return void console.log(pc.dim("nothing retrieved — the briefing would carry no memories for this"));
     for (const h of hits) {
@@ -1165,6 +1171,84 @@ program
       );
       if (opts.explain && h.detail) console.log(pc.dim(`      ${JSON.stringify(h.detail)}`));
     }
+  });
+
+program
+  .command("brain:add <text...>")
+  .description("remember a fact or decision, optionally for only one chat")
+  .option("--kind <kind>", "memory kind", "fact")
+  .option("--chat <id>", "only inject in this chat")
+  .action(async (words: string[], opts: { kind: string; chat?: string; paths?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    const result = await client.remember(project.id, opts.kind as import("../core/brain.js").MemoryKind, words.join(" "), opts.chat, opts.paths?.split(",").map(s => s.trim()).filter(Boolean));
+    console.log(`${result.memory.id} · ${result.created ? "learned" : "already known"}`);
+  });
+
+program
+  .command("brain:list")
+  .description("list learned memories, including pin, priority and stale status")
+  .option("--stale", "only memories unused for 30 days")
+  .option("--archived", "include archived memories")
+  .action(async (opts: { stale?: boolean; archived?: boolean; tag?: string; sort?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    const { memories } = await client.listBrainMemories(project.id, opts.archived, opts.tag, opts.sort);
+    for (const m of memories.filter(m => !opts.stale || m.stale)) console.log(`${m.id} ${m.kind} ${m.pinned ? "pinned " : ""}priority=${m.priority ?? 0}${m.stale ? " stale" : ""}${m.archived ? " archived" : ""} · ${m.text}`);
+  });
+
+program
+  .command("brain:pin <memoryId>")
+  .description("always include an eligible memory, ordered by priority")
+  .option("--off", "unpin it")
+  .option("--priority <number>", "integer priority from -1000 to 1000")
+  .action(async (memoryId: string, opts: { off?: boolean; priority?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    await client.updateBrainMemory(project.id, memoryId, { pinned: !opts.off, ...(opts.priority !== undefined ? { priority: Number(opts.priority) } : {}) });
+    console.log(`${memoryId} ${opts.off ? "unpinned" : "pinned"}`);
+  });
+
+program
+  .command("brain:archive <memoryId>")
+  .description("archive a memory without deleting its history")
+  .option("--restore", "restore an archived memory")
+  .action(async (memoryId: string, opts: { restore?: boolean }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    await client.updateBrainMemory(project.id, memoryId, { archived: !opts.restore });
+    console.log(`${memoryId} ${opts.restore ? "restored" : "archived"}`);
+  });
+
+program
+  .command("brain:history <memoryId>")
+  .description("show who changed what and when, or revert to a revision")
+  .option("--revert <eventId>", "restore the state after this history event")
+  .action(async (memoryId: string, opts: { revert?: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    const result = opts.revert ? await client.revertBrainMemory(project.id, memoryId, Number(opts.revert)) : await client.brainHistory(project.id, memoryId);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program
+  .command("brain:duplicates")
+  .description("suggest near-duplicate memories for human merge review")
+  .action(async () => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    console.log(JSON.stringify(await client.brainDuplicates(project.id), null, 2));
+  });
+
+program
+  .command("brain:merge <keepId> <otherId>")
+  .description("save reviewed wording on one memory and archive the other")
+  .requiredOption("--text <text>", "the reviewed merged wording")
+  .action(async (keepId: string, otherId: string, opts: { text: string }) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    console.log(JSON.stringify(await client.mergeBrainMemories(project.id, keepId, otherId, opts.text), null, 2));
+  });
+
+program
+  .command("brain:why [turn]")
+  .description("show the saved memory selection and scores for a turn")
+  .action(async (turn?: string) => {
+    const client = await ensureDaemon(), project = await currentProject(client);
+    console.log(JSON.stringify(await client.brainInjections(project.id, turn), null, 2));
   });
 
 program
@@ -1469,7 +1553,8 @@ program
     const fs = await import("node:fs");
     let doc: unknown;
     try {
-      doc = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (/^https?:\/\//i.test(file)) doc = { url: file };
+      else { const content = fs.readFileSync(file, "utf8"); doc = /\.(?:md|markdown|mdown)$/i.test(file) ? { markdown: content } : JSON.parse(content); }
     } catch (err) {
       console.error(pc.red(`could not read ${file}: ${err instanceof Error ? err.message : err}`));
       process.exitCode = 1;
@@ -1699,10 +1784,12 @@ program
 program
   .command("brain:export [file]")
   .description("write this project's brain to a file (or stdout) so it can travel")
-  .action(async (file: string | undefined) => {
+  .option("--md <file>", "write Markdown inside the repo (refuses an existing file)")
+  .action(async (file: string | undefined, opts: { md?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    const doc = await client.exportBrain(project.id);
+    if (opts.md) { const out = await client.exportBrainMarkdown(project.id, opts.md, opts.tag); console.log(`Brain exported → ${out.file}`); return; }
+    const doc = await client.exportBrain(project.id, opts.tag);
     const json = JSON.stringify(doc, null, 2);
     if (file) {
       const fs = await import("node:fs");
@@ -1716,14 +1803,15 @@ program
 
 program
   .command("brain:import <file>")
-  .description("bring an exported brain into this project (dedupes what's already known)")
+  .description("import a brain JSON file, Markdown file, or public Markdown URL")
   .action(async (file: string) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const fs = await import("node:fs");
     let doc: unknown;
     try {
-      doc = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (/^https?:\/\//i.test(file)) doc = { url: file };
+      else { const content = fs.readFileSync(file, "utf8"); doc = /\.(?:md|markdown|mdown)$/i.test(file) ? { markdown: content } : JSON.parse(content); }
     } catch (err) {
       console.error(pc.red(`could not read ${file}: ${err instanceof Error ? err.message : err}`));
       process.exitCode = 1;
@@ -5048,6 +5136,8 @@ program
       console.log(`_loom() { compadd -- ${names.join(" ")} completion; }\ncompdef _loom loom 2>/dev/null || { autoload -Uz compinit && compinit && compdef _loom loom; }`);
     } else fail(`unknown shell "${shell}" — zsh or bash`);
   });
+
+registerR4Brain(program, ensureDaemon, currentProject);
 
 program.parseAsync().catch((err) => {
   console.error(pc.red(`✗ ${err instanceof Error ? err.message : String(err)}`));

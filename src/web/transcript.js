@@ -611,6 +611,8 @@ import { shortModel } from './permissions.js';
     // row folds when it ends, see thread.js) and once it is done; the rest of
     // the usage reports feed the agent's context meter, not the thread.
     if (e.kind === "status") {
+      if (p.state === "memory_injection") return '<details class="sys memory-injection"><summary>Why was this injected? · Turn ' + esc(p.turn) + '</summary>' +
+        ((p.memories || []).length ? p.memories.map(function(m){ return '<p>' + esc(m.text) + ' · score ' + esc(Number(m.score).toFixed(3)) + ' · ' + esc(m.reason) + '</p>'; }).join('') : '<p>No memories injected.</p>') + '</details>';
       if (p.state === "compacting") return '<div class="sys live compacting" data-agent="' + esc(e.agentId || "") + '"><span class="busy"></span> ' +
         esc(labelOf(e.agentId)) + " is compacting its context\u2026</div>";
       if (p.state === "native_compacted") return '<div class="sys">\u21bb ' + esc(labelOf(e.agentId)) + " compacted its context" +

@@ -1,3 +1,5 @@
+import { mountBrainR4 } from "./brain-r4.js";
+import { brainFiltersHtml, memoryToolsHtml, wireMemoryTools } from './brain-tools.js';
 import { brandMark,kindOf } from '../agents.js';
 import { api } from '../connection.js';
 import { esc,rel } from '../format.js';
@@ -15,44 +17,52 @@ import { state } from '../state.js';
  * Creating this module only binds functions; startup and cleanup belong to project.js.
  */
 export function createBrain(view) {
+    var filters = {};
+    var generation = 0;
 
 
     function refreshBrain(){
       if (view.brainView === "team") return refreshTeamBrain();
       var el = document.getElementById("pane-brain"); if (!el) return;
       if (!el.querySelector(".brain")) el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
+      var current = ++generation;
+      var params = new URLSearchParams({ limit: '500' });
+      ['q','agent','since','until','tag'].forEach(function(key){ if (filters[key]) params.set(key === 'agent' ? 'author' : key, filters[key]); });
+      if (view.brainKind) params.set('kind', view.brainKind);
+      if (filters.archived) params.set('includeArchived', '1');
+      if (filters.q) params.set('chat', view.chatId || 'main');
       // Two reads: the learned memory units (the star), and the imported ADE
       // sources (context — what Loom pulled in from CLAUDE.md and friends).
       Promise.all([
-        api("/api/projects/" + view.pid + "/brain?limit=200"),
+        api("/api/projects/" + view.pid + "/brain" + (filters.q ? "/search" : "") + "?" + params),
         api("/api/projects/" + view.pid + "/memory").catch(function(){ return { memory: {} }; }),
         api("/api/projects/" + view.pid + "/brain/usage").catch(function(){ return { usage: {} }; }),
         api("/api/projects/" + view.pid + "/brain/continuity").catch(function(){ return { enabled: false }; }),
       ]).then(function(r){
+        if (current !== generation) return;
         var usage = (r[2] && r[2].usage) || {};
         el = document.getElementById("pane-brain"); if (!el || view.brainView !== "mine") return;
-        var memories = (r[0] && r[0].memories) || [];
+        var memories = (r[0] && (r[0].memories || (r[0].hits || []).map(function(h){ return h.memory; }))) || [];
         var stats = (r[0] && r[0].stats) || { total: 0, byKind: {} };
         var m = (r[1] && r[1].memory) || {};
         var sources = m.sources || [];
-        var continuity = r[2] || {};
+        var continuity = r[3] || {};
 
         // Filter chips — All, then each kind that has memories, with its count.
         var chips = '<button class="bkind' + (view.brainKind === "" ? " on" : "") + '" data-kind="">All <span class="kn">' + (stats.total || 0) + "</span></button>";
         view.BRAIN_KINDS.forEach(function(k){
           var n = (stats.byKind && stats.byKind[k]) || 0;
-          if (!n && view.brainKind !== k) return; // hide empty kinds unless selected
           chips += '<button class="bkind bk-' + k + (view.brainKind === k ? " on" : "") + '" data-kind="' + k + '">' + k + ' <span class="kn">' + n + "</span></button>";
         });
         var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div>" +
           '<div class="bio"><button type="button" class="btn xs ghost" id="bexport" title="download what this project knows, as JSON">' + ICONS.download + "Export</button>" +
           '<button type="button" class="btn xs ghost" id="bimport" title="bring in a brain exported from Loom (duplicates are skipped)">' + ICONS.plus + "Import</button>" +
-          '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
+          '<input type="file" id="bimportf" accept="application/json,.json,text/markdown,.md,.markdown,.mdown" hidden></div></div>' +
           '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
           '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button>' +
           '<span class="bview devonly"><span>View</span><button type="button" data-bgv="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
           '<button type="button" data-bgv="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></span></div>';
-        if (continuity.enabled) head += '<div class="bsec">Native continuity <button class="lnk" id="continuity-inspect">Inspect packets and delivery</button></div><div class="bsec">Legacy memories below are retained for compatibility and are not injected by native continuity.</div>';
+        if (continuity.enabled) head += '<div class="bsec">Native continuity <button class="lnk" id="continuity-inspect">Inspect packets and delivery</button></div><div class="bsec">Pinned memories below are included in native continuity; other legacy memories remain available for search.</div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = view.brainKind ? memories.filter(function(x){ return x.kind === view.brainKind; }) : memories;
@@ -76,14 +86,14 @@ export function createBrain(view) {
             return '<div class="bmem' + (low ? " low" : "") + '" data-mid="' + esc(x.id) + '">' +
               '<div class="bmrow"><span class="bbadge bk-' + esc(x.kind) + '">' + esc(x.kind) + "</span>" +
               '<span class="bmtext">' + esc(x.text) + "</span>" +
-              '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
-              '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button></div>" +
+              (x.source ? '' : '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
+              '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button>") + "</div>" +
               (ents ? '<div class="bents">' + ents + "</div>" : "") +
               '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
               (when ? ' <span class="dim">\u00b7 ' + esc(when) + "</span>" : "") +
               (low ? ' <span class="dim">· ' + conf + '% — shown, not injected</span>' : "") +
               (usage[x.id] ? ' <span class="bused" title="reached an agent’s prompt ' + usage[x.id].n + " time" + (usage[x.id].n === 1 ? "" : "s") + ", last " + esc(rel(usage[x.id].at)) + '">used ' + usage[x.id].n + "×</span>" : "") +
-              "</div></div>";
+              "</div>" + memoryToolsHtml(x) + "</div>";
           }).join("") + "</div>";
         }
 
@@ -91,7 +101,7 @@ export function createBrain(view) {
         // the manual counterpart to what the extractor does automatically.
         var seed = '<form class="bseed" id="decform">' +
           '<input id="decbox" placeholder="Record a decision or fact this project has made\u2026" autocomplete="off">' +
-          '<button class="btn primary sm" type="submit">Add</button></form>';
+          '<label><input type="checkbox" id="bchat-only"> This chat only</label><button class="btn primary sm" type="submit">Add</button></form>';
 
         // Imported ADE memory — secondary, folded under a quiet header.
         var src = '<div class="bsec">Imported from your agents<span class="bhint">their own memory files</span>' +
@@ -105,8 +115,10 @@ export function createBrain(view) {
             }).join("") + "</div>"
           : '<div class="bempty sm">No native ADE memory found (CLAUDE.md, AGENTS.md, .kiro/steering). Loom reads these but never writes to them.</div>';
 
-        el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
+        el.innerHTML = '<div class="pane-inner brain">' + head + brainFiltersHtml(filters) + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
+        wireMemoryTools(el, view, memories, filters, refreshBrain);
+        mountBrainR4(el, view, refreshBrain);
         if (state.brainGraph && devMode() && shown.length) view.drawMemGraph(document.getElementById("bgraph"), shown, usage);
         Array.prototype.forEach.call(el.querySelectorAll("[data-bgv]"), function(b){
           b.onclick = function(){ state.brainGraph = b.getAttribute("data-bgv") === "graph"; refreshBrain(); };
@@ -176,7 +188,7 @@ export function createBrain(view) {
         });
         var bex = document.getElementById("bexport");
         if (bex) bex.onclick = function(){
-          api("/api/projects/" + view.pid + "/brain/export").then(function(dump){
+          api("/api/projects/" + view.pid + "/brain/export" + (filters.tag ? "?tag=" + encodeURIComponent(filters.tag) : "")).then(function(dump){
             var blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
             var a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
@@ -194,7 +206,8 @@ export function createBrain(view) {
             if (f.size > 1900000) { toast("that file is over 2 MB — too big to import in one go"); return; }
             f.text().then(function(txt){
               var body;
-              try { body = JSON.parse(txt); } catch (e) { throw new Error("that isn’t a JSON file"); }
+              if (/\.(?:md|markdown|mdown)$/i.test(f.name)) body = { markdown: txt };
+              else { try { body = JSON.parse(txt); } catch (e) { throw new Error("Choose a JSON or Markdown file"); } }
               return api("/api/projects/" + view.pid + "/brain/import", { method: "POST", body: JSON.stringify(body) });
             }).then(function(r){
               toast("imported " + (r.added || 0) + " new · " + (r.known || 0) + " already known");
@@ -232,7 +245,7 @@ export function createBrain(view) {
           var text = (box.value || "").trim();
           if (!text || (decBtn && decBtn.getAttribute("data-busy"))) return;
           if (decBtn) { decBtn.setAttribute("data-busy", "1"); decBtn.disabled = true; }
-          api("/api/projects/" + view.pid + "/decisions", { method: "POST", body: JSON.stringify({ text: text }) })
+          api("/api/projects/" + view.pid + "/brain", { method: "POST", body: JSON.stringify({ text: text, kind: "decision", ...(el.querySelector("#bchat-only").checked ? { chat: view.chatId || "main" } : {}) }) })
             .then(function(){ box.value = ""; toast("saved to memory"); refreshBrain(); })
             .catch(function(err){ toast(err.message); })
             .then(function(){ if (decBtn) decBtn.removeAttribute("data-busy"); decSync(); });

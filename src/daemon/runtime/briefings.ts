@@ -1,6 +1,9 @@
+import path from "node:path";
+import { refreshSources } from "../../core/brain-r4/sources.js";
+import { watchMergedPrs } from "../../core/brain-r4/pr-learning.js";
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../../core/brain-extract.js";
 import { compileBrief, retrieve, type Hit, type RetrieveOpts } from "../../core/brain-index.js";
-import { Brain, CONFIDENCE_FLOOR } from "../../core/brain.js";
+import { Brain, CONFIDENCE_FLOOR, type MemoryBriefing } from "../../core/brain.js";
 import type { RenderedProjection } from "../../core/distill.js";
 import { buildBriefing, buildProjection, type ProjectionInput } from "../../core/projection.js";
 import type { EventJournal } from "../../core/eventlog.js";
@@ -41,7 +44,10 @@ export interface RuntimeBriefingsHost {
 
 /** Owns briefings state for exactly one open project. */
 export class RuntimeBriefings {
-  constructor(private readonly host: RuntimeBriefingsHost) { }
+  private readonly stopPrLearning: () => void;
+  constructor(private readonly host: RuntimeBriefingsHost) {
+    this.stopPrLearning = watchMergedPrs(() => host.brain, host.log, host.info.dir);
+  }
 
   /**
    * The dense retrieval channel, when this project opted in (brain.semantic).
@@ -59,6 +65,7 @@ export class RuntimeBriefings {
   private semanticGeneration = 0;
 
   close(): void {
+    this.stopPrLearning();
     this.extractionScope.abort();
     this.lifetime.abort();
     this.semanticGeneration++;
@@ -86,7 +93,7 @@ export class RuntimeBriefings {
   /** Prepare context without starting agents, taking the baton or touching UI.
    * This retains the legacy selection policy until Brain continuity is built.
    */
-  async prepareHandoff(to: string, from: string | null, mergeNote: string, bridgeIds: string[]): Promise<{
+  async prepareHandoff(to: string, from: string | null, mergeNote: string, bridgeIds: string[], chat = MAIN_CHAT): Promise<{
     memory: string;
     briefing: string;
     mode: "template" | "llm";
@@ -100,19 +107,19 @@ export class RuntimeBriefings {
       targetAgentId: to, fromAgentId: from };
     const start = Date.now();
     const rendered = await this.host.renderProjection(input);
-    const brief = await this.retrieveBrief(events, to);
+    const brief = await this.retrieveBrief(events, to, chat);
     const unified = this.unifiedMemory();
     const memory = [rendered.content, brief, ...(unified.sources.length ? [unified.document] : [])]
       .filter(Boolean).join("\n\n---\n");
     const elapsedMs = Date.now() - start;
     const bridges: Array<{ agentId: string; memory: string }> = [];
     for (const agentId of bridgeIds) {
-      const bridgeBrief = await this.retrieveBrief(events, agentId);
+      const bridgeBrief = await this.retrieveBrief(events, agentId, chat);
       bridges.push({ agentId, memory: [buildProjection({ ...input, targetAgentId: agentId }), bridgeBrief]
         .filter(Boolean).join("\n\n---\n") });
     }
     if (this.lifetime.signal.aborted) throw new Error("context runtime is closed");
-    return { memory, briefing: [mergeNote, buildBriefing(input), brief].filter(Boolean).join("\n\n"),
+    return { memory, briefing: [mergeNote, buildBriefing(input)].filter(Boolean).join("\n\n"),
       mode: rendered.mode, elapsedMs, bridges };
   }
 
@@ -148,7 +155,7 @@ export class RuntimeBriefings {
    * held back from injection (they stay visible in the Brain tab). Empty string
    * when there's nothing relevant, so callers append it unconditionally.
    */
-  async retrieveBrief(events: LoomEvent[], agentId: string): Promise<string> {
+  async retrieveBrief(events: LoomEvent[], agentId: string, chat = MAIN_CHAT): Promise<string> {
     const query = events
       .filter((e) => e.kind === "message")
       .slice(-8)
@@ -171,6 +178,7 @@ export class RuntimeBriefings {
       ...(query.trim() ? { query } : {}),
       ...(files.length ? { files } : {}),
       agent: agentId,
+      chat,
       minConfidence: CONFIDENCE_FLOOR,
       limit: 14,
     });
@@ -184,6 +192,9 @@ export class RuntimeBriefings {
    * line labelled with how sure to be (Loom Teams D42).
    */
   brainBrief(opts: RetrieveOpts): string {
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
+    opts = { ...opts, strictChatScope: true, enforcePaths: true };
     const pool = this.host.teamBrain?.pool(this.host.brain.all());
     if (!pool) {
       const hits = retrieve(this.host.brain, opts);
@@ -217,8 +228,32 @@ export class RuntimeBriefings {
    * no search at all.
    */
   async searchBrain(opts: RetrieveOpts): Promise<Hit[]> {
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
     const dense = await this.denseFor(opts.query ?? "");
     return retrieve(this.host.brain, dense ? { ...opts, dense } : opts);
+  }
+
+  async turnMemoryBrief(query: string, agent: string, chat: string, turn: number, pinsOnly = false, crew?: string): Promise<MemoryBriefing> {
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
+    const files = this.host.log.list({ chat, kinds: ["file_edit"], limit: 80 }).filter(e => e.id < turn)
+      .map(e => String(e.payload.path ?? "")).filter(Boolean)
+      .map(file => (path.isAbsolute(file) ? path.relative(this.host.info.dir, file) : file).split(path.sep).join("/"));
+    const opts: RetrieveOpts = { query, agent, chat, crew, files, enforcePaths: true, strictChatScope: true, limit: 6, minConfidence: CONFIDENCE_FLOOR, explain: true };
+    const dense = await this.denseFor(query);
+    if (dense) opts.dense = dense;
+    const pool = this.host.teamBrain?.pool(this.host.brain.all());
+    const selected = pool ? retrieveTiered(pool, opts) : retrieve(this.host.brain, opts);
+    const hits = pinsOnly ? selected.filter(h => h.memory.pinned) : selected;
+    const brief = pool ? compileTieredBrief(hits as ReturnType<typeof retrieveTiered>) : compileBrief(hits.map(h => h.memory));
+    return { briefing: brief, record: () => {
+      this.host.noteMemoriesUsed(hits.map(h => h.memory.id));
+      this.host.log.append({ kind: "status", agentId: agent, chat, payload: { state: "memory_injection", turn,
+        memories: hits.map(h => ({ id: h.memory.id, text: h.memory.text, kind: h.memory.kind, score: h.score,
+          pinned: Boolean(h.memory.pinned), priority: h.memory.priority ?? 0,
+          detail: "detail" in h ? h.detail : undefined, reason: h.memory.pinned ? "pinned" : "relevance", scope: h.memory.scope, paths: h.memory.paths, source: h.memory.source })), briefing: brief } });
+    } };
   }
 
   /** Vectors for one query, or null when the channel isn't available. */
@@ -296,9 +331,6 @@ export class RuntimeBriefings {
     ];
     const skills = this.host.activeSkillsBlock();
     if (skills) parts.push(skills);
-    // Retrieval scoped to the child's own task rather than the parent's thread.
-    const brief = this.brainBrief({ query: task, agent: childId, limit: 6 });
-    if (brief) parts.push(brief);
     return parts.filter(Boolean).join("\n\n");
   }
 

@@ -74,6 +74,7 @@ import { openMenu } from './menus.js';
       get BROWSER_TAB() { return BROWSER_TAB; },
     });
     var { refreshBrain, refreshTeamBrain } = createBrain({
+      get chatId() { return chatId; },
       get drawMemGraph() { return drawMemGraph; },
       get brainView() { return brainView; }, set brainView(value) { brainView = value; },
       get pid() { return pid; },

@@ -1,3 +1,4 @@
+import { BrainKnowledge } from "./r4-brain";
 /**
  * The project's memory on the phone — the desktop's Memory tab: what the
  * agents have learned (decisions, constraints, conventions, facts, failures,
@@ -6,11 +7,15 @@
  * from wherever you are.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { MemoryActions, MemoryTools } from "./memory-tools";
+import { memoryQuery, type KnowledgeMemory } from "./memory-model";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { addMemory, forgetMemory, getMemories, updateMemory, type Creds, type Memory, type Project } from "./api";
+import { addMemory, forgetMemory, getMemories, updateMemory, type Creds, type Memory as ApiMemory, type Project } from "./api";
 import { Empty, Panel, Unreachable, ago } from "./components";
 import { T, radii, spacing } from "./theme";
+
+type Memory = ApiMemory & KnowledgeMemory;
 
 const KINDS = ["decision", "constraint", "convention", "fact", "failure", "task"] as const;
 const KIND_COLOR: Record<string, () => string> = {
@@ -27,31 +32,41 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
   const [list, setList] = useState<Memory[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [kind, setKind] = useState<string | null>(null);
+  const [tag, setTag] = useState("");
+  const [sort, setSort] = useState("newest");
   const [q, setQ] = useState("");
+  const [agent, setAgent] = useState("");
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
+  const [chat, setChat] = useState("");
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState("");
   const [draftKind, setDraftKind] = useState<(typeof KINDS)[number]>("fact");
   const [busy, setBusy] = useState(false);
 
+  const generation = useRef(0);
   const load = useCallback(async () => {
+    const current = ++generation.current;
     try {
-      const r = await getMemories(creds, project.id);
+      const r = await getMemories(creds, project.id, memoryQuery({ tag, sort, q, kind: kind ?? undefined, agent, since, until, chat, includeArchived }));
+      if (current !== generation.current) return;
       setList(r.memories);
       setErr(null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (current === generation.current) setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setRefreshing(false);
+      if (current === generation.current) setRefreshing(false);
     }
-  }, [creds, project.id]);
-  useEffect(() => void load(), [load]);
+  }, [creds, project.id, tag, sort, q, kind, agent, since, until, chat, includeArchived]);
+  useEffect(() => { const timer = setTimeout(() => void load(), 300); return () => { clearTimeout(timer); generation.current++; }; }, [load]);
 
   const remember = async () => {
     if (!draft.trim() || busy) return;
     setBusy(true);
     try {
-      await addMemory(creds, project.id, draft.trim(), draftKind);
+      await addMemory(creds, project.id, draft.trim(), draftKind, chat.trim() || undefined);
       setDraft("");
       await load();
     } catch (e) {
@@ -61,10 +76,8 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
     }
   };
 
-  const needle = q.trim().toLowerCase();
-  const shown = (list ?? [])
-    .filter((m) => (!kind || m.kind === kind) && (!needle || m.text.toLowerCase().includes(needle) || (m.entities ?? []).some((e) => e.toLowerCase().includes(needle))))
-    .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
+  const shown = (list ?? []).slice()
+    .sort((a, b) => (sort === "usage" ? (b.timesBriefed ?? 0) - (a.timesBriefed ?? 0) : 0) || Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (b.priority ?? 0) - (a.priority ?? 0) || (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
   const counts = (list ?? []).reduce<Record<string, number>>((n, m) => ((n[m.kind] = (n[m.kind] ?? 0) + 1), n), {});
 
   return (
@@ -81,9 +94,16 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
         </Text>
       </View>
 
+      <Panel>
+        {[[tag, setTag, "Filter by tag"], [agent, setAgent, "Learned by agent"], [since, setSince, "From date (YYYY-MM-DD)"], [until, setUntil, "Through date (YYYY-MM-DD)"], [chat, setChat, "Chat ID (blank means project-wide)"]].map(([value, change, placeholder]) =>
+          <TextInput key={placeholder as string} accessibilityLabel={placeholder as string} value={value as string} onChangeText={change as (s: string) => void} placeholder={placeholder as string} placeholderTextColor={T.faint} autoCapitalize="none" style={{ color: T.text, padding: 8 }} />)}
+        <Text style={{ color: T.dim }}>New memories use the chat above, or apply to the whole project when blank.</Text>
+        <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: includeArchived }} onPress={() => setIncludeArchived(!includeArchived)}><Text style={{ color: T.text }}>{includeArchived ? "✓ " : ""}Include archived</Text></TouchableOpacity>
+      </Panel>
+      <Panel><BrainKnowledge creds={creds} projectId={project.id} onChanged={load} revision={list} /></Panel>
       {/* remember something */}
       <Panel>
-        <TextInput value={draft} onChangeText={setDraft} placeholder="Remember something for every agent…" placeholderTextColor={T.faint}
+        <TextInput value={draft} onChangeText={setDraft} placeholder={chat.trim() ? "Remember something for this chat…" : "Remember something for every agent…"} placeholderTextColor={T.faint}
           multiline style={{ color: T.text, fontSize: 14, minHeight: 44, lineHeight: 20, textAlignVertical: "top" }} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {KINDS.map((k) => (
@@ -106,8 +126,10 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
         <>
           <TextInput value={q} onChangeText={setQ} placeholder={`Search ${list.length} memories…`} placeholderTextColor={T.faint} autoCapitalize="none"
             style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14 }} />
+          <TouchableOpacity accessibilityRole="button" onPress={() => setSort(sort === "usage" ? "newest" : "usage")}><Text style={{ color: T.text }}>Sort: {sort === "usage" ? "Most used" : "Newest"}</Text></TouchableOpacity>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{[...new Set(list.flatMap(m => m.tags ?? []))].map(t => <TouchableOpacity accessibilityRole="button" key={t} onPress={() => setTag(t === tag ? "" : t)} style={{ padding: 6, borderWidth: 1, borderColor: T.line, borderRadius: radii.pill }}><Text style={{ color: T.text }}>#{t}</Text></TouchableOpacity>)}</View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 6 }}>
-            {[null, ...KINDS.filter((k) => counts[k])].map((k) => {
+            {[null, ...KINDS].map((k) => {
               const on = kind === k;
               return (
                 <TouchableOpacity key={k ?? "all"} onPress={() => setKind(k)} activeOpacity={0.7} accessibilityRole="tab" accessibilityState={{ selected: on }}
@@ -128,6 +150,7 @@ export function MemoryView(props: { creds: Creds; project: Project }) {
       ) : !err ? (
         <ActivityIndicator color={T.dim} style={{ marginTop: 24 }} />
       ) : null}
+      <Panel><MemoryTools creds={creds} projectId={project.id} onChanged={load} /></Panel>
     </ScrollView>
   );
 }
@@ -170,15 +193,20 @@ function MemoryCard(props: { m: Memory; open: boolean; onToggle: () => void; cre
         <Text style={{ color: T.faint, fontSize: 11, flex: 1 }} numberOfLines={1}>
           {who ? (who === "user" ? "you" : who) : ""}{m.updatedAt || m.createdAt ? ` · ${ago(new Date(m.updatedAt ?? m.createdAt).toISOString())}` : ""}
         </Text>
+        {m.pinned ? <Text style={{ color: T.primary, fontSize: 11 }}>Pinned · {m.priority ?? 0}</Text> : null}
+        {m.stale ? <Text style={{ color: T.warn, fontSize: 11 }}>Unused 30d</Text> : null}
+        {m.archived ? <Text style={{ color: T.faint, fontSize: 11 }}>Archived</Text> : null}
         {m.confidence != null && m.confidence < 1 ? <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }}>{Math.round(m.confidence * 100)}%</Text> : null}
         <Text style={{ color: T.faint, fontSize: 11 }}>{props.open ? "▾" : "›"}</Text>
       </TouchableOpacity>
-      {props.open ? (
+      <Text style={{ color: T.dim, fontSize: 11 }}>{(m.tags ?? []).map(t => "#" + t).join(" · ")} · briefed {m.timesBriefed ?? 0}×{m.lastUsedAt ? " · last " + ago(new Date(m.lastUsedAt).toISOString()) : ""}</Text>
+      {props.open && m.source ? <Text style={{ color: T.dim }}>{m.text}{"\n"}Read-only source: {m.source.file}:{m.source.line}</Text> : props.open ? (
         <>
           <TextInput value={text} onChangeText={setText} multiline style={{ color: T.text, fontSize: 14, lineHeight: 20, backgroundColor: T.raised, borderRadius: radii.key, padding: 10 }} />
           {m.evidence ? <Text style={{ color: T.faint, fontSize: 12, lineHeight: 17 }}>why: {m.evidence}</Text> : null}
           {m.entities?.length ? <Text style={{ color: T.faint, fontSize: 11.5, fontFamily: T.mono }}>{m.entities.join(" · ")}</Text> : null}
           {err ? <Text style={{ color: T.err, fontSize: 12 }}>{err}</Text> : null}
+          <MemoryActions creds={props.creds} projectId={props.projectId} memory={m} onChanged={props.onChanged} />
           <View style={{ flexDirection: "row", gap: 8 }}>
             <TouchableOpacity onPress={forget} activeOpacity={0.7} accessibilityRole="button" style={{ flex: 1, minHeight: 38, borderRadius: radii.key, borderWidth: 1, borderColor: T.line2, alignItems: "center", justifyContent: "center" }}>
               <Text style={{ color: T.err, fontWeight: "600" }}>Forget</Text>

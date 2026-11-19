@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ask the brain (#451):** offline answers with cited memory ids through `brain:ask`, the project API and web/phone Memory; the configured helper model is an explicit opt-in.
+- **Memory tags (#451):** persistent tags, editable chips and filters on web/phone, `brain:tag`, and `--tag` on search, list and export; tags survive portable round trips.
+- **Path-scoped memories (#451):** `brain:add --paths` and web/phone editors restrict briefings to mentioned files or recent chat edits, including pins, with file matches in `brain:why`.
+- **Project brain inbox (#451):** opt into review before saving extracted memories, then approve, edit or reject through the project API, web/phone or `brain:inbox`; pending proposals never enter retrieval.
+- **Brain packs (#451):** save filtered packs, install JSON files or owner-authorized bounded public URLs, list and remove whole packs using `brain:pack` and web/phone controls while preserving scope, privacy, expiry and outside-content trust.
+- **Memory usage and feedback (#451):** extend existing usage counts, web sorting and turn explanations with Helpful/Wrong feedback, review of wrong memories, phone usage sorting and `brain:stats`.
+- **Docs as knowledge (#451):** `brain:sources` and web/phone controls index repo Markdown/text into read-only chunks, refresh changed files before retrieval with bounded, failure-tolerant scans and stable chunk ids, and cite file/line origins in answers and turn explanations.
+- **What the brain learned (#451):** `brain:diff --since 7d`, the project changes API and web/phone change strips show additions, edits, merges and archives from the event journal.
+- **Learn from merged PRs (#451):** tracked merge events collect PR titles, descriptions and review comments as lower-trust, chat-scoped memories; review mode holds them in the project inbox learning starts with new merges, skips short comments, caps proposals and stops retries after three failures.
+- **Brain interview (#451):** `brain:teach` and web/phone forms ask for test commands, conventions and areas to leave alone, then save the answers as typed project memories.
+
+- **Memory search filters (#419):** combine kind, learning agent and inclusive creation dates in the web/phone Memory views and `loom brain:search` flags.
+- **Markdown brain export (#419):** extend JSON export with `loom brain:export --md docs/BRAIN.md` and web/phone controls; repo writes require owner/admin, stay inside the repo and preserve existing files.
+- **Duplicate memory review (#419):** extend exact deduplication with near-duplicate suggestions and a reviewed merge that keeps both histories and archives the other memory.
+- **Pinned memories and priority (#419):** persist pins and priority, include every eligible pin even beyond the retrieval limit, and expose controls in the web, phone and CLI.
+- **Stale memory review (#419):** flag memories unused for 30 days, including never-used memories, and archive/restore them without losing history.
+- **Markdown memory import (#419):** extend JSON import with Markdown files, pasted Markdown and bounded public HTTP(S) URLs; preserve scopes on round trips and mark URL content untrusted.
+- **Chat-only memory controls (#419):** expose the existing chat scope in web/phone creation and editing and CLI creation; prevent cross-chat deduplication, retrieval and team-sharing leaks.
+- **Memory history revert (#419):** extend the event history with before/after values, changed fields, device attribution and audited reverts, available in web, phone and CLI.
+- **Per-turn memory explanations (#419):** save the actual memory text, scores and selection reasons at dispatch, view them in chat/Memory or `loom brain:why`, and include explicit pins in native continuity packets.
+
 ### Fixed
 
 - **Model tools stay inside the project through symlinks (#431).** `read_file`, `search`, `write_file` and the write preview now resolve every existing path component (and refuse dangling links) before checking containment and the `.git`/`.loom` exclusions, so a link like `leak -> /elsewhere` can no longer read or write outside the project.
