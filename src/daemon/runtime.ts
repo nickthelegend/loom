@@ -3669,7 +3669,7 @@ export class ProjectRuntime {
     });
 
     await this.ensureStarted(opts.agentId);
-    const mcp = child.capabilities.mcp ? writeLoomMcpSession(this.healthyMcps(), this.config.loomTools ? { project: this.info.id, api: this.apiUrl } : undefined) : null;
+    const mcp = child.capabilities.mcp ? writeLoomMcpSession(this.healthyMcps(), this.config.loomTools ? { project: this.info.id, api: this.apiUrl, agent: opts.agentId, chat } : undefined) : null;
     const memory = await this.briefings.turnMemoryBrief(task, opts.agentId, chat, prompt.id);
     const brief = [this.subtaskBriefing(parentAgentId, opts.agentId, task), memory.briefing].filter(Boolean).join("\n\n");
     const input: SendInput = {

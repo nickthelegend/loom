@@ -139,10 +139,10 @@ describe("command palette", () => {
 
 describe("tui views", () => {
   it("cycleView wraps through the five tabs", () => {
-    expect(VIEWS).toEqual(["thread", "board", "brain", "diff", "scoreboard"]);
+    expect(VIEWS).toEqual(["thread", "board", "brain", "diff", "scoreboard", "orchestra", "approvals"]);
     expect(cycleView("thread")).toBe("board");
-    expect(cycleView("scoreboard")).toBe("thread"); // wraps
-    expect(cycleView("thread", -1)).toBe("scoreboard");
+    expect(cycleView("approvals")).toBe("thread"); // wraps
+    expect(cycleView("thread", -1)).toBe("approvals");
   });
 
   it("renderTabs shows all five labels", () => {

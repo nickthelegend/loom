@@ -1,10 +1,10 @@
 /** Credentials exist only while an agent turn is alive; they never enter daemon.json. */
 import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { McpServerConfig } from "../types.js";
 import { writeMcpSession, type McpSession } from "./mcp.js";
 
-export interface LoomToolScope { project: string; api: string; run?: string; task?: string }
+export interface LoomToolScope { project: string; api: string; run?: string; task?: string; alive?: boolean; agent?: string; chat?: string; turnId?: string }
 const credentials = new Map<string, LoomToolScope>();
 export function loomToolScope(token: string | undefined): LoomToolScope | undefined {
   return token ? credentials.get(token) : undefined;
@@ -15,6 +15,7 @@ export function writeLoomMcpSession(mcps: McpServerConfig[] | undefined, scope?:
   if (!scope) return writeMcpSession(mcps);
   if (!scope.api) throw new Error("Loom tools require a listening daemon");
   const token = randomBytes(32).toString("hex");
+  scope = { ...scope, alive: true, turnId: randomUUID() };
   credentials.set(token, scope);
   try {
     const session = writeMcpSession([
@@ -27,7 +28,7 @@ export function writeLoomMcpSession(mcps: McpServerConfig[] | undefined, scope?:
       ...(mcps ?? []),
     ])!;
     const cleanup = session.cleanup;
-    session.cleanup = () => { credentials.delete(token); cleanup(); };
+    session.cleanup = () => { scope!.alive = false; credentials.delete(token); cleanup(); };
     return session;
   } catch (error) {
     credentials.delete(token);

@@ -1,4 +1,5 @@
 import { registerProjectHelp } from "./help/settings.js";
+import { renderAgenticTools } from "./agentic-r4.js";
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -476,6 +477,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           agents.map(function(a){ return '<option value="' + esc(a.id) + '"' + (a.id === cfg.defaultAgent ? " selected" : "") + ">" + esc(a.id) + "</option>"; }).join("") +
           "</select></div></div>";
         pp.innerHTML = hh;
+        renderAgenticTools(pp, pid);
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
         bindSeg("loomtools", function(v){ patchCfg({ loomTools: v === "on" }, v === "on" ? "Agents here can use Loom's tools" : "Loom tools off for this project"); });

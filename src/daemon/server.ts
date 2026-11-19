@@ -3,6 +3,7 @@ import { registerCostRoutes } from "./routes/cost-r4.js";
 import { registerOrchestraR4Routes } from "./routes/orchestra-r4.js";
 import { registerReviewR4Routes } from "./routes/review-r4.js";
 import { registerTeamsR4Public } from "./routes/teams-r4.js";
+import { registerAgenticRoutes } from "./routes/agentic-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -628,6 +629,7 @@ export class LoomDaemon {
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
     registerInsightsR4(app, withRuntime, ctx, () => this.server);
+    registerAgenticRoutes(app, ctx, withRuntime, TOOL_WRITES);
     registerModelRoutingRoutes(app, withRuntime);
     registerHelpRoutes(app, ctx, withRuntime);
     registerCostRoutes(app, withRuntime);

@@ -2364,7 +2364,7 @@ export class OrchestraEngine {
         payload: { text, author: "loom", orchestra: { runId: run.id, to: "orchestrator" } },
       });
       const mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.mcps?.(), this.host.loomTools?.() ? {
-        project: this.host.projectId, api: this.host.apiUrl?.() ?? "",
+        project: this.host.projectId, api: this.host.apiUrl?.() ?? "", agent: agent.id, chat: run.chat,
       } : undefined) : null;
       try {
         await this.track(key, () => agent.send({ text, ...(briefing ? { briefing } : {}),

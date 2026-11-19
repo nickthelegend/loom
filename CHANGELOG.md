@@ -83,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Share-link controls (#456).** Optional passcodes, successful-open counts, last-opened times and an opt-in first-open desktop/web/phone notification extend existing read-only links. Passcodes are hashed and visitor grants expire with the link. Stored payloads are cleared on revocation or expiry cleanup, annotations are retained for 30 days after expiry, and link reads are cached.
 - **Follow in Share live (#456).** Guests can follow the owner's scroll position and open-file preview in their shared chat; presence shows who is following. File previews are sent only while a guest follows, with immediate updates on entry and chat switches. Following pauses when the owner leaves the shared chat and never opens a private chat.
 
+- MCP `loom://` resources expose scoped chats, memories, boards and Orchestra run reports over HTTP and stdio (#457).
+- Existing named prompt templates are also MCP prompts, with required arguments from their `{{variables}}` (#457).
+- Six MCP tools expose the existing queue, approvals, task retry, review, costs and triggers with project access checks (#457).
+- `loom_consult` asks another agent or model a read-only side question, records the exchange in the asking thread and charges its usage to the asking agent (#457).
+- Extend the existing Loom-tools switch with per-tool project controls in web Preferences and phone Tools, plus attributed call logs and `loom mcp:log` (#457).
+- `loom api` makes authenticated daemon calls with inline or file JSON and a nonzero exit on HTTP errors (#457).
+- Owner-enabled project hooks execute `.loom/hooks/turn-finished`, `needs-you` and `run-completed` with bounded execution, JSON stdin, project logs, CLI and web/phone controls; consent stays outside the repository (#457).
+- Draft a disabled, editable SKILL.md from a finished chat using `loom skill:from-chat`, the web Save as skill menu or phone Tools; `loom skill:lint` checks front matter (#457).
+- TUI Orchestra and Approvals tabs and palette entries show runs, live tasks and pending decisions, with task retry and allow/deny commands (#457).
+- `loom wait <chat|run>` waits for a chat to become idle or a run to settle, with outcome exit codes, timeout and one-object JSON output (#457).
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,
