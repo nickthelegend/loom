@@ -1,3 +1,4 @@
+import { installWorkspaceR4 } from "./workspace-r4/index.js";
 /** Browser main module. See README.md for ownership and startup. */
 import { isGuest } from './share-live.js';
 import { restoreWorkspace,installSelectionSync } from './session.js';
@@ -19,6 +20,7 @@ import { openTaskModal } from './tasks.js';
 import { enterWorkspace,inWorkspace,installPaneMode,makeChatsDraggable,paneId,renderWorkspace,workspaceCommand } from './workspace.js';
 import { isSplitShortcut } from './splits.js';
 
+  installWorkspaceR4();
   restoreWorkspace();
   installSelectionSync();
   installShortcuts();

@@ -1,3 +1,4 @@
+import { workspaceClient } from "../core/workspace-r4/client.js";
 /**
  * Thin daemon client used by every surface (CLI now, app later).
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
@@ -97,6 +98,7 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  readonly workspace = workspaceClient(this.request.bind(this));
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

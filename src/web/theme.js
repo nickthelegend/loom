@@ -1,3 +1,4 @@
+import { applyCustomTheme,savedTheme } from "./workspace-r4/appearance.js";
 /** Browser theme module. See README.md for ownership and startup. */
 import { ICONS } from './icons.js';
 import { THEME_KEY,state } from './state.js';
@@ -62,6 +63,7 @@ import { THEME_KEY,state } from './state.js';
     var t = themeNow();
     document.documentElement.classList.toggle("dark", t !== "light");
     applyAppearance();
+    if (savedTheme()) applyCustomTheme();
     var m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute("content", t === "light" ? "#ffffff" : "#0a0a0a");
     var tb = document.getElementById("themebtn");

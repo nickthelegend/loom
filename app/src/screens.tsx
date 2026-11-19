@@ -1,3 +1,4 @@
+import { ProjectNotesButton } from "./r4-workspace";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -1522,6 +1523,7 @@ export function ProjectScreen(props: {
           </Text>
         </TouchableOpacity>
         <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
+        <ProjectNotesButton creds={creds} projectId={project.id} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (

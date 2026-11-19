@@ -1,3 +1,4 @@
+import { registerWorkspaceR4Routes } from "./routes/workspace-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -618,6 +619,7 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerWorkspaceR4Routes(app, ctx, withRuntime);
     registerModelRoutingRoutes(app, withRuntime);
     void mondayScoreboard().catch(() => {});
     this.scoreboardTimer = setInterval(() => void mondayScoreboard().catch(() => {}), 60_000);
