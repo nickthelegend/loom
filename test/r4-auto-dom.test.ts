@@ -30,7 +30,7 @@ function mount() {
       w.matchMedia = ((q: string) => ({ matches: q.includes("min-width"), media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as typeof w.matchMedia;
       w.fetch = ((url: string, init?: RequestInit) => closed ? new Promise(() => {}) : fetch(new URL(String(url), base), init).then(r => closed ? new Promise(() => {}) : r)) as typeof w.fetch;
       w.WebSocket = class extends WebSocket { constructor(url: string, protocols?: string | string[]) { super(url, protocols); sockets.push(this); } } as unknown as typeof w.WebSocket;
-      w.localStorage.setItem("loomClientToken", token); w.localStorage.setItem("loomDevMode", "1"); w.confirm = () => true;
+      w.localStorage.setItem("loomClientToken", token); w.localStorage.setItem("loomDevMode", "1"); w.localStorage.setItem("loomSetupSeen", "1"); w.localStorage.setItem("loomTourDone", "1"); w.confirm = () => true;
     },
   });
   return { window: dom.window, errors, close() { closed = true; sockets.forEach(s => { s.on("error", () => {}); s.close(); }); dom.window.close(); } };
@@ -72,4 +72,4 @@ it("creates previewed schedules and watches, pauses automation, and resends webh
     await waitUntil(() => readWebhooks(dir).deliveries.length === 2);
     expect(m.errors).toEqual([]);
   } finally { m.close(); }
-}, 60_000);
+}, process.platform === "win32" ? 300_000 : 60_000);

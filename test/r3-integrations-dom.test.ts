@@ -30,7 +30,7 @@ function mount() {
       w.matchMedia = ((q: string) => ({ matches: q.includes("min-width"), media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as typeof w.matchMedia;
       w.fetch = ((input: string, init?: RequestInit) => closed ? never : fetch(new URL(input, base), init).then(r => closed ? never : r)) as typeof w.fetch;
       w.WebSocket = class extends WebSocket { constructor(url: string, protocols?: string[]) { super(url, protocols); sockets.push(this); } } as unknown as typeof w.WebSocket;
-      w.localStorage.setItem("loomClientToken", readDaemonConfig()!.adminToken); w.localStorage.setItem("loomDevMode", "1"); w.confirm = () => true;
+      w.localStorage.setItem("loomClientToken", readDaemonConfig()!.adminToken); w.localStorage.setItem("loomDevMode", "1"); w.localStorage.setItem("loomSetupSeen", "1"); w.localStorage.setItem("loomTourDone", "1"); w.confirm = () => true;
     } });
   mounted.push(() => { closed = true; for (const s of sockets) s.close(); dom.window.close(); });
   const el = (selector: string) => dom.window.document.querySelector(selector) as HTMLElement;

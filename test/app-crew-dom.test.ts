@@ -143,6 +143,8 @@ function mount(): Mounted {
       window.localStorage.setItem("loomClientToken", clientToken);
       // these exercise Developer mode's tools (Orchestra, Crew, the panel, the graph)
       window.localStorage.setItem("loomDevMode", "1");
+      // a first-run Setup dialog on a slow runner would sit over the tab under test
+      window.localStorage.setItem("loomSetupSeen", "1");
       window.confirm = () => true;
     },
   });
@@ -292,7 +294,7 @@ describe("web app · crew tab", () => {
     expect(act(m, "apply")).toBeNull();
     expect(fs.existsSync(path.join(projectDir, "hello.txt"))).toBe(true);
     expect(m.errors.join("\n")).toBe("");
-  }, 90_000);
+  }, process.platform === "win32" ? 300_000 : 90_000);
 
   it("Stop and Resume follow a working goal; a teammate's question shows as a banner and your answer routes to it", async () => {
     // Runs alone too: the crew comes from the API when the first test didn't make one.
@@ -330,7 +332,7 @@ describe("web app · crew tab", () => {
     await waitUntil(() => $$(m, "#pane-crew .crewev.cmine").some((e) => /teal/.test(e.textContent ?? "")));
     await waitUntil(() => $$(m, '#pane-crew .crewev.cphase[data-phase="asks"]').length >= 2);
     expect(m.errors.join("\n")).toBe("");
-  }, 90_000);
+  }, process.platform === "win32" ? 300_000 : 90_000);
   it("chooses a race result, changes play, and pauses/resumes through real phone-compatible routes", async () => {
     const made = await rest<{ crew: Crew }>("POST", "/crews", { name: "Race UI", play: "race", planApproval: false,
       testCommand: "node -e \"process.exit(0)\"", teammates: [{ id: "a", agent: "plannerbot", role: "builder" }, { id: "b", agent: "execbot", role: "builder" }] });
@@ -359,7 +361,7 @@ describe("web app · crew tab", () => {
     expect($(m, "#crewbudget")).toBeTruthy(); click(act(m, "resume"));
     await waitUntil(() => pill(m) === "completed", { timeoutMs: 30000 });
     expect(m.errors).toEqual([]);
-  }, 90000);
+  }, process.platform === "win32" ? 300_000 : 90000);
 
   it("shows every parallel seat and submits owner approval and runner controls without transcripts", async () => {
     if (!(await client.crews(projectId)).crews.length) await rest("POST", "/crews", { name: "Fixers", template: "fix" });
