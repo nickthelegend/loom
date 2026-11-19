@@ -16,7 +16,7 @@ function browser(saved: Record<string, string> = {}, search = "") {
     var api = function() { return Promise.resolve({ version: '2.2.0', highlights: [{ text: 'Update', topic: 'brain' }] }); };
     var openTriggers = function() { if (document.querySelector('.scrim')) return; var el = document.createElement('div'); el.className = 'scrim'; el.innerHTML = '<div class="modal triggersmodal"></div>'; document.body.appendChild(el); };
   `);
-  for (const file of ['mode.js', 'help/tours.js', 'navigation.js', 'help/panel.js']) {
+  for (const file of ['mode.js', 'startup-dialogs.js', 'help/tours.js', 'navigation.js', 'help/panel.js']) {
     const source = fs.readFileSync(new URL(`../src/web/${file}`, import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/^export \{.*\};?$/gm, '').replace(/export (async )?function /g, '$1function ');
     w.eval(source);
   }
