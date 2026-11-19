@@ -58,11 +58,14 @@ function mount() {
   const click = async (s: string) => { await waitUntil(() => !!q(s)?.onclick, { timeoutMs: 60_000 }); q(s)!.click(); };
   // waits for the field: a dialog renders after its data arrives, which a loaded runner can take a while to do
   const fill = async (s: string, value: string) => { await waitUntil(() => !!q(s), { timeoutMs: 60_000 }); const e = q(s) as HTMLInputElement; e.value = value; e.dispatchEvent(new dom.window.Event("input", { bubbles: true })); e.dispatchEvent(new dom.window.Event("change", { bubbles: true })); };
-  const m = { dom, errors, downloads, q, click, fill, close() { closed = true; sockets.forEach(s => { s.removeAllListeners(); s.on("error", () => {}); s.terminate(); }); dom.window.close(); } }; mounted.push(m); return m;
+  // Another dialog (a platform-specific notice) may already be up; in a browser it would cover the page and be
+  // closed first, but jsdom lets the click through and the sharing dialog then refuses to stack on it.
+  const closeDialogs = () => dom.window.document.querySelectorAll(".scrim").forEach(e => e.remove());
+  const m = { dom, errors, downloads, q, click, fill, closeDialogs, close() { closed = true; sockets.forEach(s => { s.removeAllListeners(); s.on("error", () => {}); s.terminate(); }); dom.window.close(); } }; mounted.push(m); return m;
 }
 
 it("creates a selected run share, counts down, saves roles, downloads CSV and revokes in the web UI", async () => {
-  const m = mount(); await m.click('.tab[data-tab="orchestra"]'); await waitUntil(() => !!m.q('[data-run]')); await m.click('#oshare');
+  const m = mount(); await m.click('.tab[data-tab="orchestra"]'); await waitUntil(() => !!m.q('[data-run]')); m.closeDialogs(); await m.click('#oshare');
   await m.fill('[data-expiry-preset]', '7d'); await m.click('[data-create-share]');
   await waitUntil(() => !!m.q('[aria-label="Read-only share link"]'));
   const link = (m.q('[aria-label="Read-only share link"]') as HTMLInputElement).value;
@@ -81,7 +84,7 @@ it("filters the existing activity feed, shares a fleet and revokes an invite fro
   await waitUntil(() => !!m.q('[data-feed-kind]'), { timeoutMs: 60_000 });
   await m.fill('[data-feed-kind]', 'pr_merged');
   expect(m.q('[data-tfeed="goal_started"]')!.hidden).toBe(true); expect(m.q('[data-tfeed="pr_merged"]')!.hidden).toBe(false);
-  await m.click('[data-team-sharing]'); await waitUntil(() => !!m.q('[data-invite-revoke]'), { timeoutMs: 60_000 });
+  m.closeDialogs(); await m.click('[data-team-sharing]'); await waitUntil(() => !!m.q('[data-invite-revoke]'), { timeoutMs: 60_000 });
   await m.fill('[data-fleet-name]', 'browser'); await m.fill('[data-fleet-spec]', 'echox2'); await m.click('[data-publish]');
   await waitUntil(() => !!m.q('[data-import="browser"]')); await m.click('[data-import="browser"]');
   await waitUntil(async () => (await call('GET', '/api/fleets')).fleets.some((f: { name: string }) => f.name === 'browser'));
