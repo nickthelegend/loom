@@ -62,3 +62,28 @@ export function applyEvent(
   if (ev.kind === "message") return { ...m, [id]: { ...m[id]!, thinking: false } };
   return m;
 }
+
+/**
+ * Back on the feed after it dropped: the events missed meanwhile, folded into the thread —
+ * this chat's, each once, in order. The socket reconnects on its own but replays nothing, so
+ * a reply that landed while the phone was away never showed up.
+ */
+export function mergeMissed<E extends { id: number; chat?: string }>(prev: E[], missed: E[], chat: string): E[] {
+  const have = new Set(prev.map((e) => e.id));
+  const add = missed.filter((e) => !have.has(e.id) && (!e.chat || e.chat === chat));
+  if (!add.length) return prev;
+  return [...prev, ...add].sort((a, b) => a.id - b.id);
+}
+
+/**
+ * The replies being typed, as the daemon has them now. One that finished while the feed was
+ * down is dropped (its end never arrived); one still going takes the daemon's text. An older
+ * daemon sends no snapshot: then nothing is known, and nothing changes.
+ */
+export function reconcileLive(m: LiveMap, snap: LiveSnapshot[] | undefined, chat: string): LiveMap {
+  if (!Array.isArray(snap)) return m;
+  const typing = new Set(snap.filter((s) => s?.agentId && (s.chat || "main") === chat && (s.text || s.think)).map((s) => s.agentId));
+  const kept: LiveMap = {};
+  for (const [id, one] of Object.entries(m)) if (typing.has(id)) kept[id] = one;
+  return seed(kept, snap, chat);
+}

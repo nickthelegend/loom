@@ -23,6 +23,8 @@
  * commit", "please tell me who you are").
  */
 
+import { VerifyError, verifyBeforeCommit } from "./review-r4/verify.js";
+import { SecretScanError, guardGit } from "./git-safety.js";
 import { execFile } from "./process.js";
 import path from "node:path";
 import { logbook } from "./logbook.js";
@@ -40,8 +42,9 @@ export class GitError extends Error {
 /** Run git, and say what went wrong when it does. */
 function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("git", args, { cwd, maxBuffer: 8 * 1024 * 1024, timeout: 60_000 }, (err, stdout, stderr) => {
       if (err) {
+        if (err instanceof SecretScanError || err instanceof VerifyError) { reject(err); return; }
         const detail = String(stderr || err.message).trim();
         // git's own words beat ours: "nothing to commit, working tree clean" is
         // a better message than anything we'd write about exit code 1.
@@ -109,7 +112,7 @@ export async function isRepo(dir: string): Promise<boolean> {
 export async function stage(dir: string, paths: string[]): Promise<{ staged: string[] }> {
   const rels = checkAll(dir, paths);
   // `--` ends the flags: a file called "-f" is a file, not an option.
-  await git(["add", "--", ...rels], dir);
+  await git(["--literal-pathspecs", "add", "--", ...rels], dir);
   logbook.info("git", `staged ${rels.length} file${rels.length === 1 ? "" : "s"}`, rels.join("\n"));
   return { staged: rels };
 }
@@ -184,6 +187,8 @@ export async function commit(dir: string, message: string): Promise<CommitResult
 
   // -m twice would make a body; one message, passed as one arg, can contain
   // anything including newlines and quotes because it never touches a shell.
+  guardGit("git", ["commit", "-m", text], dir);
+  await verifyBeforeCommit(dir);
   await git(["commit", "-m", text], dir);
   const sha = (await git(["rev-parse", "--short", "HEAD"], dir)).trim();
   const files = staged.split("\n").filter(Boolean).length;
@@ -223,8 +228,14 @@ export async function stageAndCommitFiles(
   message: string,
 ): Promise<CommitResult> {
   if (!paths.length) throw new GitError("no files to commit", "");
-  await stage(dir, paths);
-  return commit(dir, message);
+  const rels = checkAll(dir, paths);
+  await stage(dir, rels);
+  // --only keeps another turn's staged files out of this commit; Git still runs hooks.
+  const args = ["--literal-pathspecs", "commit", "--only", "-m", message, "--", ...rels];
+  guardGit("git", args, dir);
+  await verifyBeforeCommit(dir);
+  await git(args, dir);
+  return { sha: (await git(["rev-parse", "--short", "HEAD"], dir)).trim(), subject: firstLine(message), files: rels.length };
 }
 
 export async function status(dir: string): Promise<GitStatus> {
@@ -287,6 +298,7 @@ function gitNet(args: string[], cwd: string, timeoutMs = 45_000): Promise<string
       { cwd, maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
       (err, stdout, stderr) => {
         if (err) {
+        if (err instanceof SecretScanError || err instanceof VerifyError) { reject(err); return; }
           const detail = String(stderr || (err as Error).message).trim();
           const killed = (err as { killed?: boolean }).killed;
           reject(

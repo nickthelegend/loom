@@ -1,4 +1,5 @@
-import { flushIntakePrs } from "../core/intake.js";
+import { gitlabView } from "../core/gitlab.js";
+import { completeLinearIssues, flushIntakePrs } from "../core/intake.js";
 import { execFile } from "../core/process.js";
 import { logbook } from "../core/logbook.js";
 import { prFromUrl, readPrRecords, recordOpenedPr, savePrRecord, type PrRecord, type TrackedPr } from "../core/pr-feedback.js";
@@ -81,7 +82,8 @@ export class PrFeedback {
       try { prFromUrl(value); } catch { return Promise.reject(new Error("PR must be a positive number or an HTTPS pull request URL")); }
     } else if (!Number.isSafeInteger(Number(value))) return Promise.reject(new Error("invalid PR number"));
     return this.serial(async () => {
-      const view = JSON.parse(await this.gh(["pr", "view", value, "--json", FIELDS])) as PrView;
+      const identityHint = /^[1-9]\d*$/.test(value) ? null : prFromUrl(value);
+      const view = identityHint?.provider === "gitlab" ? await gitlabView(identityHint.repo, identityHint.prNumber, false) : JSON.parse(await this.gh(["pr", "view", value, "--json", FIELDS])) as PrView;
       if (!["OPEN", "MERGED", "CLOSED"].includes(view.state)) throw new Error("gh returned an invalid PR state");
       const identity = prFromUrl(view.url);
       const prior = readPrRecords(this.rt.info.dir).find(p => p.repo === identity.repo && p.prNumber === identity.prNumber);
@@ -109,10 +111,11 @@ export class PrFeedback {
         for (const row of readPrRecords(this.rt.info.dir)) {
           if (this.stopped) break;
           if (row.state !== "OPEN") continue;
-          const view = JSON.parse(await this.gh(["pr", "view", String(row.prNumber), "--repo", row.repo, "--json", FIELDS])) as PrView;
+          const view = row.provider === "gitlab" ? await gitlabView(row.repo, row.prNumber, this.rt.chats().find(c => c.id === row.chat)?.prFeedback === "ci+reviews") : JSON.parse(await this.gh(["pr", "view", String(row.prNumber), "--repo", row.repo, "--json", FIELDS])) as PrView;
           if (this.stopped) break;
           await this.apply(row, view);
         }
+        await completeLinearIssues(this.rt.info.dir, readPrRecords(this.rt.info.dir).filter(p => p.state === "MERGED").map(p => p.url));
         this.failures = 0;
         this.retryAt = 0;
       } catch (error) {
@@ -161,6 +164,7 @@ export class PrFeedback {
     for (const c of [...(view.reviews ?? []), ...(view.comments ?? [])]) comment(c);
     // The REST comments endpoint includes inline replies and paginates without
     // truncating large threads; gh pr view only includes top-level discussion.
+    if (row.provider === "gitlab") return;
     const parts = row.repo.split("/");
     const host = parts.length === 3 ? parts.shift()! : "github.com";
     const pages = JSON.parse(await this.gh(["api", "--hostname", host, `repos/${parts.join("/")}/pulls/${row.prNumber}/comments?per_page=100`, "--paginate", "--slurp"])) as Array<Array<{ node_id: string; body: string; user?: { login: string; type?: string }; author_association?: string }>>;

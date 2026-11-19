@@ -1,3 +1,5 @@
+import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
+import { draftCommit, selectChatBranch } from "../../core/git-review.js";
 import { branchBriefing } from "../../core/chat-branches.js";
 import { readProjectState } from "../../core/registry.js";
 import { AgentBase } from "../../adapters/base.js";
@@ -7,7 +9,7 @@ import path from "node:path";
 import { triage } from "../../core/review-triage.js";
 import * as checkpoints from "../../core/checkpoint.js";
 import type { EventJournal } from "../../core/eventlog.js";
-import { push as gitPush, stageAndCommitFiles } from "../../core/git.js";
+import { GitError, push as gitPush, stageAndCommitFiles } from "../../core/git.js";
 import { logbook } from "../../core/logbook.js";
 import { writeLoomMcpSession } from "../../core/loom-tools.js";
 import {
@@ -19,7 +21,7 @@ import { agentAllowed, type TeamPolicy } from "../../core/team-policy.js";
 import { type MergeOutcome } from "../../core/worktree-merge.js";
 import {
   diffSinceSnapshot,
-  porcelainStatus,
+  contentSnapshot,
   type TurnDiff
 } from "../../core/worktree.js";
 import type {
@@ -99,6 +101,7 @@ export interface RuntimeTurnsHost {
   ensureStarted: (agentId: string) => Promise<AnyAgent>;
   isCurrentAgent: (agent: AnyAgent) => boolean;
   dispatchFailed: (agent: AnyAgent, chat: string, error: unknown) => void;
+  turnMemoryBrief?: (query: string, agent: string, chat: string, turn: number, pinsOnly?: boolean) => Promise<import("../../core/brain.js").MemoryBriefing>;
   consumePendingBriefing: (agentId: string) => string | undefined;
   activeSkillsBlock: () => string;
   /** The agent's standing instructions block ("" when it has none). */
@@ -125,6 +128,9 @@ export class RuntimeTurns {
   turnChat = new Map<string, string>();
   /** The requested model survives errors and interrupts that omit provider metadata. */
   turnModel = new Map<string, string | undefined>();
+  private turnPrompt = new Map<string, string>();
+  private branchDispatch = false;
+  private editBranch = new Map<string, Promise<Error | undefined>>();
 
   // A turn's cost lands on a `turn_cost` status just before its `run_complete`
   // (the CLI reports it mid-stream). We hold it here so the completed turn — and
@@ -135,7 +141,7 @@ export class RuntimeTurns {
   // structured decisions once the turn completes. Reset after each run_complete.
   turnText = new Map<string, string>();
 
-  /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
+  /** Pre-turn content snapshots, for per-prompt diff attribution. */
   preTurnTree = new Map<string, string>();
 
   /** The checkpoint taken before each agent's current turn (#101). */
@@ -152,7 +158,7 @@ export class RuntimeTurns {
   lastTurnDiff = new Map<string, Promise<TurnDiff | null>>();
 
   /** App-owned diff/commit writes finish before changing a branch or its files. */
-  async settleBranches(): Promise<void> { await Promise.all(this.postTurn.values()); }
+  async settleBranches(): Promise<void> { await Promise.all([...this.postTurn.values(), ...this.editBranch.values()]); }
 
   private readonly postTurn = new Map<string, Promise<void>>();
 
@@ -181,6 +187,7 @@ export class RuntimeTurns {
    * never do is stop the turn.
    */
   async checkpointBefore(agentId: string, prompt: string): Promise<void> {
+    this.turnPrompt.set(agentId, prompt);
     try {
       const label = prompt.replace(/\s+/g, " ").trim().slice(0, 120) || `a turn by ${agentId}`;
       const cp = await checkpoints.capture(this.host.agentDir(agentId), label);
@@ -199,6 +206,16 @@ export class RuntimeTurns {
     } catch {
       /* never the reason a turn doesn't run */
     }
+  }
+
+  /** Cut a new chat branch as soon as an adapter reports its first edit. */
+  branchOnEdit(agentId: string): void {
+    if (!this.host.config.git?.branchPerChat || !this.preTurnTree.has(agentId) || this.editBranch.has(agentId)) return;
+    const chat = this.turnChat.get(agentId) ?? MAIN_CHAT;
+    this.editBranch.set(agentId, selectChatBranch(this.host.agentDir(agentId), chat, true).then(branch => {
+      this.host.log.append({ kind: "status", agentId, chat, payload: { state: "chat_branch", branch } });
+      return undefined;
+    }, error => error instanceof Error ? error : new Error(String(error))));
   }
 
   /** Every point this project's files can be put back to, newest first. */
@@ -263,12 +280,30 @@ export class RuntimeTurns {
     // agent may already be on its next turn somewhere else. Without it, every
     // "changed N files" card landed in Main whatever thread asked.
     const turnChat = this.turnChat.get(agentId);
-    const pending = diffSinceSnapshot(this.host.agentDir(agentId), before).catch(() => null);
+    const turnPrompt = this.turnPrompt.get(agentId);
+    this.turnPrompt.delete(agentId);
+    const editBranch = this.editBranch.get(agentId);
+    this.editBranch.delete(agentId);
+    const pending = (checkpoint ? checkpoints.turnDiff(this.host.agentDir(agentId), checkpoint) : diffSinceSnapshot(this.host.agentDir(agentId), before)).catch(() => null);
     this.lastTurnDiff.set(agentId, pending);
     const finalized = pending
       .then(async (diff) => {
         if (this.host.closed) return;
         if (diff) {
+          let branchReady = true;
+          if (diff.files.length && this.host.config.git?.branchPerChat) {
+            try {
+              const error = await editBranch;
+              if (error) throw error;
+              if (!editBranch) {
+                const branch = await selectChatBranch(this.host.agentDir(agentId), turnChat ?? MAIN_CHAT, true);
+                this.host.log.append({ kind: "status", agentId, chat: turnChat, payload: { state: "chat_branch", branch } });
+              }
+            } catch (error) {
+              this.host.log.append({ kind: "status", agentId, chat: turnChat, payload: { state: "git_failed", text: String(error) } });
+              branchReady = false;
+            }
+          }
           this.host.log.append({
             kind: "turn_diff",
             ...(turnChat && turnChat !== MAIN_CHAT ? { chat: turnChat } : {}),
@@ -289,7 +324,7 @@ export class RuntimeTurns {
           // files changed through the shell (sed, a script, git apply) never came as a file_edit: log them from the diff,
           // so cards and counts match what changed (#316)
           this.backfillEdits(agentId, turnChat, diff.files.map((f) => f.path));
-          await this.commitTurn(agentId, diff.files.map((f) => f.path));
+          if (branchReady) await this.commitTurn(agentId, diff.files.map((f) => f.path), diff.patch, turnChat, turnPrompt);
         }
         // Learn from the turn once we know which files it touched — the files
         // sharpen candidate retrieval. Runs after the diff so recentTurnFiles
@@ -331,14 +366,14 @@ export class RuntimeTurns {
    * are staged, so two agents finishing close together each commit their own
    * work rather than whoever finishes second swallowing both.
    */
-  async commitTurn(agentId: string, files: string[]): Promise<void> {
+  async commitTurn(agentId: string, files: string[], diff = "", chat = this.turnChat.get(agentId) ?? MAIN_CHAT, turnPrompt?: string): Promise<void> {
     const delivery = this.host.config.git?.delivery ?? "none";
     if ((!this.host.config.git?.commitPerTurn && delivery === "none") || !files.length) return;
     try {
-      const events = this.host.log.list({ limit: 60 });
-      const prompt =
+      const events = this.host.log.list({ chat, limit: 60 });
+      const prompt = turnPrompt ??
         [...events].reverse().find((e) => e.kind === "message" && !e.agentId)?.payload.text ?? "";
-      const subject = String(prompt).split("\n")[0]!.slice(0, 68) || `work by ${agentId}`;
+      const { message: subject } = await draftCommit(String(prompt), diff, this.host.config.git?.messageModel);
       const cfg = this.host.config.agents.find((a) => a.id === agentId);
       const message =
         `${subject}\n\n` +
@@ -348,17 +383,19 @@ export class RuntimeTurns {
       this.host.log.append({
         kind: "status",
         agentId,
+        chat,
         payload: { state: "turn_committed", files: files.length, subject },
       });
       // "push" delivers each committed turn; "pr" leaves pushing to the
       // orchestra's branch (a PR per turn is the flood teams complain about).
       if (delivery === "push") {
         const pushed = await gitPush(this.host.agentDir(agentId));
-        this.host.log.append({ kind: "status", agentId, payload: { state: "turn_pushed", branch: pushed.branch } });
+        this.host.log.append({ kind: "status", agentId, chat, payload: { state: "turn_pushed", branch: pushed.branch } });
       }
     } catch (err) {
       // A commit that can't happen (not a repo, hooks failed, nothing staged
       // after filters) is a Console line, never a failed turn.
+      this.host.log.append({ kind: "status", agentId, chat, payload: { state: "git_failed", text: err instanceof GitError ? err.stderr || err.message : err instanceof Error ? err.message : String(err) } });
       logbook.warn(
         "git",
         `turn commit skipped for ${agentId}`,
@@ -402,9 +439,16 @@ export class RuntimeTurns {
   async sendMessage(text: string, agentId?: string, opts: TurnOptions = {}): Promise<TurnResult> {
     const chat = opts.chat ?? MAIN_CHAT;
     this.host.assertChatWritable(chat);
+    const branchPolicy = Boolean(this.host.config.git?.branchPerChat);
+    if (branchPolicy && (this.branchDispatch || this.busySince.size)) throw new Error("finish the current turn before switching chat branches");
+    if (branchPolicy) this.branchDispatch = true;
     this.sendingChats.set(chat, (this.sendingChats.get(chat) ?? 0) + 1);
-    try { return await this.send(text, agentId, opts); }
+    try {
+      if (branchPolicy) await this.settleBranches();
+      return await this.send(text, agentId, opts);
+    }
     finally {
+      if (branchPolicy) this.branchDispatch = false;
       const remaining = this.sendingChats.get(chat)! - 1;
       if (remaining) this.sendingChats.set(chat, remaining);
       else this.sendingChats.delete(chat);
@@ -436,6 +480,34 @@ export class RuntimeTurns {
       } catch (error) {
         throw new ContinuityError("invalid", error instanceof Error ? error.message : String(error));
       }
+    }
+    const chosen = agentId ?? this.host.chatBinding(opts.chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+    const cfg = this.host.config.agents.find(a => a.id === chosen);
+    const binding = this.host.chatBinding(opts.chat);
+    // Keep explicit/chat selections separate from adapter defaults: a captured
+    // null means use the agent default, even if the chat is edited while queued.
+    const selectedModel = opts.capturedModel !== undefined ? opts.capturedModel
+      : opts.model ?? (binding.agentId === chosen ? binding.model : undefined);
+    const inheritedModel = selectedModel ?? cfg?.options?.model;
+    if (opts.capturedModel === undefined && selectedModel) opts = { ...opts, model: resolveModel(selectedModel) };
+    if (opts.capturedModel) opts = { ...opts, capturedModel: resolveModel(opts.capturedModel) };
+    if (opts.effort === undefined && !(binding.agentId === chosen && binding.effort) && !cfg?.options?.effort && ["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg?.kind ?? ""))
+      opts = { ...opts, effort: this.host.config.defaultEffort };
+    const capModel = typeof inheritedModel === "string" ? resolveModel(inheritedModel) : undefined;
+    // Claim preparation synchronously, before an asynchronous cap read. Existing
+    // turns retain their ownership; a second send will join their queue below.
+    const preparingAgent = this.host.agent(chosen);
+    const ownsPreparation = !this.busySince.has(chosen);
+    if (ownsPreparation) this.busySince.set(chosen, Date.now());
+    try {
+      const cap = enforceModelCap(capModel);
+      if (cap) await cap;
+      const qualifiedCap = cfg?.kind === "model" && capModel
+        ? enforceModelCap(`${cfg.options?.provider ?? "openrouter"}/${capModel}`) : undefined;
+      if (qualifiedCap) await qualifiedCap;
+      if (!this.host.isCurrentAgent(preparingAgent)) throw new Error(`agent "${chosen}" is no longer active`);
+    } finally {
+      if (ownsPreparation) this.busySince.delete(chosen);
     }
     if (this.host.continuity) return this.sendContinuity(text, agentId, opts);
     const source = opts.source ?? "user";
@@ -519,14 +591,22 @@ export class RuntimeTurns {
     this.turnModel.set(target, model ?? undefined);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
     this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started", ...(opts.requestId ? { requestId: opts.requestId } : {}) } });
-    this.host.log.append({
+    const promptEvent = this.host.log.append({
       kind: "message",
       chat,
       payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
     });
+    const preparation = new AbortController();
+    this.preparing.set(target, preparation);
+    const assertPrepared = () => {
+      if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent)) {
+        throw new Error(`dispatch preparation for "${target}" was cancelled or replaced`);
+      }
+    };
     let mcp: ReturnType<typeof writeLoomMcpSession> = null;
     try {
       await this.host.ensureStarted(target);
+      assertPrepared();
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
 
       const branchInput = this.branchInput(chat, target);
@@ -537,8 +617,11 @@ export class RuntimeTurns {
       // A provider agent plans in its own plan mode; the plan it proposes is
       // saved under plans/ by the runtime. Other agents get Loom's briefing.
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
+      const memoryQuery = this.host.log.list({ chat, kinds: ["message"], activeLineages: true, limit: 8 })
+        .map(e => String(e.payload.text ?? "").slice(-2000)).join("\n");
+      const memoryBrief = await this.host.turnMemoryBrief?.(memoryQuery || text, target, chat, promptEvent.id);
       const briefing =
-        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, branchInput.briefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
+        [memoryBrief?.briefing, this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, branchInput.briefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
           .filter(Boolean)
           .join("\n")
           .trim() || undefined;
@@ -568,27 +651,35 @@ export class RuntimeTurns {
         });
       }
       // Snapshot the tree so this prompt's changes can be attributed to it.
-      this.preTurnTree.set(target, await porcelainStatus(this.host.agentDir(target)));
-      // …and a checkpoint you can actually go back to. The porcelain snapshot
-      // above only says *which* paths changed; this holds their content, so
-      // "undo what that turn did" is a click rather than a re-typing (#101).
+      if (this.host.config.git?.branchPerChat) await selectChatBranch(this.host.agentDir(target), chat, false);
+      this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
+      assertPrepared();
+      // The durable checkpoint also makes this turn rewindable after a restart.
       await this.checkpointBefore(target, text);
+      assertPrepared();
       // Fire-and-notify: the turn runs in the background; progress streams
       // into the log and completion lands as run_complete.
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
       void Promise.resolve()
         .then(() => {
+          assertPrepared();
+          this.preparing.delete(target);
           if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
           this.host.clearChatMoveBriefing(chat);
+          memoryBrief?.record();
           return agent.send(input);
         })
         .catch((error) => this.host.dispatchFailed(agent, chat, error))
         // The config file exists for exactly this turn. Cleaned up whether the
         // turn succeeded, failed or was interrupted — a temp file per turn that
         // nothing removes is a slow leak of the project's server URLs.
-        .finally(() => mcp?.cleanup());
+        .finally(() => {
+          if (this.preparing.get(target) === preparation) this.preparing.delete(target);
+          mcp?.cleanup();
+        });
       return { agentId: target, ...(opts.requestId ? { requestId: opts.requestId } : {}) };
     } catch (error) {
+      if (this.preparing.get(target) === preparation) this.preparing.delete(target);
       mcp?.cleanup();
       this.host.dispatchFailed(agent, chat, error);
       throw error;
@@ -657,11 +748,13 @@ export class RuntimeTurns {
       assertPrepared();
       if (!this.host.isCurrentAgent(agent)) throw new Error("native target was replaced before dispatch");
       // Snapshot/checkpoint is complete before the frozen context is observed.
-      this.preTurnTree.set(target, await porcelainStatus(this.host.agentDir(target)));
+      if (this.host.config.git?.branchPerChat) await selectChatBranch(this.host.agentDir(target), chat, false);
+      this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
-      const supplement = [this.host.chatMoveBriefing(chat), this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
+      const memoryBrief = await this.host.turnMemoryBrief?.(text, target, chat, captured.event.id, true);
+      const supplement = [memoryBrief?.briefing, this.host.chatMoveBriefing(chat), this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
       let prepared = await brain.prepare({ ...request, targetAddedTokens: opts.contextTarget ?? request.targetAddedTokens }, cfg.kind,
         this.host.agentDir(target), options, supplement);
       assertPrepared();
@@ -702,6 +795,7 @@ export class RuntimeTurns {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");
         this.host.clearChatMoveBriefing(chat);
+        memoryBrief?.record();
         return agent.send(input);
       }).then(() => {
         if (!this.host.closed) brain.settled(continuity.runId);
@@ -763,9 +857,8 @@ export class RuntimeTurns {
    */
   async retryTurn(toAgentId: string): Promise<{ agentId: string; retried: string }> {
     const events = this.host.log.list({ limit: 200 });
-    // The last error, and the last user message before it: that pairing is the
-    // failed turn. Route-authored messages count too — a route step that died
-    // is exactly what you retry somewhere else.
+    // Pair the last error with the prompt in its own chat and turn boundary.
+    // Route-authored messages count too — a failed route step can be retried elsewhere.
     let errorAt = -1;
     for (let i = events.length - 1; i >= 0; i--) {
       if (events[i]!.kind === "error") { errorAt = i; break; }
@@ -775,6 +868,8 @@ export class RuntimeTurns {
     let prompt: string | undefined;
     for (let i = errorAt - 1; i >= 0; i--) {
       const e = events[i]!;
+      if ((e.chat ?? MAIN_CHAT) !== (err.chat ?? MAIN_CHAT)) continue;
+      if (e.kind === "status" && e.payload.state === "turn_started" && e.agentId === err.agentId) break;
       if (e.kind === "message" && !e.agentId) {
         prompt = String(e.payload.text ?? "");
         break;
@@ -805,12 +900,17 @@ export class RuntimeTurns {
   ): Promise<{ interrupted: string | null }> {
     // Stop in one chat stops that chat's turn — not whatever the baton holder
     // is doing in another thread.
+    if ((opts.source ?? "user") === "user" && this.host.queue.length && !this.host.queue.paused) {
+      this.host.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
+      const holder = this.host.validHolder();
+      this.host.log.append({ kind: "status", ...(holder ? { agentId: holder } : {}), ...(opts.chat ? { chat: opts.chat } : {}), payload: { state: "queue_paused", waiting: this.host.queue.length } });
+    }
     if (opts.chat) {
       for (const [id, chat] of this.turnChat) {
         if ((chat ?? "main") !== opts.chat) continue;
-        const a = this.host.agent(id);
+        const a = this.host.agents.get(id);
         // a turn still waiting for a daemon slot is this chat's turn too (#431)
-        if (isAdapter(a) && (a.busy() || waitingForSlot(a))) {
+        if (a && isAdapter(a) && (a.busy() || waitingForSlot(a))) {
           if ((opts.source ?? "user") === "user") this.host.routes.onManualInterrupt();
           await a.interrupt();
           return { interrupted: id };
@@ -830,12 +930,6 @@ export class RuntimeTurns {
     const holder = this.host.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.host.agent(holder);
-    // Stop means stop: what's queued doesn't start after it — it waits,
-    // paused, for you to resume, edit or clear it.
-    if ((opts.source ?? "user") === "user" && this.host.queue.length && !this.host.queue.paused) {
-      this.host.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
-      this.host.log.append({ kind: "status", agentId: holder, payload: { state: "queue_paused", waiting: this.host.queue.length } });
-    }
     if (isAdapter(agent) && (agent.busy() || waitingForSlot(agent))) {
       await agent.interrupt();
       return { interrupted: holder };

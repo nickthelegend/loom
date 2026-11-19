@@ -1,12 +1,39 @@
+import { brainMarkdown, parseBrainMarkdown, readMarkdownUrl, writeBrainMarkdown } from "../../core/brain-markdown.js";
 import type { Express } from 'express';
-import { findConflicts } from "../../core/brain-index.js";
-import type { MemoryKind, MemoryPatch } from "../../core/brain.js";
+import { findConflicts, findDuplicates } from "../../core/brain-index.js";
+import { MEMORY_KINDS, staleMemory, type MemoryKind } from "../../core/brain.js";
 import type { WithRuntime } from './context.js';
 import { z } from "zod";
 import { ContextItemV1, ContinuityError, Id, parseBounded } from "../../core/continuity/contracts.js";
 import { NATIVE_KINDS } from "../../core/continuity/capabilities.js";
 /** Register brain routes in the order established by LoomDaemon.routes(). */
-export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): void {
+export function registerBrainRoutes(app: Express, withRuntime: WithRuntime, auth: import("../auth.js").AuthManager): void {
+  const actor = (req: import("express").Request) => {
+    const client = auth.clientFor(req.headers.authorization?.replace(/^Bearer /i, ""));
+    return client ? `${client.name} (${client.id})` : "user";
+  };
+  // A project-scoped device reaches only its own projects (the scope wall), and its project's
+  // memory is its own; URL import and repo export below stay with the owner.
+  const scopeSchema = z.strictObject({ chat: z.string().min(1).max(200).optional(), agent: z.string().min(1).max(200).optional(),
+    task: z.string().min(1).max(200).optional(), crew: z.string().min(1).max(200).optional() });
+  const patchSchema = z.strictObject({ text: z.string().trim().min(1).max(100_000).optional(), kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(),
+    entities: z.array(z.string().max(200)).max(200).optional(), confidence: z.number().min(0).max(1).optional(),
+    scope: scopeSchema.optional(), pinned: z.boolean().optional(), priority: z.number().int().min(-1000).max(1000).optional(),
+    archived: z.boolean().optional(), private: z.boolean().optional(), untrusted: z.boolean().optional(),
+    evidence: z.string().max(100_000).optional(), expiresAt: z.number().finite().nullable().optional() });
+  const filters = (query: import("express").Request["query"]) => {
+    const input = z.object({ kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]).optional(), author: z.string().optional(),
+      since: z.string().optional(), until: z.string().optional() }).parse(query);
+    const date = (value: string | undefined, end: boolean) => {
+      if (value === undefined) return undefined;
+      const n = Date.parse(value + (/^\d{4}-\d{2}-\d{2}$/.test(value) ? end ? "T23:59:59.999Z" : "T00:00:00.000Z" : ""));
+      if (!Number.isFinite(n) || !/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(value) || (/^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(n).toISOString().slice(0, 10) !== value)) throw new Error("invalid date filter");
+      return n;
+    };
+    const since = date(input.since, false), until = date(input.until, true);
+    if (since !== undefined && until !== undefined && since > until) throw new Error("since must precede until");
+    return { kind: input.kind, author: input.author, since, until };
+  };
   // Keep concrete continuity routes before /brain/:mid. Diagnostics contain
   // stored evidence; provider acceptance is never labelled understanding.
   const requireBrain = (rt: Parameters<Parameters<WithRuntime>[0]>[0]) => {
@@ -111,7 +138,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
       rt.brain.add({
         kind: "decision",
         text,
-        provenance: { agentId: "user", eventId: event.id, ts: event.ts },
+        provenance: { agentId: actor(req), eventId: event.id, ts: event.ts },
       });
       res.json({ event });
     }),
@@ -131,13 +158,17 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/brain",
     withRuntime(async (rt, req, res) => {
       const q = req.query as Record<string, string | undefined>;
-      const memories = rt.brain.list({
-        ...(q.kind ? { kind: q.kind as MemoryKind } : {}),
-        ...(q.chat ? { chat: q.chat } : {}),
-        ...(q.includeExpired === "1" ? { includeExpired: true } : {}),
-        ...(q.limit ? { limit: Math.min(500, Number(q.limit) || 100) } : {}),
-      });
-      res.json({ memories, stats: rt.brain.stats() });
+      try {
+        const memories = rt.brain.list({
+          ...filters({ ...req.query, author: req.query.author ?? req.query.agent }),
+          includeArchived: q.includeArchived === "1",
+          ...(q.chat ? { chat: q.chat } : {}),
+          ...(q.includeExpired === "1" ? { includeExpired: true } : {}),
+          ...(q.limit ? { limit: Math.max(1, Math.min(500, Number(q.limit) || 100)) } : {}),
+        });
+        const usage = rt.memoryUsage();
+        res.json({ memories: memories.map(m => ({ ...m, stale: staleMemory(m, usage[m.id]?.at), lastUsedAt: usage[m.id]?.at })), stats: rt.brain.stats() });
+      } catch (error) { failure(res, error); }
     }),
   );
 
@@ -151,37 +182,34 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
       }
       // searchBrain, not retrieve: a search that scored differently from
       // the briefing it exists to explain would be worse than no search.
-      const hits = await rt.searchBrain({
-        ...(q.q ? { query: q.q } : {}),
-        ...(files.length ? { files } : {}),
-        ...(q.chat ? { chat: q.chat } : {}),
-        ...(q.agent ? { agent: q.agent } : {}),
-        limit: Math.min(50, Number(q.limit) || 12),
-        explain: q.explain === "1",
-      });
-      res.json({ hits });
+      try {
+        const hits = await rt.searchBrain({
+          ...filters(req.query),
+          ...(q.agent ? { agent: q.agent } : {}),
+          includeArchived: q.includeArchived === "1",
+          ...(q.q ? { query: q.q } : {}),
+          ...(files.length ? { files } : {}),
+          ...(q.chat ? { chat: q.chat } : {}),
+          limit: Math.max(1, Math.min(500, Number(q.limit) || 12)),
+          explain: q.explain === "1",
+        });
+        const usage = rt.memoryUsage();
+        res.json({ hits: hits.map(h => ({ ...h, memory: { ...h.memory, stale: staleMemory(h.memory, usage[h.memory.id]?.at) } })), stats: rt.brain.stats() });
+      } catch (error) { failure(res, error); }
     }),
   );
 
   app.post(
     "/api/projects/:id/brain",
     withRuntime(async (rt, req, res) => {
-      const body = (req.body ?? {}) as {
-        text?: string;
-        kind?: MemoryKind;
-        entities?: string[];
-        confidence?: number;
-        chat?: string;
-      };
-      if (!body.text?.trim()) return void res.status(400).json({ error: "missing text" });
       try {
+        const input = patchSchema.omit({ archived: true }).extend({ text: z.string().trim().min(1).max(100_000), chat: z.string().min(1).max(200).optional() }).parse(req.body);
+        const scope = input.chat ? { ...input.scope, chat: input.chat } : input.scope;
+        if (scope?.chat && !rt.chats().some(c => c.id === scope.chat)) throw new Error("no such chat");
         const { memory, created } = rt.brain.add({
-          kind: body.kind ?? "fact",
-          text: body.text,
-          ...(body.entities ? { entities: body.entities } : {}),
-          ...(body.chat ? { scope: { chat: body.chat } } : {}),
-          ...(body.confidence !== undefined ? { confidence: body.confidence } : {}),
-          provenance: { agentId: "user", eventId: rt.log.lastId(), ts: Date.now() },
+          ...input, expiresAt: input.expiresAt ?? undefined, scope,
+          kind: input.kind ?? "fact", text: input.text,
+          provenance: { agentId: actor(req), eventId: rt.log.lastId(), ts: Date.now() },
         });
         res.json({ memory, created });
       } catch (err) {
@@ -233,7 +261,9 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
   app.get(
     "/api/projects/:id/brain/export",
     withRuntime(async (rt, _req, res) => {
-      res.json(rt.brain.export(rt.info.name));
+      const doc = rt.brain.export(rt.info.name);
+      if (_req.query.format === "md") { res.type("text/markdown").send(brainMarkdown(doc)); return; }
+      res.json(doc);
     }),
   );
 
@@ -241,8 +271,26 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/brain/import",
     withRuntime(async (rt, req, res) => {
       try {
-        const out = rt.brain.import(req.body as Parameters<typeof rt.brain.import>[0], {
-          agentId: "import",
+        const input = req.body;
+        let doc = input;
+        if (input?.url !== undefined) {
+          if (!(req as import("express").Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "URL import requires owner/admin" });
+          doc = parseBrainMarkdown(await readMarkdownUrl(z.string().max(4000).parse(input.url)));
+          doc.memories = doc.memories.map((m: import("../../core/brain.js").BrainExport["memories"][number]) => ({ ...m, untrusted: true, pinned: false }));
+        } else if (input?.markdown !== undefined) doc = parseBrainMarkdown(input.markdown);
+        if (doc?.format !== "loom-brain" || !Array.isArray(doc.memories)) throw new Error("not a loom brain export");
+        if (doc.memories.length > 2000) throw new Error("import at most 2000 memories at a time");
+        const row = patchSchema.omit({ scope: true, archived: true }).extend({
+          text: z.string().trim().min(1).max(100_000), kind: z.enum(MEMORY_KINDS as [MemoryKind, ...MemoryKind[]]),
+          expiresAt: z.number().finite().optional(),
+          chat: z.string().max(200).optional(), agent: z.string().max(200).optional(), crew: z.string().max(200).optional(), task: z.string().max(200).optional(),
+        });
+        // JSON imports have always skipped malformed rows; validate new fields without changing that contract.
+        const validated = { ...doc, memories: doc.memories.flatMap((m: unknown) => {
+          const result = row.safeParse(m); return result.success ? [result.data] : [];
+        }) };
+        const out = rt.brain.import(validated as Parameters<typeof rt.brain.import>[0], {
+          agentId: actor(req),
           eventId: rt.log.lastId(),
           ts: Date.now(),
         });
@@ -253,11 +301,38 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  app.post("/api/projects/:id/brain/export", withRuntime(async (rt, req, res) => {
+    if (!(req as import("express").Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "repo export requires owner/admin" });
+    try { const input = z.strictObject({ md: z.string().min(1).max(1000) }).parse(req.body);
+      res.json({ file: writeBrainMarkdown(rt.info.dir, input.md, rt.brain.export(rt.info.name)) });
+    } catch (error) { failure(res, error); }
+  }));
+  app.get("/api/projects/:id/brain/duplicates", withRuntime(async (rt, _req, res) => {
+    res.json({ duplicates: findDuplicates(rt.brain.all()) });
+  }));
+  app.post("/api/projects/:id/brain/merge", withRuntime(async (rt, req, res) => {
+    try { const input = z.strictObject({ keep: z.string(), other: z.string(), text: z.string().trim().min(1).max(100_000) }).parse(req.body);
+      res.json({ memory: rt.brain.merge(input.keep, input.other, input.text, actor(req)) });
+    } catch (error) { failure(res, error); }
+  }));
+  app.post("/api/projects/:id/brain/:mid/revert", withRuntime(async (rt, req, res) => {
+    try { const input = z.strictObject({ eventId: z.number().int().positive() }).parse(req.body);
+      res.json({ memory: rt.brain.revert(String(req.params.mid), input.eventId, actor(req)) });
+    } catch (error) { failure(res, error); }
+  }));
+  app.get("/api/projects/:id/brain/injections", withRuntime(async (rt, req, res) => {
+    const injections = rt.log.list({ kinds: ["status"], ...(typeof req.query.chat === "string" ? { chat: req.query.chat } : {}) })
+      .filter(e => e.payload.state === "memory_injection" && (!req.query.turn || String(e.payload.turn) === req.query.turn));
+    res.json({ injections: injections.slice(-100) });
+  }));
+
   app.patch(
     "/api/projects/:id/brain/:mid",
     withRuntime(async (rt, req, res) => {
       try {
-        res.json({ memory: rt.brain.update(String(req.params.mid), (req.body ?? {}) as MemoryPatch, "user") });
+        const patch = patchSchema.parse(req.body);
+        if (patch.scope?.chat && !rt.chats().some(c => c.id === patch.scope!.chat)) throw new Error("no such chat");
+        res.json({ memory: rt.brain.update(String(req.params.mid), patch, actor(req)) });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         res.status(/no such memory/.test(msg) ? 404 : 400).json({ error: msg });
@@ -270,7 +345,7 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
     withRuntime(async (rt, req, res) => {
       const reason = String((req.query as Record<string, string>).reason ?? "").trim();
       if (!reason) return void res.status(400).json({ error: "forgetting needs a reason" });
-      const forgot = rt.brain.forget(String(req.params.mid), reason, "user");
+      const forgot = rt.brain.forget(String(req.params.mid), reason, actor(req));
       if (!forgot) return void res.status(404).json({ error: "no such memory" });
       res.json({ forgot: true });
     }),

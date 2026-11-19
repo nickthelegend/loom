@@ -16,6 +16,8 @@
  * The hub never holds a readable team key.
  */
 
+import { validateFleet } from "../core/fleets.js";
+import { mentionLogins } from "../core/team-sharing.js";
 import { ChatMoveError } from "../core/chat-move.js";
 import { execFile } from "../core/process.js";
 import fs from "node:fs";
@@ -154,6 +156,7 @@ export interface TeamLinkHost {
   projects?(): ProjectInfo[];
   /** Fan a team frame out to connected UIs. */
   broadcast(frame: Record<string, unknown>): void;
+  mention?(from: string, repo: string): void;
   /** Tests inject a hub; production builds an HttpHubClient from state. */
   hubFactory?: (url: string, token: string) => HubClient;
   /** Where team.json lives; defaults to ~/.loom/team.json. Tests run two members in one process. */
@@ -488,7 +491,11 @@ export class TeamLink {
         if (p.userId === e.userId && p.deviceId === e.deviceId && p.agent === e.agent && p.repo === e.repo) v.presence.delete(k);
       }
     } else if (e.type === "feed") {
+      if (v.feed.some(f => f.id === e.event.id)) return;
       v.feed.push(e.event);
+      if (e.event.type === "mention" && e.event.meta.to === this.state.hub?.github) {
+        this.host.mention?.(e.event.github ?? "A teammate", e.event.repo ?? "a shared project");
+      }
       if (e.event.type === "crew_request" && String(e.event.meta.owner).toLowerCase() === this.state.hub?.github.toLowerCase()) {
         for (const rt of this.host.runtimes()) {
           const share = await this.teamFor(rt);
@@ -551,6 +558,58 @@ export class TeamLink {
     writeState(this.file, this.state);
     await this.attach(team.id);
     return { id: team.id, name: team.name };
+  }
+
+  listInvites(teamId = this.defaultTeam()) { return this.hub().listInvites(teamId); }
+  revokeInvite(teamId: string, id: string) { return this.hub().revokeInvite(teamId, id); }
+
+  async projectPeople(rt: ProjectRuntime) {
+    if (!this.hubClient) return [];
+    const share = await this.teamFor(rt);
+    if (!share) return [];
+    const people = new Map<string, { id: string; name: string; kind: "owner"; typing: boolean; since: number }>();
+    for (const p of this.views.get(share.teamId)?.presence.values() ?? []) {
+      if (p.repo !== share.repo || p.userId === this.state.hub?.userId || Date.now() - p.ts >= 45_000) continue;
+      people.set(p.userId, { id: `team:${p.userId}`, name: p.github, kind: "owner", typing: false, since: p.since });
+    }
+    return [...people.values()];
+  }
+
+  async sharedFleets(teamId = this.defaultTeam()) {
+    const rows = await this.hub().teamFleets(teamId);
+    return rows.flatMap(row => {
+      const content = openFromTeam(this.state.teams[teamId]?.keys ?? [], row.sealed);
+      if (!content) return [];
+      try { return [{ ...validateFleet(row.name, (content as { spec?: unknown }).spec), author: row.author, updatedAt: row.updatedAt }]; }
+      catch { return []; }
+    });
+  }
+
+  async shareFleet(teamId: string, name: unknown, spec: unknown) {
+    const fleet = validateFleet(name, spec);
+    await this.hub().putTeamFleet(teamId, fleet.name, sealForTeam(this.currentKey(teamId), { spec: fleet.spec }));
+    return fleet;
+  }
+
+  removeSharedFleet(teamId: string, name: string) { return this.hub().putTeamFleet(teamId, name, null); }
+
+  async teammates(rt: ProjectRuntime) {
+    if (!this.hubClient) return [];
+    const share = await this.teamFor(rt);
+    if (!share) return [];
+    return (await this.hub().members(share.teamId)).filter(m => m.user.id !== this.state.hub?.userId).map(m => ({ github: m.user.github, name: m.user.name }));
+  }
+
+  async mention(rt: ProjectRuntime, chat: string, text: string): Promise<void> {
+    if (!mentionLogins(text).length || !this.hubClient) return;
+    const share = await this.teamFor(rt);
+    if (!share) return;
+    const members = await this.hub().members(share.teamId);
+    const recipients = mentionLogins(text).filter(login => login !== this.state.hub?.github && members.some(m => m.user.github.toLowerCase() === login));
+    for (const to of recipients) await this.hub().appendFeed(share.teamId, {
+      type: "mention", repo: share.repo, meta: { to, chat }, deviceId: this.device().id,
+      sealed: sealForTeam(this.currentKey(share.teamId), { text: text.slice(0, 500) }),
+    });
   }
 
   /** Whether an unexpired, successfully minted invite exists on this machine. */
@@ -667,6 +726,9 @@ export class TeamLink {
     await this.hub().putKeyEnvelopes(teamId, next.version, envelopes);
     this.state.teams[teamId]!.keys.push(next);
     writeState(this.file, this.state);
+    // Older hubs have no fleet API; their key rotation must still work.
+    const fleets = await this.sharedFleets(teamId).catch(() => []);
+    for (const fleet of fleets) await this.shareFleet(teamId, fleet.name, fleet.spec).catch(e => logbook.warn("team", "couldn't rotate a shared fleet", String(e)));
     return { keyVersion: next.version };
   }
 

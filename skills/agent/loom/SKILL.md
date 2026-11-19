@@ -8,7 +8,7 @@ description: Drive Loom's local agents, demo, bundled skills, MCP connections, s
 Loom is a local-first control plane: one daemon drives installed agent CLIs,
 ACP agents, and model endpoints. Projects share memory across agent sessions.
 The app, CLI, phone, bridges, and teams talk to that daemon.
-Require Loom ≥ 2.0.0. Run project commands from the intended project folder.
+Require Loom ≥ 2.1.0. Run project commands from the intended project folder.
 Use discovered agent IDs; the examples assume those agents exist.
 
 ## Establish context
@@ -68,6 +68,26 @@ under projectsRoot, including Git initialization and a first commit.
 `loom clone REPOSITORY_URL --name example` clones and registers an existing repo.
 Read the returned project ID and directory before sending work.
 
+## Local setup and shortcuts
+
+```sh
+loom init --list-templates
+loom init --template node --gitignore
+loom config validate
+loom alias set inspect-turn -- send --wait "Review my changes"
+loom alias list --json
+loom alias rm inspect-turn
+loom completion bash
+```
+
+Starter choices are web, node and library. They do not overwrite existing files,
+install dependencies or start servers. Config validation reads `.loom/config.json`
+on disk, even if the daemon still holds the last good configuration.
+Aliases store literal argument lists; extra invocation arguments are appended.
+Built-ins take precedence and cycles are rejected. Alias management is owner-only.
+Completion also accepts zsh and fish; source its output in the matching shell for
+commands, subcommands, options and user aliases without starting a daemon.
+
 ## Connect Loom tools
 
 ```sh
@@ -118,6 +138,20 @@ Handle the exit code explicitly; a timeout does not stop the agent:
 | 75 | Daemon stopped/restarted | Inspect partial work, then send a continuation. |
 | 124 | Wait timed out | Follow logs; do not duplicate a still-running task. |
 
+For live automation output:
+
+```sh
+loom send --stream "Review the parser and report the result."
+loom ask --models provider/MODEL_A,provider/MODEL_B --json --timeout 600 "Compare these approaches."
+```
+
+Use real provider/model IDs. `send --stream` implies waiting and emits NDJSON
+accepted receipts, text deltas, durable events and the outcome. `send --json`
+also implies waiting but still prints one final object. `ask --json` streams an
+outcome for each returned model chat; a failure or question makes the exit nonzero.
+Keep stderr separate, deduplicate durable events by ID, and treat deltas as previews.
+Queued sends follow their own dispatch receipt. Timing out leaves work running.
+
 `--timeout 3600` extends the CLI wait. `--fresh` resets this agent's chat session;
 use it deliberately when old context is unnecessary, not as a routine retry.
 `loom log -n 40` reads recent events; `loom log --follow` follows activity.
@@ -161,6 +195,48 @@ Local find prints text; JSON output is implemented for the `--all` search path.
 Report which agent did the work, the outcome, test evidence, and any reported cost.
 Never interpret an absent cost as zero. Never paste secrets into prompts or commit `.loom/`.
 Never run `loom up --restart --force` while someone's turns run.
+
+## Review and maintain memory
+
+```sh
+loom brain:search "parser" --kind decision --agent codex --since 2026-11-01 --until 2026-11-19 --chat main --explain
+loom brain:list --stale --archived
+loom brain:why TURN_ID
+loom brain:history MEMORY_ID
+loom brain:duplicates
+loom brain:export --md docs/BRAIN.md
+loom brain:import docs/DECISIONS.md
+```
+
+Dates are inclusive creation filters; `--agent` means the agent that learned it.
+Use returned memory/turn/event IDs. `brain:why` shows the selection saved at dispatch,
+not a new search. Markdown exports stay inside the repo and refuse existing files;
+imports also accept brain JSON or a public Markdown URL, whose content is untrusted.
+
+For agreed memory changes, `loom brain:add "Keep the parser API stable" --kind decision --chat main`
+limits the memory to that chat. `loom brain:pin MEMORY_ID --priority 10` includes an
+eligible pin beyond the normal retrieval limit; `--off` unpins (priority: -1000–1000).
+Use `loom brain:archive MEMORY_ID` or `--restore` to retain history while hiding or
+restoring stale entries. `loom brain:history MEMORY_ID --revert EVENT_ID` restores
+the state after that event. Review suggestions before
+`loom brain:merge KEEP_ID OTHER_ID --text "Reviewed merged wording"`; it archives
+the other memory and keeps both histories.
+
+## Saved prompts and exports
+
+```sh
+loom bookmarks --json
+loom templates list --json
+loom templates save parser-review "Review {{file}} for edge cases."
+loom templates use parser-review --var file=src/parser.ts
+loom export --format html --chat main --out chat.html
+```
+
+Bookmarks span this project. Prompt templates reuse the saved prompt library;
+writes are owner-only. Repeat `--var key=value` for variables; `templates use`
+prints the rendered prompt without sending it. `loom templates rm parser-review`
+removes a requested template. HTML export is a standalone chat replay; review
+its contents before sharing it.
 
 ## Choose the next skill
 

@@ -40,6 +40,8 @@ import { THEME_KEY,state } from './state.js';
   function appearancePref(name, fallback){ try { return localStorage.getItem("loomPref:" + name) || fallback; } catch (e) { return fallback; } }
   function applyAppearance(){
     var root = document.documentElement;
+    var motion = appearancePref("motion", "system");
+    root.classList.toggle("reduced-motion", motion === "reduce" || (motion === "system" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches));
     // The workspace is scaled, not the page: menus and dialogs live on <body>
     // and place themselves from the workspace's on-screen boxes, which are
     // right only if <body> itself isn't zoomed.
@@ -77,3 +79,5 @@ import { THEME_KEY,state } from './state.js';
 
   function isElectron(){ return document.documentElement.hasAttribute("data-electron"); }
 export { ACCENTS,appearancePref,applyAppearance,applyTheme,bindTheme,isElectron,setThemePref,THEME_BTN,themeNow,themePref };
+try { var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)'); if (reducedMotion && reducedMotion.addEventListener) reducedMotion.addEventListener('change', applyAppearance); } catch (e) {}
+window.addEventListener('storage', function(e){ if (e.key === THEME_KEY || (e.key || '').indexOf('loomPref:') === 0) applyTheme(); });
