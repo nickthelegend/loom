@@ -1,4 +1,10 @@
 import { assertChatBudget } from "../core/cost-r4/budgets.js";
+// agents-r4 hooks: streaming privacy, retry lifetime, and session policy.
+import { isRetrying } from "../core/agents-r4/attempts.js";
+import { EnvironmentStream, EnvironmentLiveThrottle } from "../core/agents-r4/redaction.js";
+import { registerSessionRuntime } from "../core/agents-r4/runtime.js";
+import { applyEnvironment, clearEnvironment } from "../core/agents-r4/store.js";
+import { recordChatRestore } from "../core/agents-r4/chats.js";
 import { resolveModel, validateAgentOptions, enforceModelCap, modelUsage, readModelRouting } from "../core/model-routing.js";
 import { RedactedStream } from "../core/redact.js";
 import { readSafety, writeSafety, parseSafety, presetMode, hasSafetyRules, SAFETY_PRESETS, type SafetyPolicy } from "../core/safety.js";
@@ -238,7 +244,7 @@ export class ProjectRuntime {
   private streamListeners = new Set<(f: LiveText) => void>();
   private liveListeners = new Set<(d: LiveFrame) => void>();
   /** Streamed text and tool progress from provider agents, coalesced for clients. Not persisted. */
-  private readonly live = new LiveDeltaThrottle((d) => { for (const cb of this.liveListeners) cb(d); }, 50, true);
+  private readonly live = new EnvironmentLiveThrottle(() => this.info.id, (d) => { for (const cb of this.liveListeners) cb(d); }, 50, true);
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -626,6 +632,7 @@ export class ProjectRuntime {
       this.watchClockConditions(q);
     });
 
+    registerSessionRuntime(this, this.turns, this.agentLifecycle, () => this.closed);
     this.prFeedback = new PrFeedback(this);
     this.prFeedback.start();
 
@@ -1173,6 +1180,7 @@ export class ProjectRuntime {
     // so the project 500s on every poll and the roster you just changed becomes
     // unreachable. Writing the file is the easy half; the runtime has to learn
     // too, and it can't wait for a restart to do it.
+    clearEnvironment(this.info.id, id); // agents-r4: never reuse a retired session’s secrets
     this.spawnAgent(cfg);
     this.config.agents.push(cfg);
     this.saveConfig();
@@ -1298,7 +1306,7 @@ export class ProjectRuntime {
           (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
         const cost = this.turns.pendingCost.get(agent.id);
         this.turns.pendingCost.delete(agent.id);
-        this.turns.turnModel.delete(agent.id);
+        if (!isRetrying(p)) this.turns.turnModel.delete(agent.id);
         payload = {
           ...p,
           adapter: cfg.kind,
@@ -1323,7 +1331,7 @@ export class ProjectRuntime {
       // Any terminal event stops the stale-session clock — a turn that ended in
       // an error is over, not hung.
       const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
-      if (turnOver && !this.continuity) {
+      if (turnOver && !isRetrying(p) && !this.continuity) {
         this.turns.busySince.delete(agent.id);
       }
       if (turnOver) this.openQuestions.delete(agent.id);
@@ -1391,6 +1399,7 @@ export class ProjectRuntime {
     // doesn't unhappen it. Only the roster forgets.
     this.config.agents = this.config.agents.filter((a) => a.id !== agentId);
     this.saveConfig();
+    clearEnvironment(this.info.id, agentId); // agents-r4: private values belong to this lifetime
     if (live) {
       void this.agentLifecycle.retire(agentId);
     }
@@ -2020,6 +2029,7 @@ export class ProjectRuntime {
     const state = readProjectState(this.info.dir);
     const chat = (state.chats ?? []).find((c) => c.id === id);
     if (!chat) return null;
+    recordChatRestore(chat, flags); // agents-r4 idle clock
     for (const k of ["pinned", "archived"] as const) {
       if (flags[k] === undefined) continue;
       if (flags[k]) chat[k] = true;
@@ -2730,6 +2740,7 @@ export class ProjectRuntime {
   private afterAgentEvent(event: LoomEvent): void {
     if (event.kind === "file_edit" && event.agentId) this.turns.branchOnEdit(event.agentId);
     this.trackCost(event);
+    if (isRetrying(event.payload)) return; // agents-r4: account attempts without ending the turn
     void this.warnModelCap(event).catch(() => {});
     this.shield(event);
     this.noteSignIn(event);
@@ -3034,7 +3045,7 @@ export class ProjectRuntime {
   private liveText(f: LiveText): void {
     if (this.closed) return;
     let s = this.liveSoFar.get(f.agentId);
-    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "", textStream: new RedactedStream(), thinkStream: new RedactedStream() }));
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "", textStream: new EnvironmentStream(this.info.id, f.agentId), thinkStream: new EnvironmentStream(this.info.id, f.agentId) }));
     const text = (f.reasoning ? s.thinkStream : s.textStream).push(f.text);
     if (!text) return;
     const off = f.reasoning ? s.think.length : s.text.length;
@@ -4208,6 +4219,7 @@ export class ProjectRuntime {
 
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
     const opts: Record<string, unknown> = { ...(resolveAgentAccount(cfg).options ?? {}) };
+    applyEnvironment(opts, this.info.id, cfg.id); // agents-r4 startup hook
     const safety = readSafety(this.info.id);
     if (safety) {
       if (hasSafetyRules(safety) && !["model", "claude-code", "echo"].includes(cfg.kind)) throw new Error(`${cfg.kind} cannot enforce this project's safety rules.`);

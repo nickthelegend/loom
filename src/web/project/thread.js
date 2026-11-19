@@ -1,3 +1,4 @@
+import { catchMeUp } from "../agents-r4.js";
 import { agentGlyph,agentLabel,BRAND_TITLES,brandMark,hasBrand,labelOf } from '../agents.js';
 import { settleApprovalCards } from '../approvals.js';
 import { api,checkBuild } from '../connection.js';
@@ -376,6 +377,8 @@ export function createThread(view) {
           if (prevCard && !userSince) { var fresh = lineFor(e); if (fresh) prevCard.outerHTML = fresh; return; }
         }
         var html = lineFor(e);
+        if (html && e.kind === "needs_input" && e.payload.reason === "turn_time_limit") html = html.replace('<div class="nirow">', '<div class="niopts"><button class="nio" type="button" data-nipick="Continue from where you stopped.">Continue</button></div><div class="nirow">');
+        if (e.kind === "status" && e.payload.state === "turn_retry") html = '<div class="sys">' + esc(e.payload.text) + '</div>';
         if (!html) return;
         placeLine(feed, html);
         added = true;
@@ -705,6 +708,8 @@ export function createThread(view) {
           evs.forEach(function(e){
             if (!state.firstId || e.id < state.firstId) state.firstId = e.id;
             var html = lineFor(e);
+        if (html && e.kind === "needs_input" && e.payload.reason === "turn_time_limit") html = html.replace('<div class="nirow">', '<div class="niopts"><button class="nio" type="button" data-nipick="Continue from where you stopped.">Continue</button></div><div class="nirow">');
+        if (e.kind === "status" && e.payload.state === "turn_retry") html = '<div class="sys">' + esc(e.payload.text) + '</div>';
             if (html) placeLine(feed, html, anchor);
           });
           drawEarlier(evs.length >= PAGE);
@@ -718,10 +723,14 @@ export function createThread(view) {
     // changes what every past line renders as, so there is nothing to patch —
     // the whole feed is re-read rather than re-styled.
     var historyRequest = 0;
+    var historyReadBefore, historyReadCaptured = false;
     function loadHistory(){
       var request = ++historyRequest;
-      var readBefore;
-      try { readBefore = JSON.parse(localStorage.getItem("loomSeen") || "{}")[view.pid + ":" + view.chatId]; } catch (e) {}
+      if (!historyReadCaptured) {
+        try { historyReadBefore = JSON.parse(localStorage.getItem("loomSeen") || "{}")[view.pid + ":" + view.chatId]; } catch (e) {}
+        historyReadCaptured = true;
+      }
+      var readBefore = historyReadBefore;
 
       var feed = document.getElementById("feed");
       if (feed) feed.innerHTML = '<div class="loader"></div>';
@@ -760,7 +769,8 @@ export function createThread(view) {
           if (unread && !(go && go.id)) {
             var target = document.querySelector('#feed .msg[data-id="' + unread.id + '"]');
             if (target) {
-              target.insertAdjacentHTML('beforebegin', '<div class="unread-divider" role="separator">Unread</div>');
+              target.insertAdjacentHTML('beforebegin', '<div class="unread-divider" role="separator">Unread <button class="btn xs" data-catchup>Catch me up</button></div>');
+              target.previousElementSibling.querySelector("[data-catchup]").onclick = function(){ catchMeUp(view.pid, view.chatId, readBefore); };
               target.previousElementSibling.scrollIntoView({ block: 'start' });
             }
           }

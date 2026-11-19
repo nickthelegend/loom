@@ -105,6 +105,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Recent-chat switcher (#459).** Ctrl+Tab / Ctrl+Shift+Tab preview recently used chats across projects and open the selection on release, preserving independent split-pane selections.
 - **Files from this chat (#459).** A panel and `loom chat-files` index received attachments and produced images/screenshots, with authenticated open/download, copy-path and jump-to-message actions, confined to existing files inside the source project, with code-reference fragments and line numbers normalized.
 
+- **Agent profiles (#458).** Save kind, model, effort, access and standing instructions with `loom profiles save|list|rm`; use `loom agents:add --profile` or the web and phone Add agent profile pickers.
+- **Archive improvements (#458).** Extend existing archive menus with `loom chat:archive --restore`, archived-only lists and search, phone archive browsing, and optional per-project idle auto-archive.
+- **Chat labels (#458).** `loom chat:label` and web/phone label editors add colored chips and label filters to chat lists.
+- **Turn time limits (#458).** Project and agent settings bound turn duration, interrupt the exact agent through existing admission controls, and show needs-you with Continue; configure from Settings or `loom agents:limit --turn-minutes`.
+- **Idle sleep (#458).** Stop idle processes while preserving roster, baton and saved sessions; wake on the next message and show Asleep in the web, phone and `loom agents`.
+- **Catch me up (#458).** `loom catchup` and unread controls summarize new activity offline, with an explicit helper-model opt-in.
+- **Duplicate agents (#458).** `loom agents:clone --count --model` and web/phone Duplicate actions copy settings into independent sessions without copying environment secrets or native session IDs.
+- **Per-agent environment (#458).** Owner and unscoped-device editors and `loom agents:env` set private daemon-side values for process startup; clients see names only, event and stream output redact values of at least eight characters, and backups exclude them.
+- **Retry policy (#458).** Optional bounded retries with backoff handle rate-limit/network failures only when no file changed, retain Stop/admission and budget checks, and show and account for each attempt.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

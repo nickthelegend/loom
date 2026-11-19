@@ -1,3 +1,5 @@
+import { deliverAttemptEvent } from "../../core/agents-r4/attempts.js";
+import { isAdapter } from "../../types.js";
 import type { AdapterEvent, AnyAgent } from "../../types.js";
 
 interface Entry {
@@ -25,7 +27,12 @@ export class RuntimeAgents {
     this.entries.set(agent.id, entry);
     this.live.set(agent.id, agent);
     entry.off = agent.onEvent((event) => {
-      if (!this.closed && this.entries.get(agent.id) === entry) onEvent(event);
+      if (!this.closed && this.entries.get(agent.id) === entry) {
+        if (isAdapter(agent)) deliverAttemptEvent(agent, event, e => {
+          if (!this.closed && this.entries.get(agent.id) === entry) onEvent(e);
+        });
+        else onEvent(event);
+      }
     });
   }
 
@@ -66,6 +73,8 @@ export class RuntimeAgents {
     }).catch(() => {}); // retain rejected barrier: no successor may start
     return stopped;
   }
+
+  async settled(id: string): Promise<void> { await this.stopping.get(id); }
 
   async close(): Promise<void> {
     this.closed = true;

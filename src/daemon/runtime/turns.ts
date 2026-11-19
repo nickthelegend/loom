@@ -1,5 +1,7 @@
 import { enforceCostBudget } from "../../core/cost-r4/budgets.js";
 import { prepareCostTurn } from "../../core/cost-r4/turns.js";
+import { runAttempts } from "../../core/agents-r4/attempts.js";
+import { agentPolicy } from "../../core/agents-r4/store.js";
 import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
 import { draftCommit, selectChatBranch } from "../../core/git-review.js";
 import { branchBriefing } from "../../core/chat-branches.js";
@@ -27,6 +29,7 @@ import {
   type TurnDiff
 } from "../../core/worktree.js";
 import type {
+  AdapterEvent,
   AnyAgent,
   McpServerConfig,
   ProjectConfig,
@@ -121,6 +124,19 @@ export interface RuntimeTurnsHost {
 /** Owns turns state for exactly one open project. */
 export class RuntimeTurns {
   constructor(private readonly host: RuntimeTurnsHost) { }
+
+  private attemptEvent(agent: AnyAgent, chat: string, event: AdapterEvent): void {
+    if (!this.host.isCurrentAgent(agent)) return;
+    if (event.kind === "error") {
+      const cfg = this.host.config.agents.find(a => a.id === agent.id);
+      const model = this.turnModel.get(agent.id) ?? cfg?.options?.model;
+      const cost = this.pendingCost.get(agent.id);
+      this.pendingCost.delete(agent.id);
+      event = { ...event, payload: { ...event.payload, adapter: agent.kind,
+        ...(model ? { model } : {}), ...(cost !== undefined ? { costUsd: cost } : {}) } };
+    }
+    this.host.appendIfOpen({ ...event, agentId: agent.id, chat });
+  }
 
   /**
    * Which conversation each agent's current turn belongs to. Set when a turn
@@ -684,7 +700,18 @@ export class RuntimeTurns {
           if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
           this.host.clearChatMoveBriefing(chat);
           memoryBrief?.record();
-          return agent.send(input);
+          return runAttempts(agent, input, agentPolicy(this.host.info.dir, target), {
+            dir: this.host.agentDir(target), budget: () => this.host.enforceBudget(target),
+            current: () => this.host.isCurrentAgent(agent),
+            say: e => this.attemptEvent(agent, chat, e),
+            interrupted: () => this.interruptAgent(target, chat),
+            abandoned: () => {
+              this.host.appendIfOpen({ kind: "status", agentId: target, chat, payload: { state: "interrupted" } });
+              this.busySince.delete(target);
+              this.turnModel.delete(target);
+              this.host.kickQueue();
+            },
+          });
         })
         .catch((error) => this.host.dispatchFailed(agent, chat, error))
         // The config file exists for exactly this turn. Cleaned up whether the
@@ -693,6 +720,7 @@ export class RuntimeTurns {
         .finally(() => {
           if (this.preparing.get(target) === preparation) this.preparing.delete(target);
           mcp?.cleanup();
+          this.host.kickQueue();
         });
       return { agentId: target, ...(opts.requestId ? { requestId: opts.requestId } : {}) };
     } catch (error) {
@@ -813,7 +841,31 @@ export class RuntimeTurns {
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");
         this.host.clearChatMoveBriefing(chat);
         memoryBrief?.record();
-        return agent.send(input);
+        return runAttempts(agent, input, agentPolicy(this.host.info.dir, target), {
+          dir: this.host.agentDir(target), budget: () => this.host.enforceBudget(target),
+          current: () => this.host.isCurrentAgent(agent),
+          say: e => this.attemptEvent(agent, chat, e),
+          interrupted: () => this.interruptAgent(target, chat),
+          abandoned: () => {
+            this.host.appendIfOpen({ kind: "status", agentId: target, chat, payload: { state: "interrupted" } });
+            this.busySince.delete(target);
+            this.turnModel.delete(target);
+            this.host.kickQueue();
+          },
+          retryInput: async (failure, signal) => {
+            brain.settled(continuity.runId, new Error(failure));
+            await this.postTurn.get(target);
+            if (signal.aborted || !this.host.isCurrentAgent(agent)) throw new NativeDispatchRejected("retry cancelled");
+            this.host.enforceBudget(target);
+            const retry = brain.capture({ ...request, id: randomUUID() });
+            const next = await brain.prepare(retry.request, cfg.kind, this.host.agentDir(target), options, supplement);
+            if (next.packet.budget.overflow === "mandatory") throw new Error("retry context exceeds the model budget");
+            continuity = await brain.submit(next, signal);
+            runId = continuity.runId;
+            this.preTurnTree.set(target, await contentSnapshot(this.host.agentDir(target)));
+            return { ...input, continuity };
+          },
+        });
       }).then(() => {
         if (!this.host.closed) brain.settled(continuity.runId);
       }, error => {
@@ -910,6 +962,17 @@ export class RuntimeTurns {
     );
     await this.sendMessage(prompt, toAgentId, { chat: err.chat ?? MAIN_CHAT });
     return { agentId: toAgentId, retried: prompt };
+  }
+
+  /** Policy interruption targets one turn and never pauses user queues or routes. */
+  async interruptAgent(agentId: string, chat: string): Promise<boolean> {
+    if ((this.turnChat.get(agentId) ?? MAIN_CHAT) !== chat) return false;
+    const pending = this.preparing.get(agentId);
+    if (pending) { pending.abort(); return true; }
+    const agent = this.host.agents.get(agentId);
+    if (!agent || !isAdapter(agent) || !(agent.busy() || waitingForSlot(agent))) return false;
+    await agent.interrupt();
+    return true;
   }
 
   async interrupt(

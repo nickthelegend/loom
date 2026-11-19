@@ -8,6 +8,7 @@ import { registerAutomationCli } from "./r4-auto.js";
 import { registerTeamsR4Cli } from "./r4-teams.js";
 import { registerAgenticCli } from "./r4-agentic.js";
 import { registerWorkspaceCommands } from "./r4-workspace.js";
+import { addFromProfile, registerR4Agents } from "./r4-agents.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 import { registerR4Brain } from "./r4-brain.js";
 /**
@@ -3534,7 +3535,9 @@ program
   });
 
 program
-  .command("agents:add <kind>")
+  .command("agents:add [kind]")
+  .usage("<kind> [options] | --profile <name> [options]")
+  .option("--profile <name>", "use a saved agent profile")
   .option("--account <id-or-label>", "CLI account to use (loom accounts)")
   .description("add agent sessions to this project")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
@@ -3549,8 +3552,9 @@ program
   .option("--cmd <command>", 'for acp: the ACP agent command, e.g. "gemini --experimental-acp"')
   .action(
     async (
-      kind: string,
+      kind: string | undefined,
       opts: {
+        profile?: string;
         as?: string;
         account?: string;
         role?: string;
@@ -3564,6 +3568,8 @@ program
         cmd?: string;
       },
     ) => {
+    if (opts.profile) return addFromProfile(kind, { ...opts, profile: opts.profile }, ensureDaemon, currentProject);
+    if (!kind) return fail("specify a kind or --profile");
     const count = Number(opts.count);
     if (!Number.isInteger(count) || count < 1 || count > 8) fail("--count must be an integer from 1 to 8");
     const client = await ensureDaemon();
@@ -5502,6 +5508,7 @@ registerAutomationCli(program, ensureDaemon, currentProject);
 registerTeamsR4Cli(program, ensureDaemon, currentProject);
 registerAgenticCli(program);
 registerWorkspaceCommands(program);
+registerR4Agents(program, ensureDaemon, currentProject);
 
 async function main() {
   const args = process.argv.slice(2);

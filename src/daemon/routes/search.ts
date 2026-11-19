@@ -18,8 +18,12 @@ export function registerSearchRoutes(app: Express, withRuntime: WithRuntime): vo
   app.get(
     "/api/projects/:id/chats/search",
     withRuntime(async (rt, req, res) => {
+      // Explicit in-chat search includes archived history; global search uses filters.
+      const allowed = new Set(rt.chats().filter(c => req.query.chat || (req.query.archived === "1" ? c.archived : !c.archived))
+        .filter(c => !req.query.label || c.labels?.some(l => l.name === req.query.label)).map(c => c.id));
+      const log = { list: (opts: Parameters<typeof rt.log.list>[0]) => rt.log.list(opts).filter(e => allowed.has(e.chat ?? "main")) };
       res.json(
-        searchChats(rt.log, String(req.query.q ?? ""), {
+        searchChats(log, String(req.query.q ?? ""), {
           ...(req.query.chat ? { chat: String(req.query.chat) } : {}),
         }),
       );

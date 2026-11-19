@@ -9,6 +9,7 @@ export function addAgents(pid, kind){
     scrim.className = "scrim cfscrim";
     scrim.innerHTML = '<form class="modal cfmodal" role="dialog" aria-modal="true" aria-label="Add agents">' +
       '<div class="cft">Add ' + esc(kind) + '</div>' +
+      '<label class="cflab" for="addprofile">Profile<select class="cfin" id="addprofile"><option value="">Custom settings</option></select></label>' +
       '<label class="cflab" for="addmodel">Model<input class="cfin" id="addmodel" list="addmodels" placeholder="' +
         (kind === "model" ? 'provider/model' : 'Default model') + '" autocomplete="off" spellcheck="false"' + (kind === "model" ? ' required' : '') + '>' +
         '<datalist id="addmodels"></datalist></label>' +
@@ -41,6 +42,7 @@ export function addAgents(pid, kind){
       submit.disabled = true;
       modalErr(scrim, "");
       var body = { kind: kind, count: n };
+      var profile = scrim.querySelector("#addprofile").value; if (profile) body.profile = profile;
       if (selected) body.model = selected;
       var acct = scrim.querySelector("#addaccount");
       if (acct && acct.value) body.account = acct.value;
@@ -62,6 +64,12 @@ export function addAgents(pid, kind){
         scrim.querySelector("#addaccountrow").style.display = "";
       }).catch(function(){});
     }
+    api("/api/profiles").then(function(j){
+      var choices = j.profiles.filter(function(p){ return p.kind === kind; });
+      var picker = scrim.querySelector("#addprofile");
+      picker.innerHTML += choices.map(function(p){ return '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>'; }).join("");
+      picker.onchange = function(){ var p = choices.find(function(p){ return p.name === picker.value; }); if (p) model.value = p.model || ""; };
+    }).catch(function(){});
     model.focus();
   });
 }
