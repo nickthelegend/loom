@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { addFromProfile, registerR4Agents } from "./r4-agents.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 /**
  * loom — one CLI for all your coding agents.
@@ -3524,7 +3525,9 @@ program
   });
 
 program
-  .command("agents:add <kind>")
+  .command("agents:add [kind]")
+  .usage("<kind> [options] | --profile <name> [options]")
+  .option("--profile <name>", "use a saved agent profile")
   .option("--account <id-or-label>", "CLI account to use (loom accounts)")
   .description("add agent sessions to this project")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
@@ -3539,8 +3542,9 @@ program
   .option("--cmd <command>", 'for acp: the ACP agent command, e.g. "gemini --experimental-acp"')
   .action(
     async (
-      kind: string,
+      kind: string | undefined,
       opts: {
+        profile?: string;
         as?: string;
         account?: string;
         role?: string;
@@ -3554,6 +3558,8 @@ program
         cmd?: string;
       },
     ) => {
+    if (opts.profile) return addFromProfile(kind, { ...opts, profile: opts.profile }, ensureDaemon, currentProject);
+    if (!kind) return fail("specify a kind or --profile");
     const count = Number(opts.count);
     if (!Number.isInteger(count) || count < 1 || count > 8) fail("--count must be an integer from 1 to 8");
     const client = await ensureDaemon();
@@ -5481,6 +5487,8 @@ program.command("completion")
     if (shell === "candidates") console.log(completionWords(program, expandAlias(words, readAliases(), program.commands.map(c => c.name())), Object.keys(readAliases())).join("\n"));
     else console.log(completionScript(shell));
   });
+
+registerR4Agents(program, ensureDaemon, currentProject);
 
 async function main() {
   const args = process.argv.slice(2);

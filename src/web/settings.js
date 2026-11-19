@@ -1,3 +1,4 @@
+import { mountSessionSettings } from "./agents-r4.js";
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -406,6 +407,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      mountSessionSettings(pane, pid);
       bindSeg("devmode", function(v){
         setDevMode(v === "dev");
         toast(v === "dev" ? "Developer mode on \u2014 every tool is back" : "Simple mode \u2014 just what you need");

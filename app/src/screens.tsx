@@ -1,3 +1,4 @@
+import { R4AgentSessions } from "./r4-agents";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -1619,6 +1620,7 @@ export function ProjectScreen(props: {
 
       {tab === "thread" ? (
         <>
+          <R4AgentSessions creds={creds} project={project} chat={chatId} unread={unreadId} events={events} onChat={setChatId} onChanged={() => { refreshProject(); reloadChats(); }} />
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
           {(
             <ScrollView

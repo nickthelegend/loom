@@ -227,7 +227,9 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
   app.get(
     "/api/projects/:id/chats",
     withRuntime(async (rt, _req, res) => {
-      res.json({ chats: rt.chats() });
+      const chats = rt.chats().filter(c => _req.query.archived === undefined || (_req.query.archived === "1" ? c.archived : !c.archived))
+        .filter(c => !_req.query.label || c.labels?.some(l => l.name === _req.query.label));
+      res.json({ chats });
     }),
   );
 

@@ -1,3 +1,4 @@
+import { registerAgentsR4 } from "./routes/agents-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -616,6 +617,7 @@ export class LoomDaemon {
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
+    registerAgentsR4(app, createRuntimeHandler(ctx), ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
     registerModelRoutingRoutes(app, withRuntime);

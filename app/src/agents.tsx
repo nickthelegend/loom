@@ -86,6 +86,7 @@ export function AgentIcon(props: { kind: string; size?: number }) {
 }
 
 function stateOf(a: AgentStatus, holder: string | null): { text: string; color: string } {
+  if ((a as AgentStatus & { asleep?: boolean }).asleep) return { text: "Asleep", color: T.dim };
   if (a.enabled === false) return { text: "off", color: T.faint };
   if (!a.available) return { text: "not installed", color: T.faint };
   if (a.busy) return { text: "working", color: T.ok };
