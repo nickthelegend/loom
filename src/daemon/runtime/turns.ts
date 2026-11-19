@@ -1,3 +1,5 @@
+import { enforceCostBudget } from "../../core/cost-r4/budgets.js";
+import { prepareCostTurn } from "../../core/cost-r4/turns.js";
 import { resolveModel, enforceModelCap } from "../../core/model-routing.js";
 import { draftCommit, selectChatBranch } from "../../core/git-review.js";
 import { branchBriefing } from "../../core/chat-branches.js";
@@ -409,6 +411,7 @@ export class RuntimeTurns {
   async steer(text: string, agentId?: string, opts: { chat?: string; by?: string } = {}): Promise<{
     agentId: string; steered: boolean; reason: string;
   }> {
+    enforceCostBudget(this.host, opts.chat ?? MAIN_CHAT);
     const chat = opts.chat ?? MAIN_CHAT;
     this.host.assertChatWritable(chat);
     if (!text.trim()) throw new Error("missing text");
@@ -444,8 +447,22 @@ export class RuntimeTurns {
     if (branchPolicy) this.branchDispatch = true;
     this.sendingChats.set(chat, (this.sendingChats.get(chat) ?? 0) + 1);
     try {
-      if (branchPolicy) await this.settleBranches();
-      return await this.send(text, agentId, opts);
+      // Cost preparation can await a model catalog. Own the target before that
+      // first yield, just as send owns it while checking asynchronous model caps.
+      const target = agentId ?? this.host.chatBinding(chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+      const ownsPreparation = !this.busySince.has(target);
+      if (ownsPreparation) this.busySince.set(target, Date.now());
+      let prepared;
+      try {
+        if (branchPolicy) await this.settleBranches();
+        prepared = await prepareCostTurn(this.host, agentId, opts);
+      } finally {
+        if (ownsPreparation) this.busySince.delete(target);
+      }
+      opts = prepared.opts;
+      const result = await this.send(text, agentId, opts);
+      prepared.accepted();
+      return result;
     }
     finally {
       if (branchPolicy) this.branchDispatch = false;

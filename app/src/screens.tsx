@@ -1,3 +1,4 @@
+import { R4CostMenu } from "./r4-cost";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -1521,6 +1522,7 @@ export function ProjectScreen(props: {
             {`$${presentation.costUsd.toFixed(4)} · ${presentation.tokens} tokens · ${presentation.turns} turns`}
           </Text>
         </TouchableOpacity>
+        <R4CostMenu creds={creds} projectId={project.id} chat={chatId} />
         <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Price overrides in USD per million tokens through `loom prices`, `/api/prices`, and Settings → Models, shared by existing estimates without inventing unknown prices (#452).
+- Export existing usage breakdowns by agent, model, chat or day with date filters, JSON/CSV CLI and API output, a Usage download, and phone sharing; exports include every chat (#452).
+- Per-chat spend caps through `loom chat:budget`, the project API and web/phone chat cost menus, with a needs-you state and Raise action before another turn starts (#452).
+- Calendar-month project budgets with an 80% warning, month-end run-rate projection, CLI controls, and progress bars in web and phone Usage (#452).
+- Per-project spend alert preferences in Settings and `loom budget:alerts`, delivering agent, chat, daily model and monthly warnings/pauses through configured Slack, Discord, SMTP or paired-phone push destinations (#452).
+- What-if token repricing with `loom costs:whatif`, the project API and “On another model” chat controls on web and phone, preserving unknown-price markers (#452).
+- Extend existing cache-hit percentages with per-model money saved at known cache prices in Usage, `loom costs --cache`, CSV exports and phone usage bars (#452).
+- Compare model prices, catalog context sizes, last health latency, recorded finish rates and average costs through `loom models:compare` and the web model picker (#452).
+- Extend existing recorded standings and saved fleets with budget-aware `loom fleets:suggest`, `/api/fleets/suggest`, and web/phone fleet-editor suggestions with a reason for each pick (#452).
+- Opt-in Saver mode at a chosen share of daily or monthly spend, selecting a named alias only when there is no explicit agent, chat or turn model; configure it on web/phone or `loom budget:saver`, with a composer indicator and thread note (#452).
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

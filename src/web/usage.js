@@ -1,3 +1,4 @@
+import { observeCostEvent } from "./cost-r4.js";
 /**
  * The context meter on a native agent's chip: tokens in context against the
  * model's window, "compacting…" while the harness compacts, and the provider
@@ -13,6 +14,7 @@ var CLAUDE_WINDOWS = { five_hour: "5-hour", seven_day: "weekly", seven_day_opus:
 
 /** Fold one event into the project's agent statuses. True when a meter changed. */
 function observeUsage(project, e){
+  if (e) observeCostEvent(project, e);
   if (!project || !e || !e.agentId) return false;
   var agent = null;
   project.agents.forEach(function(a){ if (a.id === e.agentId) agent = a; });

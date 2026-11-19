@@ -1,3 +1,4 @@
+import { R4SaverChip } from "./r4-cost";
 import { useEffect, useState } from "react";
 import { Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, type AgentStatus, type Creds } from "./api";
@@ -17,7 +18,7 @@ export function ModelEstimateLine(props: { creds: Creds; projectId: string; agen
     }, 250);
     return () => { stale = true; clearTimeout(timer); };
   }, [props.creds, props.projectId, props.agentId, props.chat, props.text, props.model]);
-  return line ? <Text accessibilityLiveRegion="polite" style={{ color: T.dim, fontSize: 11.5, paddingHorizontal: 12 }}>{line}</Text> : null;
+  return <><R4SaverChip creds={props.creds} projectId={props.projectId} chat={props.chat} />{line ? <Text accessibilityLiveRegion="polite" style={{ color: T.dim, fontSize: 11.5, paddingHorizontal: 12 }}>{line}</Text> : null}</>;
 }
 
 export function ModelRoutingSheet(props: { creds: Creds; projectId: string; agent: AgentStatus | null; onChanged: () => void }) {
