@@ -1,8 +1,9 @@
+import { Text } from "./r4-phone/preferences";
 /** An agent's reply on a phone: the blocks markdown-model.ts parses, drawn. */
 
 import * as Clipboard from "expo-clipboard";
 import { useState } from "react";
-import { Linking, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Linking, ScrollView, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
 import { type Block, type Inline, parse } from "./markdown-model";
 import { T, radii } from "./theme";

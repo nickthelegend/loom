@@ -1,7 +1,8 @@
+import { TriggerEditor } from "./r4-phone/trigger-editor";
 /**
  * Triggers, on the phone (#361): every schedule and webhook in the project, when each runs next,
  * how its last runs went, and the two things you'd want from a phone — Run now and Pause/Resume.
- * Adding, editing and removing stay on the computer (the daemon refuses them from a phone).
+ * Owner phones can also create and edit schedules and webhooks.
  */
 
 import { IntegrationsPanel } from "./integrations";
@@ -63,6 +64,7 @@ export function TriggersView(props: { creds: Creds; projectId: string; onOpenCha
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, gap: spacing.sm }}
       refreshControl={<RefreshControl refreshing={false} onRefresh={() => void load()} tintColor={T.dim} />}>
+      <TriggerEditor creds={props.creds} project={props.projectId} onSaved={() => void load()} />
       <IntegrationsPanel creds={props.creds} projectId={props.projectId} />
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
       {data === null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 24 }} /> : null}
@@ -70,7 +72,7 @@ export function TriggersView(props: { creds: Creds; projectId: string; onOpenCha
         <View style={{ padding: spacing.md, borderRadius: radii.card, borderWidth: 1, borderColor: T.line, gap: 6 }}>
           <Text style={{ color: T.text, fontSize: 15, fontWeight: "700" }}>No triggers yet</Text>
           <Text style={{ color: T.dim, fontSize: 13, lineHeight: 19 }}>
-            A trigger starts a turn on its own — every morning, or when CI fails. Add one on your computer (Triggers in the project menu, or `loom triggers add`); it shows up here to run or pause.
+            A trigger starts a turn on its own — every morning, or when CI fails. Create one here from an owner phone, or on your computer.
           </Text>
         </View>
       )}
@@ -89,6 +91,7 @@ export function TriggersView(props: { creds: Creds; projectId: string; onOpenCha
               <Switch value={t.enabled} disabled={busy === t.id + ":switch"} onValueChange={(v) => void toggle(t, v)}
                 accessibilityLabel={t.enabled ? `Pause ${t.name}` : `Resume ${t.name}`} trackColor={{ true: T.ok, false: T.line2 }} />
             </View>
+            <TriggerEditor creds={props.creds} project={props.projectId} trigger={t} onSaved={() => void load()} />
             <Text style={{ color: T.dim, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>{t.prompt}</Text>
             {runs.length > 0 && (
               <View style={{ gap: 3 }}>

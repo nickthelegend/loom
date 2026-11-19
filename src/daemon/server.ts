@@ -1,3 +1,4 @@
+import { registerPhoneRoutes } from "./routes/phone-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -615,6 +616,7 @@ export class LoomDaemon {
     registerPairingRoutes(app, ctx);
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
+    registerPhoneRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);

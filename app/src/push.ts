@@ -1,3 +1,4 @@
+import { pushRegistration } from "./r4-phone/push-state";
 /**
  * Register this device for pushes: ask permission, fetch the Expo push
  * token, hand it to the daemon (attached to our paired-client record).
@@ -9,7 +10,7 @@ import { haptic } from "./haptics";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { AppState, Platform } from "react-native";
-import { api, kv, type Creds } from "./api";
+import { phoneApi as api, kv, type Creds } from "./api";
 
 /** What the daemon can push, each switchable from the account sheet (daemon push.ts PUSH_CATEGORIES). */
 export const PUSH_KINDS = [
@@ -98,13 +99,10 @@ export function onApprovalAction(cb: (data: Record<string, unknown>, decision: "
 export type PushState = "on" | "denied" | "unavailable";
 
 /** How the last registration went (App registers on launch), for the account sheet. */
-let lastState: PushState | null = null;
-export const lastPushState = () => lastState;
-
-export async function enablePush(creds: Creds): Promise<PushState> {
-  lastState = await register(creds);
-  return lastState;
-}
+const registration = pushRegistration(register);
+export const lastPushState = registration.last;
+export const enablePush = registration.active;
+export const registerPush = registration.background;
 
 async function register(creds: Creds): Promise<PushState> {
   if (Platform.OS === "web") return "unavailable";
@@ -120,10 +118,11 @@ async function register(creds: Creds): Promise<PushState> {
     if (!perm.granted) return "denied";
     const projectId = easProjectId();
     const token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)).data;
-    await api(creds, "/api/push/register", {
+    const registered = await api<{ clientId?: string }>(creds, "/api/push/register", {
       method: "POST",
       body: JSON.stringify({ token, platform: Platform.OS, kinds: await loadPushKinds(), groupByProject: Constants.appOwnership !== "expo" }),
     });
+    if (registered.clientId) await kv.set("loom.push-client." + creds.token, registered.clientId);
     return "on";
   } catch {
     // Push is optional — the app works fully without it.

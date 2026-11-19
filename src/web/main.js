@@ -205,3 +205,6 @@ import { isSplitShortcut } from './splits.js';
       route();
     }).catch(function(err){ toast(err.message); route(); });
   }
+
+import { registerPhoneWeb } from './r4-phone.js';
+registerPhoneWeb();

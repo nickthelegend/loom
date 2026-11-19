@@ -124,9 +124,17 @@ export function onAccent(fn: (a: Accent) => void): () => void { accentListeners.
 export function pickAccent(a: Accent): void { for (const fn of accentListeners) fn(a); }
 export function setAccent(value: unknown): void { accent = accentOf(value); }
 
+let highContrast = false;
+let appliedContrast = false;
+export function setHighContrast(value: boolean): void { highContrast = value; }
 export function setScheme(next: "dark" | "light"): boolean {
-  if (next === scheme && accent === appliedAccent) return false;
+  if (next === scheme && accent === appliedAccent && highContrast === appliedContrast) return false;
   Object.assign(T, next === "light" ? LIGHT : DARK);
+  appliedContrast = highContrast;
+  if (highContrast) {
+    const light = next === "light";
+    Object.assign(T, { text: light ? "#000000" : "#ffffff", dim: light ? "#292929" : "#eeeeee", faint: light ? "#333333" : "#dddddd", line: light ? "#555555" : "#999999", line2: light ? "#444444" : "#aaaaaa", gitAdd: light ? "#145522" : "#9effae", gitDel: light ? "#8c1420" : "#ff9ba7" });
+  }
   scheme = next;
   appliedAccent = accent;
   const color = ACCENTS[accent][next === "light" ? 1 : 0];

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerPhoneCommands } from "./r4-phone.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 /**
  * loom — one CLI for all your coding agents.
@@ -5481,6 +5482,8 @@ program.command("completion")
     if (shell === "candidates") console.log(completionWords(program, expandAlias(words, readAliases(), program.commands.map(c => c.name())), Object.keys(readAliases())).join("\n"));
     else console.log(completionScript(shell));
   });
+
+registerPhoneCommands(program);
 
 async function main() {
   const args = process.argv.slice(2);
