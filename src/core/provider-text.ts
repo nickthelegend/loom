@@ -4,6 +4,8 @@
  * jobs (the memory extractor). `pool:free` takes the next few free models in
  * the rotation, so a busy one doesn't fail the job, and stops at the daily cap.
  */
+import { resolveModel, enforceModelCap, recordModelUsage } from "./model-routing.js";
+
 
 import { claudeText } from "./claude-cli.js";
 import { countFreeRequest, freeModels, isDailyCap, isPool, noteCapped, resetAt, rest, rotation } from "./free-pool.js";
@@ -18,6 +20,8 @@ export function providerModel(ref: string): { provider: string; model: string } 
 }
 
 export async function providerText(ref: string, prompt: string, opts: { timeoutMs?: number; fetchImpl?: typeof fetch; signal?: AbortSignal; maxTokens?: number } = {}): Promise<string> {
+  ref = resolveModel(ref);
+  await enforceModelCap(ref);
   const pm = providerModel(ref);
   if (!pm) throw new Error(`${ref} isn't a configured provider/model`);
   const p = resolveProvider(pm.provider)!;
@@ -34,7 +38,8 @@ export async function providerText(ref: string, prompt: string, opts: { timeoutM
     });
     if (p.free(model) || isPool(pm.model)) countFreeRequest();
     if (res.ok) {
-      const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      recordModelUsage(`${p.id}/${model}`, body.usage);
       const text = body.choices?.[0]?.message?.content ?? "";
       if (text.trim()) return text;
       last = `${model} returned nothing`;
@@ -58,5 +63,6 @@ export async function providerText(ref: string, prompt: string, opts: { timeoutM
  * provider, anything else ("haiku", "sonnet") is a Claude alias.
  */
 export function helperText(model: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<string> {
+  model = resolveModel(model);
   return providerModel(model) ? providerText(model, prompt, opts) : claudeText(prompt, { model, ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) });
 }

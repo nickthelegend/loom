@@ -4,9 +4,8 @@
 [![npm](https://img.shields.io/npm/v/@loompad/cli)](https://www.npmjs.com/package/@loompad/cli)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-> **Loom 2 is here.** Every agent, every model, as many as you want: two Claude Code on Opus next
-> to two Codex on GPT‑5.6 in one Orchestra run, steered from your desk or your phone, with a
-> scoreboard of which model wins, and skills and an MCP server so agents can drive Loom themselves.
+> **Loom 2.1 is here.** Orchestra plan previews, task retries and saved recipes; model routing
+> controls, memory review, offline phone sending, and more ways to work with your team.
 > Try it with no agents and no keys:
 >
 > ```bash
@@ -14,7 +13,7 @@
 > ```
 >
 > [loompad.tech](https://loompad.tech) · [download](https://loompad.tech/download) ·
-> [phone app](https://loompad.tech/mobile) · [what's new](docs/release-notes/v2.0.0.md) ·
+> [phone app](https://loompad.tech/mobile) · [what's new](docs/release-notes/v2.1.0.md) ·
 > [how 2.0 was chosen](docs/v2/LOOM-2.md)
 
 **The shared-memory layer for AI dev environments.** Every coding agent — Claude Code,

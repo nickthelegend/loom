@@ -3,6 +3,7 @@
  * each (or an Orchestra goal), linked back to the issue when its PR opens. Started ones open their chat.
  */
 
+import { INTAKE_SOURCES } from "./integrations-model";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { getIntake, startIntake, type Creds, type IntakeIssue } from "./api";
@@ -11,7 +12,7 @@ import { Sheet } from "./observatory";
 import { T, radii, spacing } from "./theme";
 
 export function IntakeSheet(props: { visible: boolean; creds: Creds; projectId: string; onClose: () => void; onOpenChat: (chat: string, title: string) => void }) {
-  const [source, setSource] = useState<"github" | "linear">("github");
+  const [source, setSource] = useState<"github" | "linear" | "jira">("github");
   const [mode, setMode] = useState<"chat" | "orchestra">("chat");
   const [issues, setIssues] = useState<IntakeIssue[] | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -42,8 +43,7 @@ export function IntakeSheet(props: { visible: boolean; creds: Creds; projectId: 
   return (
     <Sheet title="My issues" visible={props.visible} onClose={props.onClose}>
       <View style={{ flexDirection: "row", gap: 6, paddingHorizontal: spacing.md, paddingBottom: 8 }}>
-        {pill("GitHub", source === "github", () => setSource("github"))}
-        {pill("Linear", source === "linear", () => setSource("linear"))}
+        {INTAKE_SOURCES.map(s => pill(({ github: "GitHub", linear: "Linear", jira: "Jira" })[s], source === s, () => setSource(s)))}
       </View>
       <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ paddingHorizontal: spacing.md, gap: 6 }}>
         {err ? <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text> : issues === null ? <ActivityIndicator color={T.dim} /> :

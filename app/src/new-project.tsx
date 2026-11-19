@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { cloneProject, createProject, getProjectJob, getSetupAgents, tryDemo, type Creds, type SetupAgent } from "./api";
+import { cloneProject, createProject, getStarterTemplates, type StarterTemplate, getProjectJob, getSetupAgents, tryDemo, type Creds, type SetupAgent } from "./api";
 import { TAP } from "./components";
 import { Sheet } from "./observatory";
 import { T, radii, spacing } from "./theme";
@@ -22,6 +22,8 @@ export function NewProjectSheet(props: {
   onCreated: (projectId: string) => void;
 }) {
   const [mode, setMode] = useState<"new" | "clone">("new");
+  const [template, setTemplate] = useState("");
+  const [templates, setTemplates] = useState<StarterTemplate[]>([]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [agents, setAgents] = useState<SetupAgent[] | null>(null);
@@ -35,7 +37,8 @@ export function NewProjectSheet(props: {
     open.current = props.visible;
     if (!props.visible) return;
     setName(""); setUrl(""); setErr(null); setBusy(false); setProgress(""); setPicks({});
-    setAgents(null);
+    setAgents(null); setTemplate("");
+    void getStarterTemplates(props.creds).then(r => { if (open.current) setTemplates(r.templates); }).catch(e => { if (open.current) setErr(String(e.message)); });
     void getSetupAgents(props.creds)
       // the demo agent is for `Try a demo project`, not for a real one
       .then((r) => { if (open.current) setAgents(r.agents.filter((a) => a.found && a.kind !== "demo")); })
@@ -57,7 +60,7 @@ export function NewProjectSheet(props: {
       if (picks.model?.on && !picks.model.model.trim()) return setErr("Model (API) needs a model id — it can't answer without one.");
       setBusy(true);
       try {
-        const { project } = await createProject(props.creds, name.trim(), chosen);
+        const { project } = await createProject(props.creds, name.trim(), chosen, template || undefined);
         props.onCreated(project.id);
       } catch (e) { fail(e); }
       return;
@@ -127,6 +130,13 @@ export function NewProjectSheet(props: {
 
         {mode === "new" && (
           <View style={{ gap: 6 }}>
+            {label("STARTER TEMPLATE")}
+            {[{ name: "", description: "Empty project" }, ...templates].map(t => (
+              <TouchableOpacity key={t.name} disabled={busy} onPress={() => setTemplate(t.name)} accessibilityRole="radio" accessibilityState={{ checked: template === t.name }}
+                style={{ minHeight: TAP, padding: 12, borderRadius: radii.key, backgroundColor: template === t.name ? T.raised : "transparent", borderWidth: 1, borderColor: T.line }}>
+                <Text style={{ color: T.text }}>{t.name ? `${t.name} — ${t.description}` : t.description}</Text>
+              </TouchableOpacity>
+            ))}
             {label("WHO WORKS HERE")}
             {agents === null ? <ActivityIndicator color={T.dim} /> : agents.length === 0 ? (
               <Text style={{ color: T.dim, fontSize: 13 }}>No agent CLIs found on your computer — the project starts empty; add one later.</Text>

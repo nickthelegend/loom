@@ -155,3 +155,20 @@ export function permissionMenu(kind: string): Array<{ mode: PermissionMode } & P
   if (!p) return null;
   return PERMISSION_MODES.map((mode) => ({ mode, ...p.modes[mode] }));
 }
+
+/** A visible label must not claim sandboxing when a config explicitly disabled it. */
+export function permissionIndicator(kind: string, options?: Record<string, unknown>): string {
+  const mode = permissionFor(kind, options);
+  if (kind === "claude-code" && options?.permissionMode) {
+    const native = options.permissionMode;
+    if (native === "bypassPermissions") return "Bypass · no approvals";
+    if (native === "plan") return "Plan · read-only tools";
+    if (native === "default") return "Ask · tool permissions";
+  }
+  const name = mode === "bypass" ? "Bypass" : mode === "ask" ? "Ask" : "Auto";
+  if (kind === "codex") {
+    const sandbox = options?.sandbox ?? (mode === "bypass" ? "danger-full-access" : mode === "ask" ? "read-only" : "workspace-write");
+    return `${name} · ${sandbox === "workspace-write" ? "workspace sandbox" : sandbox === "read-only" ? "read-only sandbox" : "no sandbox"}`;
+  }
+  return `${name} · ${mode === "bypass" ? "no approvals" : "tool permissions"}`;
+}
