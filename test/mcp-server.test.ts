@@ -164,7 +164,8 @@ describe("MCP tools", () => {
   });
 
   it("bounds waits and steers the running turn", async () => {
-    const sent = await call("send", { project, agent: "plannerbot", text: "sleep:400", wait: true, timeoutMs: 1 });
+    // long enough that the steer lands mid-turn even on a slow runner; the bounded wait still times out at once
+    const sent = await call("send", { project, agent: "plannerbot", text: "sleep:5000", wait: true, timeoutMs: 1 });
     expect(sent.result.structuredContent.timedOut).toBe(true);
     expect((await call("steer", { project, agent: "plannerbot", text: "new information" })).result.structuredContent.steered).toBe(true);
     await waitUntil(async () => !(await client.project(project)).project.agents.find(a => a.id === "plannerbot")?.busy);
