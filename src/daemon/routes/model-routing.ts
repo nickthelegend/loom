@@ -1,3 +1,6 @@
+import { canUseSaver } from "../../core/cost-r4/turns.js";
+import { budgetSnapshot } from "../../core/cost-r4/budgets.js";
+import { costSettings } from "../../core/cost-r4/settings.js";
 import type { Express, Request } from "express";
 import { configuredModels, modelHealth, modelUsage, promptEstimate, savedModelHealth, readModelRouting, writeModelRouting } from "../../core/model-routing.js";
 import type { WithRuntime } from "./context.js";
@@ -28,9 +31,12 @@ export function registerModelRoutingRoutes(app: Express, withRuntime: WithRuntim
     const id = agentId ?? bound.agentId ?? rt.baton.holder() ?? rt.config.defaultAgent ?? rt.config.agents[0]?.id;
     const agent = rt.config.agents.find(a => a.id === id);
     if (!agent) return void res.status(404).json({ error: "unknown agent" });
-    const selected = model || (bound.agentId === id ? bound.model : undefined) || String(agent.options?.model ?? "");
+    const explicit = model || (bound.agentId === id ? bound.model : undefined) || String(agent.options?.model ?? "");
+    const candidate = !explicit && costSettings(rt.info.dir).saver ? budgetSnapshot(rt).saver : null;
+    const saver = candidate?.active && await canUseSaver(agent, candidate.model) ? candidate : null;
+    const selected = explicit || (saver?.active ? saver.model : "");
     const estimate = promptEstimate(selected, text, rt.sessionWeight(id, chat)?.tokens ?? 0, Number(agent.options?.maxTokens ?? 1024));
-    res.json({ ...estimate, usage: selected ? await modelUsage(selected) : null });
+    res.json({ ...estimate, ...(saver?.active ? { saver: { alias: saver.alias, model: saver.model } } : {}), usage: selected ? await modelUsage(selected) : null });
   }));
   app.get("/api/projects/:id/agents/:agentId/options", withRuntime(async (rt, req, res) => {
     const agent = rt.config.agents.find(a => a.id === req.params.agentId);

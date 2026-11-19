@@ -1,3 +1,11 @@
+import { R4ProjectTools } from "./r4-onboard";
+import { R4CostMenu } from "./r4-cost";
+import { R4Inbox } from "./r4-review";
+import { R4ChatAnnotations } from "./r4-teams";
+import { ProjectNotesButton } from "./r4-workspace";
+import { R4AgentSessions } from "./r4-agents";
+import { useProjectRail } from "./r4-phone/project-rail";
+import { QuickReplies } from "./r4-phone/quick-replies";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -68,6 +76,7 @@ import { SideSheet } from "./side";
 import { NewProjectSheet } from "./new-project";
 import { GetStartedCard } from "./get-started";
 import { TriggersView } from "./triggers";
+import { AutomationPanel } from "./r4-auto";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
 import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } from "./link-model";
@@ -728,6 +737,7 @@ export function BoardScreen(props: {
           }}
         />
 
+        <R4Inbox creds={props.creds} />
         {/* projects — and + Project, which starts or clones one on the computer (#371) */}
         <View>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -1480,6 +1490,7 @@ export function ProjectScreen(props: {
   const r = project.route;
   const routeActive = r && (r.status === "running" || r.status === "waiting_human");
   const armed = text.trim().length > 0 || attach.items.length > 0;
+  useProjectRail({ tabs: TABS.filter(t => t.key === tab || (t.key === "brain" ? brain.summary.shared && !brain.summary.hidden : t.key === "landing" ? !landing.summary.hidden && (brain.summary.shared || landing.summary.goals > 0 || landing.summary.count > 0) : t.key === "runners" ? runnersTabVisible({ ...runners.summary, shared: brain.summary.shared }) : true)), tab, chat: chatId, selectTab: setTab, selectChat: setChatId, seen, saveSeen });
 
   return (
     <KeyboardAvoidingView
@@ -1521,7 +1532,9 @@ export function ProjectScreen(props: {
             {`$${presentation.costUsd.toFixed(4)} · ${presentation.tokens} tokens · ${presentation.turns} turns`}
           </Text>
         </TouchableOpacity>
+        <R4CostMenu creds={creds} projectId={project.id} chat={chatId} />
         <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
+        <ProjectNotesButton creds={creds} projectId={project.id} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (
@@ -1617,8 +1630,11 @@ export function ProjectScreen(props: {
 
       {err && <Sys color={T.err} text={err} />}
 
+      <R4ProjectTools creds={creds} projectId={project.id} tab={tab} empty={!events.some(e => e.kind === "message")} onPrompt={setText} />
+      {tab === "triggers" && <AutomationPanel creds={creds} projectId={project.id} />}
       {tab === "thread" ? (
         <>
+          <R4AgentSessions creds={creds} project={project} chat={chatId} unread={unreadId} events={events} onChat={setChatId} onChanged={() => { refreshProject(); reloadChats(); }} />
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
           {(
             <ScrollView
@@ -2106,7 +2122,9 @@ export function ProjectScreen(props: {
               ) : null;
             })()}
             <ModelEstimateLine creds={creds} projectId={project.id} agentId={selectedAgent?.id} chat={chatId} text={text} model={chats.find(c => c.id === chatId)?.model || selectedAgent?.model} />
+            <QuickReplies onUse={setText} />
             <AttachBar items={attach.items} onRemove={attach.remove} />
+            <R4ChatAnnotations creds={creds} projectId={project.id} chat={chatId} />
             <TeammateMentions creds={creds} projectId={project.id} text={text} onChange={setText} />
             <View
               style={{

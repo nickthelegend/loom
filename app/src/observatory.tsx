@@ -1,3 +1,5 @@
+import { R4Insights } from "./r4-insights";
+import { R4Usage } from "./r4-cost";
 import { diffSummary } from "./git-review-model";
 /**
  * The Observatory, natively.
@@ -272,6 +274,7 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
         ) : (
           <ReplayView snapshots={snapshots} decisions={decisions} spans={spans} />
         )}
+        {view === "metrics" ? <R4Insights creds={creds} projectId={project.id} /> : null}
       </ScrollView>
 
       <TriageSheet
@@ -302,6 +305,7 @@ function UsageView(props: { creds: Creds; project: Project }) {
   const pct = (x: number, of: number) => (of ? `${Math.round((x / of) * 100)}%` : "—");
   return (
     <>
+      <R4Usage creds={props.creds} projectId={props.project.id} />
       <Segmented options={USAGE_RANGES} value={days} onChange={setDays} accent={T.primaryDim} />
       <Load res={res} what="usage">
         {() => {

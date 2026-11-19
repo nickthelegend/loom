@@ -155,7 +155,7 @@ describe("2.1 API and CLI configuration", () => {
     const made = await client.newProject({ name: "Library starter", template: "library", agents: [{ kind: "echo" }] });
     expect(fs.existsSync(path.join(made.project.dir, "index.test.js"))).toBe(true);
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: made.project.dir, encoding: "utf8" })).toBe("");
-    expect((await client.initTemplates()).templates.map(t => t.name)).toEqual(["web", "node", "library"]);
+    expect((await client.initTemplates()).templates.map(t => t.name)).toEqual(["web", "node", "library", "api", "cli", "static", "python"]);
   });
   it("validates an invalid disk edit even while the runtime holds a good config", async () => {
     const file = path.join(dir, ".loom/config.json"), original = fs.readFileSync(file, "utf8");

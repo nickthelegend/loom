@@ -31,6 +31,8 @@ const loom = (actions: unknown[]) => "Sure.\n```loom\n" + JSON.stringify({ actio
 type Script = (input: SendInput, dir: string, n: number) => string | { text: string; ask?: string } | { silent: true };
 let scripts: Record<string, Script> = {};
 let seatCharges: Record<string, number> = {};
+/** How long an interrupt takes to land: a slow machine's Stop. */
+let interruptDelayMs = 0;
 const turns: Array<{ teammate: string; text: string; briefing: string; instance: string }> = [];
 
 class CrewBot extends AdapterBase {
@@ -39,7 +41,7 @@ class CrewBot extends AdapterBase {
   async available() { return true; }
   async start() {}
   async stop() {}
-  async interrupt() { this.stopped = true; }
+  async interrupt() { if (interruptDelayMs) await new Promise((r) => setTimeout(r, interruptDelayMs)); this.stopped = true; }
   async diff() { return ""; }
   async send(input: SendInput): Promise<void> {
     this._busy = true;
@@ -68,7 +70,7 @@ class CrewBot extends AdapterBase {
 registerAgentKind("crewbot", (cfg, dir) => new CrewBot(cfg.id, "crewbot", dir));
 
 let rt: ProjectRuntime | undefined;
-afterEach(async () => { await rt?.close(); rt = undefined; scripts = {}; seatCharges = {}; turns.length = 0; });
+afterEach(async () => { await rt?.close(); rt = undefined; scripts = {}; seatCharges = {}; turns.length = 0; interruptDelayMs = 0; });
 
 async function project(crew = true) {
   const dir = tmpDir("crew");
@@ -371,6 +373,23 @@ describe("a crew works a goal", () => {
     const tested = rt.log.list({ kinds: ["crew"] }).filter((e) => e.payload.phase === "tested").map((e) => [e.payload.teammate, e.payload.result]);
     expect(tested).toEqual([["loom", "fail"], ["loom", "pass"]]);
     expect(rt.log.list({ kinds: ["crew"] }).find((e) => e.payload.phase === "tested" && e.payload.result === "pass")!.payload.log).toContain("all-green");
+  });
+
+  it("a goal said while Stop is still settling waits for it, and only the stopped goal is announced as stopped", async () => {
+    const { rt, crew } = await project();
+    scripts = { lead: (input) => (input.text.includes("pick a palette") ? { text: "", ask: "which colour?" } : { silent: true }) };
+    const first = await rt.crews.goal(crew!.id, "think it over");
+    await waitUntil(() => turns.some((t) => t.teammate === "lead"));
+    interruptDelayMs = 400;
+    const stopping = rt.crews.stop(crew!.id);
+    expect(first.status).toBe("stopped"); // already reads as stopped, before the turn has settled
+    expect(await rt.crews.say(crew!.id, "pick a palette")).toMatchObject({ routed: "goal" });
+    await stopping;
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "waiting_human", { timeoutMs: 20_000 });
+    const second = rt.crews.get(crew!.id).state.goal!;
+    expect(second.id).not.toBe(first.id);
+    const stopped = rt.log.list({ kinds: ["crew"] }).filter((e) => e.payload.phase === "stopped").map((e) => e.payload.goalId);
+    expect(stopped).toEqual([first.id]);
   });
 
   it("refuses a crew that can't work, and a goal while one is running", async () => {

@@ -7,6 +7,8 @@ export interface PresenceMessage {
   type: "presence";
   chat: string;
   typing?: boolean;
+  following?: boolean;
+  view?: { scroll: number; file?: string; preview?: string };
 }
 
 export interface PresencePerson {
@@ -16,6 +18,8 @@ export interface PresencePerson {
   name: string;
   kind: "owner" | "device" | "guest";
   typing: boolean;
+  following?: boolean;
+  view?: { chat: string; scroll: number; file?: string; preview?: string };
   /** Unix milliseconds when this socket entered this chat; heartbeats preserve it. */
   since: number;
 }

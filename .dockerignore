@@ -7,6 +7,7 @@ desktop
 hardware
 videos
 docs
+!docs/help
 test
 .git
 .env

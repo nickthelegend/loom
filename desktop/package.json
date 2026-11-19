@@ -28,6 +28,9 @@
     },
     "files": [
       "main.js",
+      "tray.js",
+      "tray-host.js",
+      "build/icon.png",
       "webview-guard.js",
       "shortcuts.js",
       "loom-app.js",

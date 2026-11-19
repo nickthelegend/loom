@@ -16,6 +16,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig*.json ./
 COPY src ./src
+COPY templates ./templates
+COPY docs/help ./docs/help
 COPY scripts/build-web.mjs scripts/prune-dist.mjs ./scripts/
 RUN npm run build && npm prune --omit=dev
 
@@ -32,6 +34,8 @@ RUN useradd -m -s /bin/bash loom && mkdir -p /loom && chown loom:loom /loom
 COPY --from=build /src/dist /opt/loom/dist
 COPY --from=build /src/node_modules /opt/loom/node_modules
 COPY --from=build /src/package.json /opt/loom/package.json
+COPY --from=build /src/templates /opt/loom/templates
+COPY --from=build /src/docs/help /opt/loom/docs/help
 RUN ln -s /opt/loom/dist/cli/index.js /usr/local/bin/loom && chmod +x /opt/loom/dist/cli/index.js
 USER loom
 ENV LOOM_HOME=/loom

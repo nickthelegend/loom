@@ -1,3 +1,4 @@
+import { enforceCostBudget, type CostHost } from "../../core/cost-r4/budgets.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import { blockedBy } from "../../core/goal-lanes.js";
 import { OrchestraEngine } from "../../core/orchestra.js";
@@ -19,9 +20,10 @@ import type {
 import { isAdapter } from "../../types.js";
 import { CLOCK_TICK_MS, questionHold } from '../runtime-support.js';
 import type { TurnOptions, TurnResult } from "./turns.js";
+import { automationHold } from "../../core/auto-r4/state.js";
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
-export interface RuntimeQueueHost {
+export interface RuntimeQueueHost extends CostHost {
   queue: PromptQueue;
   agents: ReadonlyMap<string, AnyAgent>;
   routeState: () => RouteState | null;
@@ -82,6 +84,10 @@ export class RuntimeQueue {
 
   /** Why the head can't go yet, or null when it can. */
   queueBlocker(item: QueueItem): string | null {
+    if (item.automation || item.when?.kind === "at") {
+      const hold = automationHold();
+      if (hold) return hold;
+    }
     // A condition comes first: a prompt held for 3am isn't waiting on an agent.
     if (this.host.config.brain?.continuity && this.host.busySince.size) return "waiting for the foreground native turn";
     const held = item.when ? this.conditionUnmet(item.when) : null;
@@ -143,7 +149,7 @@ export class RuntimeQueue {
    * a timer that runs when nothing needs it is a battery someone else pays for.
    */
   watchClockConditions(q: QueueState): void {
-    const needsClock = q.items.some((i) => i.when && (i.when.kind === "at" || i.when.kind === "quiet"));
+    const needsClock = q.items.some((i) => i.automation || i.when && (i.when.kind === "at" || i.when.kind === "quiet"));
     if (needsClock && !this.clockTimer) {
       this.clockTimer = setInterval(() => this.kickQueue(), CLOCK_TICK_MS);
       this.clockTimer.unref?.();
@@ -215,12 +221,14 @@ export class RuntimeQueue {
     try {
       await this.dispatchQueued(item);
     } catch (err) {
-      // refused (budget, quarantine, policy, a missing agent): keep it where it
-      // was and stop, so you can edit it or send it elsewhere — never drop it
+      // User prompts stay available to edit. Automation failures enter trigger
+      // history and its circuit breaker rather than freezing the user's queue.
       const message = err instanceof Error ? err.message : String(err);
       if (!this.host.closed) {
-        this.host.queue.unshift(item);
-        this.host.queue.setPaused(true, `the next prompt wasn't sent: ${message}`);
+        if (!item.automation) {
+          this.host.queue.unshift(item);
+          this.host.queue.setPaused(true, `the next prompt wasn't sent: ${message}`);
+        }
         this.host.appendIfOpen({ kind: "error", chat: item.chat, payload: { message: `queued prompt not sent: ${message}` } });
       }
     } finally {
@@ -233,6 +241,7 @@ export class RuntimeQueue {
     const t = item.target;
     if (t.kind === "orchestra") {
       await this.host.orchestra.start({
+        ...t.recipeOptions,
         goal: item.text,
         // A queued goal remembers the thread it was typed in. sendMessage
         // below always honoured that; this branch dropped it (#100).
@@ -245,6 +254,12 @@ export class RuntimeQueue {
       });
       return;
     }
+    if (t.kind === "auto" && t.routeName) {
+      const spec = this.host.config.routes?.[t.routeName];
+      if (!spec) throw new Error(`no saved route "${t.routeName}"`);
+      await this.host.startRoute({ task: item.text, spec, chat: item.chat });
+      return;
+    }
     if (t.kind === "auto" && !item.plan) {
       await this.host.startRoute({ task: item.text, spec: "auto", chat: item.chat });
       return;
@@ -254,6 +269,7 @@ export class RuntimeQueue {
     // A queued prompt goes once. After a restart one task went twice in the same millisecond, and each
     // send cut the other's turn short — five starts and stops in nine seconds (#302).
     if (this.dispatching.has(item.id)) return;
+    enforceCostBudget(this.host, item.chat ?? "main");
     this.dispatching.add(item.id);
     try {
       const holder = this.host.validHolder();

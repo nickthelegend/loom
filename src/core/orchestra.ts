@@ -1,3 +1,7 @@
+import { captureTaskFiles } from "./orchestra-r4/results.js";
+import { control } from "./orchestra-r4/control.js";
+import { TaskChecks } from "./orchestra-r4/check.js";
+import { skipDependents, validatePlan, type RunControls, type TaskControls, type PlanTask } from "./orchestra-r4/model.js";
 import { predictMerge } from "./worktrees.js";
 /**
  * Orchestra — one orchestrator agent, many worker agents, in parallel.
@@ -202,7 +206,7 @@ export function parseWorkerReports(text: string): Omit<OrchestraReport, "at">[] 
   return reports;
 }
 
-export interface OrchestraTask extends OrchestraModel {
+export interface OrchestraTask extends OrchestraModel, TaskControls {
   id: string;
   title: string;
   prompt: string;
@@ -250,7 +254,7 @@ export interface OrchestraTask extends OrchestraModel {
   reported?: boolean;
 }
 
-export interface OrchestraRun {
+export interface OrchestraRun extends RunControls {
   id: string;
   goal: string;
   orchestrator: { agent: string; kind: string } & OrchestraModel;
@@ -385,7 +389,10 @@ export interface LandingState {
 /** How much of a goal's budget may go before it says something. */
 export const BUDGET_WARN_AT = 0.8;
 
-export interface OrchestraStartOptions {
+export interface OrchestraStartOptions extends RunControls {
+  savedTasks?: PlanTask[];
+  savedBase?: string;
+  remapTasks?: boolean;
   goal: string;
   /** agent[@model][:effort][x1]; exactly one orchestrator. Defaults to the host's pick. */
   orchestrator?: string;
@@ -1156,6 +1163,10 @@ export class OrchestraEngine {
     for (const run of this.runs.values()) {
       if (isTerminal(run.status) || run.moving) continue;
       for (const task of run.tasks) {
+        if (task.status === "running" && task.deadlineAt && now >= task.deadlineAt && !task.timedOutAt) {
+          void this.expireTask(run, task, now).catch(() => {});
+          continue;
+        }
         if (task.status !== "running" || task.stalledAt || now - (task.lastProgressAt ?? task.startedAt ?? now) < (run.stallMinutes ?? 10) * 60_000) continue;
         task.stalledAt = now;
         this.emit(run, "task_stalled", { taskId: task.id, task: taskSummary(task) });
@@ -1199,10 +1210,11 @@ export class OrchestraEngine {
     return run;
   }
 
-  async retryTask(runId: string, taskId: string, agent: string): Promise<OrchestraRun> {
+  async retryTask(runId: string, taskId: string, agent: string, extendedMinutes?: number): Promise<OrchestraRun> {
     const run = this.mustGet(runId), task = run.tasks.find(t => t.id === taskId);
     if (!task) throw new Error("no such task in this run");
     const key = `${run.id}/${task.id}`;
+    await this.controlledStops.get(key);
     if (run.moving || run.status === "moved" || run.applied || this.orchestratorBusy.has(run.id) || [...this.retrying].some(k => k.startsWith(`${run.id}/`)) || this.admitting.has(key)) throw new Error("task cannot be retried now");
     if (!["failed", "cancelled", "needs_input", "conflict"].includes(task.status) && !(task.status === "running" && task.stalledAt)) throw new Error("only failed, cancelled, blocked or stalled tasks can be retried");
     const cfg = this.resolveAgent(agent);
@@ -1238,9 +1250,15 @@ export class OrchestraEngine {
       task.error = undefined;
       task.hold = undefined;
       task.stalledAt = undefined;
+      task.skippedReason = undefined;
+      task.timedOutAt = undefined;
+      task.deadlineAt = undefined;
+      task.extendedMinutes = extendedMinutes;
+      task.checkFailures = 0;
       task.finishedAt = undefined;
       task.reported = false;
       run.error = undefined;
+      run.finishedAt = undefined;
       run.summary = undefined;
       run.status = "running";
       run.question = undefined;
@@ -1251,6 +1269,89 @@ export class OrchestraEngine {
     } finally { this.retrying.delete(key); }
   }
 
+  // Orchestra 2.2 delegates user actions; the hooks retain admission and cleanup ownership here.
+  private controlLocks = new Map<string, Mutex>();
+  private skipRequests = new Set<string>();
+  async control(runId: string, action: string, body: Record<string, unknown> = {}): Promise<OrchestraRun> {
+    let lock = this.controlLocks.get(runId);
+    if (!lock) { lock = new Mutex(); this.controlLocks.set(runId, lock); }
+    return lock.run(() => control({
+      get: id => this.mustGet(id),
+      save: (run, phase) => { this.save(run); this.emit(run, phase, { held: run.held }); },
+      schedule: run => this.schedule(run),
+      add: (run, task) => this.addTask(run, { type: "spawn", ...task }),
+      assignment: (run, name) => {
+        const cfg = this.workersFor(run).find(w => w.id === name) ?? this.resolveAgent(name);
+        if (!cfg) throw new Error(`unknown worker "${name}"`);
+        return { agent: cfg.id, kind: cfg.kind, ...modelOf(cfg) };
+      },
+      include: (run, names) => {
+        const workers = [...this.workersFor(run)];
+        for (const name of names) if (!workers.some(w => w.id === name)) workers.push(this.resolveAgent(name)!);
+        this.workerCfgs.set(run.id, workers);
+        run.workers = workers.map(w => w.id); run.workerDetails = workers.map(workerOf);
+      },
+      stop: (run, task) => this.stopControlledTask(run, task),
+      skip: async (run, task, reason) => {
+        const key = `${run.id}/${task.id}`;
+        this.skipRequests.add(key);
+        try {
+          return await this.gitLock.run(async () => {
+            if (task.status === "done") throw new Error("a merged task cannot be skipped");
+            return skipDependents(run, task, reason);
+          });
+        } finally { this.skipRequests.delete(key); }
+      },
+      note: async (run, task, note) => this.live.get(`${run.id}/${task.id}`)?.steer?.(task.chat, note) ?? false,
+      approve: id => this.approvePlan(id), start: opts => this.start(opts),
+      retry: (id, task, agent, extendedMinutes) => this.retryTask(id, task, agent, extendedMinutes),
+      busy: run => this.orchestratorBusy.has(run.id),
+    }, runId, action, body));
+  }
+
+  private async expireTask(run: OrchestraRun, task: OrchestraTask, now: number): Promise<void> {
+    // A merge already in flight finishes before a human decision can replace its outcome.
+    await this.gitLock.run(async () => {
+      if (this.cancelled(run, task) || task.timedOutAt || !task.deadlineAt || now < task.deadlineAt) return;
+      task.timedOutAt = now; task.status = "needs_input";
+      task.error = "Task time limit reached. Extend, reassign or skip.";
+      run.status = "waiting_human"; run.question = `${task.id}: ${task.error}`;
+      this.save(run); this.emit(run, "task_timeout", { taskId: task.id, task: taskSummary(task) });
+    });
+    if (task.timedOutAt) await this.stopControlledTask(run, task);
+  }
+
+  private checks = new TaskChecks();
+  private controlledStops = new Map<string, Promise<void>>();
+  private stopControlledTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    const key = `${run.id}/${task.id}`;
+    const existing = this.controlledStops.get(key);
+    if (existing) return existing;
+    const stopped = this.doStopControlledTask(run, task).finally(() => this.controlledStops.delete(key));
+    this.controlledStops.set(key, stopped);
+    return stopped;
+  }
+  private async doStopControlledTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    const key = `${run.id}/${task.id}`;
+    this.checks.abort(key);
+    const agent = this.live.get(key);
+    await agent?.interrupt();
+    await this.taskTurns.get(key);
+    await agent?.stop();
+    await captureTaskFiles(run, task);
+    this.live.delete(key);
+    this.taskEnded(run, task);
+    this.save(run);
+  }
+
+  private checkTask(run: OrchestraRun, task: OrchestraTask): Promise<boolean> {
+    return this.checks.run(run, task, {
+      cancelled: () => this.cancelled(run, task),
+      track: operation => this.track(`${run.id}/${task.id}`, operation),
+      emit: (ok, output) => this.emit(run, "task_check", { taskId: task.id, ok, output }),
+    });
+  }
+
   constructor(private host: OrchestraHost) {
     this.stallTimer.unref();
     for (const run of this.loadRuns()) this.runs.set(run.id, run);
@@ -1259,6 +1360,7 @@ export class OrchestraEngine {
     for (const run of this.runs.values()) {
       if (!isTerminal(run.status) && run.status !== "waiting_human") {
         run.status = "failed";
+        run.held = false;
         run.error = "the daemon restarted while this run was active";
         for (const t of run.tasks) {
           if (t.status === "running" || t.status === "pending") {
@@ -1406,6 +1508,7 @@ export class OrchestraEngine {
 
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
     validateOrchestraOptions(opts);
+    if (opts.savedTasks) validatePlan(opts.savedTasks);
     if (opts.chat) {
       this.host.assertChatWritable?.(opts.chat);
       this.startingChats.set(opts.chat, (this.startingChats.get(opts.chat) ?? 0) + 1);
@@ -1446,7 +1549,13 @@ export class OrchestraEngine {
 
     const roster = this.host.roster();
     const workers = expandWorkerSpecs(opts.workers?.length ? opts.workers : roster.map((a) => a.id), (name) => this.resolveAgent(name, opts.compare), roster.map((a) => a.id));
-    if (opts.compare && (workers.length < 2 || workers.length > 8)) throw new Error("a comparison needs 2–8 entrants after expansion");
+    if (opts.savedTasks && !opts.remapTasks) {
+      for (const task of opts.savedTasks) {
+        const resolved = this.resolveAgent(task.agent);
+        if (!workers.some(w => w.id === task.agent || w.id === resolved?.id || w.kind === resolved?.kind)) throw new Error(`saved task ${task.id} has no worker in the fleet`);
+      }
+    }
+    if (opts.compare && !opts.savedTasks && (workers.length < 2 || workers.length > 8)) throw new Error("a comparison needs 2–8 entrants after expansion");
     const orchCfg = opts.compare ? workers[0] : opts.orchestrator
       ? this.resolveAgent(opts.orchestrator)
       : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null);
@@ -1459,7 +1568,7 @@ export class OrchestraEngine {
       const kinds = await this.host.coordinator?.()?.remoteWorkers?.().catch(() => [] as string[]) ?? [];
       for (const k of kinds) { const cfg = this.resolveAgent(`team:${k}`); if (cfg && !workers.some((x) => x.id === cfg.id)) workers.push(cfg); }
     }
-    if (opts.race && workers.length < 2) throw new Error("a race needs at least two agents");
+    if (opts.race && !opts.savedTasks && workers.length < 2) throw new Error("a race needs at least two agents");
     this.host.gate(orchCfg.id, orchCfg.kind);
     const blocked = this.host.coordinator?.()?.canStart?.();
     if (blocked) throw new Error(blocked);
@@ -1477,6 +1586,7 @@ export class OrchestraEngine {
       );
     }
     let baseCommit = (await git(["rev-parse", "HEAD"], dir)).trim();
+    if (opts.savedBase) baseCommit = (await git(["rev-parse", opts.savedBase], dir)).trim();
     let baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim() || null;
     if (opts.from) {
       // Adopting a teammate's goal: work starts from their pushed branch (D63).
@@ -1527,6 +1637,7 @@ export class OrchestraEngine {
       ...(opts.plan ? { plan: true } : {}),
       planOnly: opts.planOnly, kindLimits: opts.kindLimits, stallMinutes: opts.stallMinutes ?? 10,
       webhookUrl: opts.webhookUrl, timeline: [],
+      check: opts.check, checkRounds: opts.checkRounds, taskMinutes: opts.taskMinutes, rerunOf: opts.rerunOf,
       ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
       // A cap for this goal: what was asked for, else the project's default.
       ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
@@ -1556,6 +1667,15 @@ export class OrchestraEngine {
       ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
     });
 
+    if (opts.savedTasks) {
+      const plan = opts.savedTasks.map((t, i) => ({ ...t, ...(opts.remapTasks ? { agent: workers[i % workers.length]!.id, model: modelOf(workers[i % workers.length]!).model, effort: modelOf(workers[i % workers.length]!).effort } : {}) }));
+      // All dependencies are restored after creation, including forward references.
+      for (const t of plan) this.addTask(run, { type: "spawn", ...t, dependsOn: [] }).id = t.id;
+      run.tasks.forEach((t, i) => { t.dependsOn = [...plan[i]!.dependsOn]; });
+      run.status = "running";
+      if (run.plan) await this.writePlan(run, "plan");
+      this.save(run); this.schedule(run); return run;
+    }
     if (run.race) {
       // No plan and no orchestrator: every entrant gets the goal as it was
       // typed, in its own worktree off the same commit, within the parallel cap.
@@ -1615,6 +1735,8 @@ export class OrchestraEngine {
     const run = this.mustGet(runId);
     if (isTerminal(run.status)) return run;
     run.status = "aborted";
+    run.held = false;
+    run.finishedAt = Date.now();
     run.error = reason;
     for (const t of run.tasks) {
       if (t.status === "running" || t.status === "pending") {
@@ -2110,7 +2232,9 @@ export class OrchestraEngine {
         tasks: run.tasks.filter((t) => t.status === "running" || t.status === "pending").map((t) => t.id),
         phase: run.status,
       };
+      const held = run.held;
       await this.abort(run.id, "Loom stopped while this run was going (a restart or shutdown) — what finished is on its branch, and Resume carries on from there");
+      run.held = held; this.save(run);
     }
   }
 
@@ -2136,6 +2260,7 @@ export class OrchestraEngine {
       pending++;
     }
     delete run.interrupted;
+    delete run.finishedAt;
     delete run.error;
     run.maxRounds = Math.max(run.maxRounds, run.round + 10);
     run.updatedAt = Date.now();
@@ -2170,13 +2295,14 @@ export class OrchestraEngine {
   }
 
   private cancelled(run: OrchestraRun, task?: OrchestraTask): boolean {
-    return isTerminal(run.status) || Boolean(run.moving) || this.stopping.has(run.id) || Boolean(task && task.status !== "running");
+    return isTerminal(run.status) || Boolean(run.moving) || this.stopping.has(run.id) || Boolean(task && (task.status !== "running" || this.skipRequests.has(`${run.id}/${task.id}`)));
   }
 
   private async stopAll(run: OrchestraRun): Promise<void> {
     this.stopping.add(run.id);
     const mine = (key: string) => key.startsWith(`${run.id}/`);
     try {
+      this.checks.abortRun(run.id);
       for (const [key, agent] of this.live) {
         if (mine(key) && agent.busy()) await agent.interrupt().catch(() => {});
       }
@@ -2238,7 +2364,7 @@ export class OrchestraEngine {
         payload: { text, author: "loom", orchestra: { runId: run.id, to: "orchestrator" } },
       });
       const mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.mcps?.(), this.host.loomTools?.() ? {
-        project: this.host.projectId, api: this.host.apiUrl?.() ?? "",
+        project: this.host.projectId, api: this.host.apiUrl?.() ?? "", agent: agent.id, chat: run.chat,
       } : undefined) : null;
       try {
         await this.track(key, () => agent.send({ text, ...(briefing ? { briefing } : {}),
@@ -2442,6 +2568,7 @@ export class OrchestraEngine {
     const task = run.tasks.find((t) => t.id === taskId);
     if (!task) throw new Error(`no task "${taskId}"`);
     if (task.status === "cancelled") throw new Error(`task ${taskId} was cancelled`);
+    if (task.timedOutAt) throw new Error(`task ${taskId} reached its time limit; the human must extend, reassign or skip it`);
     task.queued.push(message);
     task.reported = false;
     if (task.status !== "running") task.status = "pending";
@@ -2477,15 +2604,15 @@ export class OrchestraEngine {
       task.reported = false;
       this.emit(run, "task", { task: taskSummary(task) });
     }
-    if (run.status !== "running" || this.cancelled(run) || run.moving || (run.planOnly && !run.planApprovedAt)) return;
+    if (run.held || run.status !== "running" || this.cancelled(run) || run.moving || (run.planOnly && !run.planApprovedAt)) return;
     if (this.overBudget(run)) return;
-    const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
+    const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`) || this.controlledStops.has(`${run.id}/${t.id}`)).length;
     let slots = run.maxParallel - inFlight;
     let waiting = false;
     for (const task of run.tasks) {
       if (slots <= 0) break;
       if (task.status !== "pending") continue;
-      if (this.admitting.has(`${run.id}/${task.id}`)) continue;
+      if (this.admitting.has(`${run.id}/${task.id}`) || this.controlledStops.has(`${run.id}/${task.id}`)) continue;
       // "decide" holds wait for the orchestrator; the rest are re-checked, not hammered
       if (task.hold?.kind === "decide") continue;
       if (task.hold && Date.now() - (task.hold.checkedAt ?? task.hold.since) < RECHECK_MS) {
@@ -2502,7 +2629,7 @@ export class OrchestraEngine {
       }
       if (!deps.every((d) => !d || d.status === "done")) continue;
       const limit = run.kindLimits?.[task.kind];
-      if (limit !== undefined && run.tasks.filter(t => t.kind === task.kind && (t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))).length >= limit) continue;
+      if (limit !== undefined && run.tasks.filter(t => t.kind === task.kind && (t.status === "running" || this.admitting.has(`${run.id}/${t.id}`) || this.controlledStops.has(`${run.id}/${t.id}`))).length >= limit) continue;
       slots--;
       const key = `${run.id}/${task.id}`;
       const turn = this.admitAndRun(run, task);
@@ -2591,7 +2718,7 @@ export class OrchestraEngine {
       a = { go: false, hold: { kind: "capacity", reason: `team hub unreachable: ${(err as Error).message}`, since: Date.now() } };
     }
     this.admitting.delete(key);
-    if (isTerminal(run.status) || run.status !== "running" || run.moving || this.stopping.has(run.id) || task.status !== "pending" || this.overBudget(run)) return;
+    if (run.held || isTerminal(run.status) || run.status !== "running" || run.moving || this.stopping.has(run.id) || task.status !== "pending" || this.overBudget(run)) return;
     if (!a.go) {
       const was = task.hold?.reason;
       task.hold = { ...a.hold, since: task.hold?.since ?? a.hold.since, checkedAt: Date.now() };
@@ -2618,7 +2745,7 @@ export class OrchestraEngine {
         return;
       } finally { this.admitting.delete(key); }
     }
-    if (run.status !== "running" || task.status !== "pending" || this.overBudget(run)) return;
+    if (run.held || run.status !== "running" || task.status !== "pending" || this.overBudget(run)) return;
     return this.runTask(run, task);
   }
 
@@ -2645,8 +2772,13 @@ export class OrchestraEngine {
 
   /** When nothing can move without the orchestrator, give it a turn. */
   private maybeReview(run: OrchestraRun): void {
-    if (run.status !== "running" || this.cancelled(run) || this.orchestratorBusy.has(run.id)) return;
-    if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))) return;
+    if (run.held || run.status !== "running" || this.cancelled(run) || this.orchestratorBusy.has(run.id)) return;
+    if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`) || this.controlledStops.has(`${run.id}/${t.id}`))) return;
+    const blocked = run.tasks.find(t => t.status === "needs_input" && (t.timedOutAt || (t.checkFailures ?? 0) > (run.checkRounds ?? 2)));
+    if (blocked) {
+      run.status = "waiting_human"; run.question = `${blocked.id}: ${blocked.error ?? "needs your decision"}`;
+      this.save(run); this.emit(run, "waiting", { question: run.question }); return;
+    }
     if (run.race) {
       // A race has no reviewer: it's over when every entrant has finished.
       if (run.tasks.some((t) => t.status === "pending")) return;
@@ -2719,6 +2851,7 @@ export class OrchestraEngine {
   }
 
   private taskEnded(run: OrchestraRun, task: OrchestraTask): void {
+    if (!task.timedOutAt) task.deadlineAt = undefined;
     task.stalledAt = undefined;
     if (!task.attempts || run.timeline?.some(e => e.taskId === task.id && e.attempt === task.attempts && e.phase === "task_finished")) return;
     task.finishedAt = Date.now();
@@ -2726,10 +2859,14 @@ export class OrchestraEngine {
   }
 
   private async runTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
-    if (isTerminal(run.status) || run.moving || this.stopping.has(run.id) || task.status !== "pending") return;
+    if (run.held || isTerminal(run.status) || run.moving || this.stopping.has(run.id) || task.status !== "pending") return;
     task.status = "running";
     task.attempts++;
     task.startedAt = Date.now();
+    task.finishedAt = undefined;
+    const minutes = task.extendedMinutes ?? run.taskMinutes;
+    task.deadlineAt = minutes ? Date.now() + minutes * 60_000 : undefined;
+    delete task.extendedMinutes;
     this.progress(run, task);
     task.error = undefined;
     this.save(run);
@@ -2761,17 +2898,19 @@ export class OrchestraEngine {
       if (isRemoteWorker(task.agent)) {
         await this.runRemoteTask(run, task);
         if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
-        await this.track(key, () => this.integrate(run, task));
+        if (await this.checkTask(run, task)) await this.track(key, () => this.integrate(run, task));
       } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
       if (err instanceof SecretScanError) task.secrets = err.findings;
       if (run.race) await this.snapshotRaceTask(run, task).catch(() => {});
-      if ((task.status as TaskStatus) !== "cancelled") {
+      if ((task.status as TaskStatus) !== "cancelled" && !task.timedOutAt) {
         task.status = "failed";
         task.error = (err as Error).message.slice(0, 1000);
       }
     }
+    if ((task.status as TaskStatus) === "done" && task.queued.length) task.status = "pending";
     task.finishedAt = Date.now();
+    if (!task.timedOutAt) task.deadlineAt = undefined;
     // Only a successfully scanned retry resolves an earlier safety failure.
     if ((task.status as TaskStatus) === "done") delete task.secrets;
     task.reported = false;
@@ -2841,16 +2980,16 @@ export class OrchestraEngine {
     if (this.cancelled(run, task)) return false;
     this.host.gate(task.agent, task.kind);
     const memory = await this.host.memoryForTurn?.(text, task.agent, task.chat, prompt.id);
-    const fullBriefing = [memory?.briefing, briefing].filter(Boolean).join("\n\n");
+    const fullBriefing = [memory?.briefing, briefing, ...(run.workerNotes ?? []).map(n => `Note from the human: ${n}`)].filter(Boolean).join("\n\n");
     const mcp = agent.capabilities.mcp && this.host.apiUrl?.() ? writeLoomMcpSession(this.host.mcps?.(), {
       project: this.host.projectId, api: this.host.apiUrl(), run: run.id, task: task.id,
     }) : null;
     try {
       memory?.record();
-      await this.track(key, () => agent!.send({ text, ...(fullBriefing ? { briefing: fullBriefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
+      await this.track(key, () => agent!.send({ text, chat: task.chat, ...(fullBriefing ? { briefing: fullBriefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}),
         ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) }));
     } finally { mcp?.cleanup(); }
-    if (isTerminal(run.status) || this.stopping.has(run.id) || (task.status as TaskStatus) === "cancelled") return false;
+    if (isTerminal(run.status) || this.stopping.has(run.id) || (task.status as TaskStatus) === "cancelled" || task.timedOutAt || this.skipRequests.has(key)) return false;
     // paused mid-turn (pauseTask): not finished, nothing to integrate yet
     if ((task.status as TaskStatus) === "pending") {
       this.schedule(run);
@@ -2890,7 +3029,7 @@ export class OrchestraEngine {
       // The orchestrator already queued a follow-up: keep going on the same
       // worktree before merging.
       task.status = "pending";
-    } else {
+    } else if (await this.checkTask(run, task)) {
       await this.track(key, () => this.integrate(run, task));
     }
     return true;
@@ -2914,7 +3053,7 @@ export class OrchestraEngine {
     this.host.append({ kind: "message", chat: task.chat, payload: { text: followUp ?? task.prompt, author: "orchestrator", orchestra: { runId: run.id, taskId: task.id } } });
     this.host.append({ kind: "status", chat: task.chat, payload: { state: "team_task", runId: run.id, taskId: task.id,
       text: `Sent to a teammate's machine (${task.kind}) — it runs there with their agent and comes back here to merge.` } });
-    const res = await coord.runRemote(run, task, base, prompt);
+    const res = await coord.runRemote(run, task, base, [prompt, ...(run.workerNotes ?? []).map(n => `Note from the human: ${n}`)].join("\n\n"));
     if (typeof res.costUsd === "number" && Number.isFinite(res.costUsd) && res.costUsd >= 0) {
       run.costUsd += res.costUsd;
       task.costUsd = (task.costUsd ?? 0) + res.costUsd;
@@ -2955,6 +3094,7 @@ export class OrchestraEngine {
   }
 
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    if (task.queued.length && !this.cancelled(run, task)) { task.status = "pending"; return; }
     const dir = task.dir!;
     if (run.race) {
       // An entrant's work stays on its own branch, to be compared, not merged.
@@ -2981,6 +3121,7 @@ export class OrchestraEngine {
       try {
         const prediction = await predictMerge(run.dir, "HEAD", task.branch!);
         if (!prediction.clean) throw new Error(`pre-merge conflict: ${prediction.detail}`);
+        if (this.cancelled(run, task)) return;
         await git(
           ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `orchestra ${task.id}: ${task.title}`, task.branch!],
           run.dir,
@@ -3122,6 +3263,8 @@ export class OrchestraEngine {
     // Aborted while we were finishing up: the human's abort stands.
     if (run.status === "aborted") return;
     run.status = status;
+    run.held = false;
+    run.finishedAt = Date.now();
     if (error) run.error = error;
     if (summary) run.summary = summary;
     this.save(run);
@@ -3335,6 +3478,9 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
     ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
     ...(t.stalledAt ? { stalledAt: t.stalledAt } : {}),
+    ...(t.skippedReason ? { skippedReason: t.skippedReason } : {}),
+    ...(t.timedOutAt ? { timedOutAt: t.timedOutAt, deadlineAt: t.deadlineAt } : {}),
+    ...(t.checkOutput !== undefined ? { checkOutput: t.checkOutput, checkFailures: t.checkFailures } : {}),
     ...(t.lastProgressAt ? { lastProgressAt: t.lastProgressAt } : {}),
     reports: t.reports ?? [],
     lastReport: t.lastReport ?? null,

@@ -1,3 +1,4 @@
+import { state } from "./state.js";
 /**
  * The split workspace: several Loom views in one window — ⌘D splits side by side, ⌘⇧D one above
  * the other; drag a chat from a pane's sidebar onto another pane's edge to open it there, or a
@@ -25,7 +26,7 @@ export function paneId() { var m = /[?&]pane=([\w-]+)/.exec(location.search); re
 
 /** From a normal window: split the current view into two panes. */
 export function enterWorkspace(dir) {
-  var hash = location.hash || "";
+  var hash = state.pid ? "#p/" + encodeURIComponent(state.pid) + "/c/" + encodeURIComponent(state.currentChat ? state.currentChat() : state.chat || "main") : location.hash || "";
   var a = newPaneId(), b = newPaneId();
   saveWorkspace({ layout: { direction: dir || "row", children: [{ id: a }, { id: b }] }, panes: { [a]: { hash: hash }, [b]: { hash: hash } }, focus: b });
   location.href = "/app?split=1";

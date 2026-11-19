@@ -29,6 +29,7 @@ export function turnOutcome(events: LoomEvent[], agentId: string, sinceId: numbe
     if (e.id <= sinceId || e.agentId !== agentId) continue;
     if (chat !== undefined && (e.chat ?? "main") !== chat) continue;
     const p = e.payload ?? {};
+    if (p.retrying === true) continue;
     if (e.kind === "message" && !p.reasoning && typeof p.text === "string") reply = p.text;
     else if (e.kind === "status" && p.state === "turn_cost") costUsd += Number(p.costUsd ?? 0) || 0;
     else if (e.kind === "needs_input") return { status: "needs_input", agent: agentId, reply, costUsd: costUsd || null, question: String(p.question ?? "") };

@@ -1,3 +1,6 @@
+import { OnboardClient } from "../core/help/client.js";
+import { daemonApi } from "../core/agentic-r4/client.js";
+import { workspaceClient } from "../core/workspace-r4/client.js";
 /**
  * Thin daemon client used by every surface (CLI now, app later).
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
@@ -39,7 +42,7 @@ import {
 import type { SideView } from "../core/side-chats.js";
 import type { Memory, MemoryKind, MemoryPatch, MemoryHistoryEntry } from "../core/brain.js";
 import type { BoardData } from "./board.js";
-import { BUILD_REV, DEFAULT_PORT } from "./server.js";
+import { BUILD_REV, DEFAULT_PORT } from "./system.js";
 import { VERSION } from "../version.js";
 import type { NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "../core/project-creation.js";
 import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
@@ -97,11 +100,17 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  readonly onboard = new OnboardClient((method, route, body) => this.request(method, route, body));
+  r4Orchestra<T>(id: string, route: string, body?: Record<string, unknown>): Promise<T> { return this.request(body === undefined ? "GET" : "POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${route}`, body); }
+  teamsR4(id: string, route: string, body?: Record<string, unknown>): Promise<Record<string, any>> { return this.request(body ? "POST" : "GET", `/api/projects/${encodeURIComponent(id)}/teams-r4${route}`, body); }
+  readonly workspace = workspaceClient(this.request.bind(this));
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {
     this.cfg = cfg;
   }
+
+  api<T = unknown>(method: string, route: string, body?: unknown, timeoutMs?: number): Promise<T> { return daemonApi<T>(this.baseUrl, this.cfg.adminToken, method, route, body, timeoutMs); }
 
   static fromDisk(): DaemonClient | null {
     const cfg = readDaemonConfig();
@@ -121,9 +130,13 @@ export class DaemonClient {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
   }
 
+  reviewR4<T = unknown>(route: string, body?: Record<string, unknown>, method = body ? "POST" : "GET", timeoutMs = 120_000): Promise<T> { return this.request(method, route, body, timeoutMs); }
+
   get baseUrl(): string {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }
+
+  automation<T = Record<string, unknown>>(route: string, method = "GET", body?: Record<string, unknown>): Promise<T> { return this.request(method, route, body); }
 
   modelHealth() { return this.request<{ health: import("../core/model-routing.js").ModelHealth[] }>("POST", "/api/model-routing/health", undefined, 120_000); }
   setProjectEffort(id: string, defaultEffort: string) { return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/config`, { defaultEffort }); }
@@ -162,8 +175,8 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
   }
 
-  remember(id: string, kind: MemoryKind, text: string, chat?: string): Promise<{ memory: Memory; created: boolean }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}) });
+  remember(id: string, kind: MemoryKind, text: string, chat?: string, paths?: string[]): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}), ...(paths ? { paths } : {}) });
   }
 
   report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
@@ -818,10 +831,10 @@ export class DaemonClient {
   searchBrain(
     id: string,
     q: string,
-    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
+    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number; tag?: string } = {},
   ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
     const params = new URLSearchParams({ q });
-    for (const key of ["agent", "author", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
+    for (const key of ["agent", "author", "kind", "since", "until", "chat", "tag"] as const) if (opts[key]) params.set(key, opts[key]!);
     if (opts.explain) params.set("explain", "1");
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);
@@ -914,16 +927,16 @@ export class DaemonClient {
   brainInjections(id: string, turn?: string): Promise<{ injections: unknown[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/injections${turn ? `?turn=${encodeURIComponent(turn)}` : ""}`);
   }
-  listBrainMemories(id: string, includeArchived = false): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
-    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}`);
+  listBrainMemories(id: string, includeArchived = false, tag?: string, sort?: string): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}${tag ? `&tag=${encodeURIComponent(tag)}` : ""}${sort ? `&sort=${encodeURIComponent(sort)}` : ""}`);
   }
 
-  exportBrainMarkdown(id: string, md: string): Promise<{ file: string }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md });
+  exportBrainMarkdown(id: string, md: string, tag?: string): Promise<{ file: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md, ...(tag ? { tag } : {}) });
   }
 
-  exportBrain(id: string): Promise<Record<string, unknown>> {
-    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
+  exportBrain(id: string, tag?: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`);
   }
 
   importBrain(id: string, doc: unknown): Promise<{ added: number; known: number }> {

@@ -99,6 +99,14 @@ export class DemoAdapter extends AdapterBase {
       let reply: string;
       if (this.orchestraBriefing) {
         reply = this.orchestrate({ ...input, briefing: this.orchestraBriefing });
+      } else if (input.text.includes("This is a READ-ONLY review")) {
+        reply = input.text.includes("function first(items)")
+          ? "- [high] example.js:1 — first([]) dereferences undefined. Guard empty input and add an empty-list test.\nScripted finding for the supplied demo example; no files were changed."
+          : "Scripted read-only review: inspect the target and verify edge cases. No files were changed.";
+      } else if (/demo release codename/i.test(input.text)) {
+        reply = input.briefing?.includes("copper lantern")
+          ? "The release codename is copper lantern. I reused the shared decision taught by the other Demo agent."
+          : "No release codename decision was in my briefing. Teach a shared memory, then try again.";
       } else if (input.briefing?.includes("[Loom · Plan mode]") || /\b(make a plan|plan the|plan for)\b/i.test(input.text)) {
         const plan = ["---", 'title: "Demo implementation plan"', "status: proposed", "---", "# Demo plan", "## Goal", input.text,
           "## Context", "styles.css controls appearance; filter.js selects todos; test.mjs checks behavior.",

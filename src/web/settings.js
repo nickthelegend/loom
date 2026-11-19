@@ -1,3 +1,8 @@
+import { registerProjectHelp } from "./help/settings.js";
+import { renderAgenticTools } from "./agentic-r4.js";
+import { mountAppearance } from "./workspace-r4/appearance.js";
+import { mountSessionSettings } from "./agents-r4.js";
+import { dismissStartupDialogs, openStartupDialog } from './startup-dialogs.js';
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -406,6 +411,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      mountSessionSettings(pane, pid);
       bindSeg("devmode", function(v){
         setDevMode(v === "dev");
         toast(v === "dev" ? "Developer mode on \u2014 every tool is back" : "Simple mode \u2014 just what you need");
@@ -432,6 +438,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         };
       });
       bindSeg("theme", function(v){ setThemePref(v); });
+      mountAppearance(pane);
       var pp = document.getElementById("projprefs");
       if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
       pp.innerHTML = LOADER;
@@ -475,6 +482,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           agents.map(function(a){ return '<option value="' + esc(a.id) + '"' + (a.id === cfg.defaultAgent ? " selected" : "") + ">" + esc(a.id) + "</option>"; }).join("") +
           "</select></div></div>";
         pp.innerHTML = hh;
+        renderAgenticTools(pp, pid);
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
         bindSeg("loomtools", function(v){ patchCfg({ loomTools: v === "on" }, v === "on" ? "Agents here can use Loom's tools" : "Loom tools off for this project"); });
@@ -1149,19 +1157,25 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     }
     drawNav();
     render();
+    return function(){ if (scrim.isConnected) close(); };
   }
 
   // The sidebar foot and the first-run nudge open Settings on its Setup section.
-  function openSetupModal(){ openSettingsModal("setup"); }
+  function openSetupModal(automatic){
+    if (automatic === true) openStartupDialog(function(){ return openSettingsModal("setup"); });
+    else openSettingsModal("setup");
+  }
 
 
   // Per-project settings: toggle agents on/off and set each agent's role. Every
   // change lands on .loom/config.json and re-renders the fleet everywhere.
   function openProjectSettings(pid){
+    dismissStartupDialogs();
     if (document.querySelector(".scrim")) return;
     var scrim = document.createElement("div"); scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal psetmodal"><div class="modalhead">Project settings<button class="iconbtn" id="psx" aria-label="close">' + ICONS.x + '</button></div><div class="modalbody" id="psbody"><div class="loader"><i></i><i></i><i></i><i></i></div></div></div>';
     document.body.appendChild(scrim);
+    registerProjectHelp(scrim, pid);
     function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); delete teamHooks().pset; }
     function onKey(e){ if (e.key === "Escape") close(); }
     document.addEventListener("keydown", onKey);

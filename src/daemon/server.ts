@@ -1,3 +1,13 @@
+import { registerHelpRoutes } from "./routes/help.js";
+import { registerCostRoutes } from "./routes/cost-r4.js";
+import { registerOrchestraR4Routes } from "./routes/orchestra-r4.js";
+import { registerReviewR4Routes } from "./routes/review-r4.js";
+import { registerTeamsR4Public } from "./routes/teams-r4.js";
+import { attachHooks } from "../core/agentic-r4/hooks.js";
+import { registerAgenticRoutes } from "./routes/agentic-r4.js";
+import { registerWorkspaceR4Routes } from "./routes/workspace-r4.js";
+import { registerAgentsR4 } from "./routes/agents-r4.js";
+import { registerPhoneRoutes } from "./routes/phone-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -9,6 +19,7 @@ import { safetyDecision } from "../core/safety.js";
 import { EmailDigest } from "./email-digest.js";
 import { registerEmailRoutes } from "./routes/email.js";
 import { DiscordRuns } from "./discord-runs.js";
+import { registerBrainR4Routes } from "./routes/brain-r4.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -93,6 +104,7 @@ import { registerIntegrationsProjectRoutes } from './routes/integrations-project
 import { registerIntegrationsRoutes } from './routes/integrations.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerMessagesRoutes } from './routes/messages.js';
+import { registerInsightsR4 } from './routes/insights-r4.js';
 import { registerObservabilityRoutes } from './routes/observability.js';
 import { registerScoreboardRoutes } from "./routes/scoreboard.js";
 import { registerOrchestraRoutes } from './routes/orchestra.js';
@@ -132,6 +144,7 @@ import { registerProofRoutes } from "./routes/proof.js";
 import { registerShiftRoutes } from "./routes/shift.js";
 import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
+import { registerAutomationRoutes } from "./routes/auto-r4.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
 import { auditCsv } from "../core/team-sharing.js";
@@ -475,6 +488,7 @@ export class LoomDaemon {
       next();
     });
     registerAssetsRoutes(app);
+    registerTeamsR4Public(app, ctx, this.presence);
     registerPublicRoutes(app, ctx);
     registerPreviewPublic(app);
 
@@ -615,10 +629,17 @@ export class LoomDaemon {
     registerPairingRoutes(app, ctx);
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
+    registerPhoneRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
+    registerAgentsR4(app, createRuntimeHandler(ctx), ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerInsightsR4(app, withRuntime, ctx, () => this.server);
+    registerAgenticRoutes(app, ctx, withRuntime, TOOL_WRITES);
+    registerWorkspaceR4Routes(app, ctx, withRuntime);
     registerModelRoutingRoutes(app, withRuntime);
+    registerHelpRoutes(app, ctx, withRuntime);
+    registerCostRoutes(app, withRuntime);
     void mondayScoreboard().catch(() => {});
     this.scoreboardTimer = setInterval(() => void mondayScoreboard().catch(() => {}), 60_000);
     this.scoreboardTimer.unref();
@@ -642,6 +663,7 @@ export class LoomDaemon {
     registerConfigRoutes(app, withRuntime);
     registerSearchRoutes(app, withRuntime);
     registerGitRoutes(app, withRuntime);
+    registerReviewR4Routes(app, withRuntime, ctx);
     registerLogsRoutes(app);
     registerAgentDiscoveryRoutes(app, withRuntime);
     registerSpecsRoutes(app, ctx, withRuntime);
@@ -651,11 +673,13 @@ export class LoomDaemon {
     registerPromptsRoutes(app, ctx);
     registerProjectTeamRoutes(app, ctx, withRuntime);
     registerApprovalsRoutes(app, ctx, withRuntime);
+    registerOrchestraR4Routes(app, withRuntime);
     registerOrchestraRoutes(app, withRuntime);
     registerCrewsRoutes(app, withRuntime);
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
+    registerAutomationRoutes(app, withRuntime, this.triggers, ctx);
     registerEmailRoutes(app, this.emailDigest);
     registerBridgeRoutes(app, this.bridges);
     // every session, every project (a scoped token: its own) — and the audit trail, owner only
@@ -691,6 +715,7 @@ export class LoomDaemon {
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
+    registerBrainR4Routes(app, withRuntime, this.auth);
     registerBrainRoutes(app, withRuntime, this.auth);
     registerRoutingRoutes(app, withRuntime);
     registerTerminalsRoutes(app, ctx);
@@ -739,6 +764,7 @@ export class LoomDaemon {
 
   private async openRuntime(info: ProjectInfo): Promise<ProjectRuntime> {
     const rt = await ProjectRuntime.open(info);
+    attachHooks(rt);
     rt.sides.onEvent(frame => {
       this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
     });
@@ -1123,6 +1149,7 @@ export class LoomDaemon {
       // Terminal input comes back up this socket: a tty needs a round-trip per
       // keystroke, which a POST each time can't carry. Only a socket scoped to
       // a project may drive that project's terminals.
+      this.presence.attach(ws);
       ws.on("message", (raw) => {
         let msg: { type?: string; term?: string; data?: string; cols?: number; rows?: number; chat?: unknown; typing?: unknown };
         try {

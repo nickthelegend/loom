@@ -87,6 +87,7 @@ export const HELP_LINES = [
   pc.dim("    pgup / pgdn       scroll the view · enter send · esc back/interrupt"),
   pc.dim("    ctrl+p palette    ·  ctrl+c quit"),
   pc.bold("  commands"),
+  pc.dim("    /orchestra · /approvals · /retry-task <run> <task> <agent> · /allow <id> · /deny <id>"),
   pc.dim("    /board · /brain · /diff · /thread · /scoreboard   jump to a view"),
   pc.dim("    /route <name|a,b,c> <task>   run a pipeline across agents"),
   pc.dim("    /routes                      list named pipelines"),
@@ -141,6 +142,8 @@ export function paletteItems(
     { id: "view:board", label: "go to Board", hint: "agents · issues · PRs", action: { type: "view", view: "board" } },
     { id: "view:brain", label: "go to Brain", hint: "learned memory", action: { type: "view", view: "brain" } },
     { id: "view:scoreboard", label: "go to Scoreboard", hint: "model standings", action: { type: "view", view: "scoreboard" } },
+    { id: "view:orchestra", label: "go to Orchestra", hint: "runs and live tasks", action: { type: "view", view: "orchestra" } },
+    { id: "view:approvals", label: "go to Approvals", hint: "allow or deny", action: { type: "view", view: "approvals" } },
     { id: "view:diff", label: "go to Diff", hint: "working tree", action: { type: "view", view: "diff" } },
   );
   for (const a of switchableAgents(agents)) {
@@ -176,6 +179,11 @@ export function paletteItems(
     { id: "cmd:help", label: "help", action: { type: "command", cmd: "help" } },
     { id: "cmd:quit", label: "quit", hint: "daemon keeps running", action: { type: "command", cmd: "quit" } },
   );
+  items.push(
+    { id: "orchestra:retry", label: "retry Orchestra task", action: { type: "insert", text: "/retry-task " } },
+    { id: "approvals:allow", label: "allow approval", action: { type: "insert", text: "/allow " } },
+    { id: "approvals:deny", label: "deny approval", action: { type: "insert", text: "/deny " } },
+  );
   return items;
 }
 
@@ -183,14 +191,16 @@ export function paletteItems(
 // Views — the tabbed faces of the TUI (Thread · Board · Brain · Diff · Scoreboard)
 // ---------------------------------------------------------------------------
 
-export type ViewName = "thread" | "board" | "brain" | "diff" | "scoreboard";
-export const VIEWS: ViewName[] = ["thread", "board", "brain", "diff", "scoreboard"];
+export type ViewName = "thread" | "board" | "brain" | "diff" | "scoreboard" | "orchestra" | "approvals";
+export const VIEWS: ViewName[] = ["thread", "board", "brain", "diff", "scoreboard", "orchestra", "approvals"];
 const VIEW_LABEL: Record<ViewName, string> = {
   thread: "Thread",
   board: "Board",
   brain: "Brain",
   diff: "Diff",
   scoreboard: "Scoreboard",
+  orchestra: "Orchestra",
+  approvals: "Approvals",
 };
 
 /** The tab strip — active tab bright and underlined, the rest dim. */

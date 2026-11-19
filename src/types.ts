@@ -776,3 +776,8 @@ export interface CostSummary {
   tokensOut: number;
   byAgent: AgentCost[];
 }
+
+/** Session organization metadata added in Loom 2.2. */
+export interface ChatInfo { labels?: import("./core/agents-r4/chats.js").Label[] }
+
+export interface ChatInfo { restoredAt?: number }

@@ -17,3 +17,13 @@ export function parseAgentRouting(extraArgs: string, fallbacks: string, effort: 
   };
   return { extraArgs: array(extraArgs, "Extra arguments"), fallbacks: array(fallbacks, "Fallback models"), effort };
 }
+
+export function costMoney(value: number | null | undefined): string {
+  return value == null ? "unknown" : `$${value.toFixed(4)}`;
+}
+export function cacheSavingsLabel(row: { cachedIn: number; tokensIn: number; cacheSavedUsd?: number | null }): string {
+  return `${row.tokensIn ? Math.round(Math.min(row.cachedIn, row.tokensIn) / row.tokensIn * 100) : 0}% cached · ${costMoney(row.cacheSavedUsd)} saved at API prices`;
+}
+export function costBudgetLabel(row: { spentUsd: number; capUsd: number; projectedUsd?: number; stopped: boolean; warning: boolean }): string {
+  return `${costMoney(row.spentUsd)} / ${row.capUsd ? costMoney(row.capUsd) : "no cap"}${row.projectedUsd === undefined ? "" : ` · projected ${costMoney(row.projectedUsd)}`}${row.stopped ? " · Needs you: raise cap" : row.warning ? " · 80% used" : ""}`;
+}

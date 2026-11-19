@@ -1,18 +1,20 @@
+import { feedbackHtml, wireFeedback } from "./brain-r4.js";
 import { api } from '../connection.js';
 import { esc } from '../format.js';
 import { askText,toast } from '../notifications.js';
 
 export function brainFiltersHtml(filters) {
   return '<form id="brain-filters" class="brain-filters">' +
-    [['q','Search memories','search'],['agent','Learned by agent','text'],['since','From date','date'],['until','Through date','date']].map(function(f){
+    [['q','Search memories','search'],['tag','Tag','text'],['agent','Learned by agent','text'],['since','From date','date'],['until','Through date','date']].map(function(f){
       return '<label>' + esc(f[1]) + '<input name="' + esc(f[0]) + '" type="' + esc(f[2]) + '" value="' + esc(filters[f[0]] || '') + '"></label>';
     }).join('') + '<label><input name="archived" type="checkbox"' + (filters.archived ? ' checked' : '') + '> Include archived</label><button class="btn sm">Search</button></form>';
 }
 
 export function memoryToolsHtml(memory) {
-  return '<div class="brain-actions">' + (memory.stale ? '<span class="bbadge">Unused for 30 days</span>' : '') +
+  if (memory.source) return '<p class="bmmeta">Read-only source: ' + esc(memory.source.file) + ':' + esc(memory.source.line) + '</p>';
+  return '<div class="brain-actions">' + (memory.tags || []).map(function(tag){ return '<button class="btn xs ghost" data-tag="' + esc(tag) + '">#' + esc(tag) + '</button>'; }).join('') + (memory.pack ? '<span>Pack: ' + esc(memory.pack) + '</span>' : '') + (memory.paths && memory.paths.length ? '<span>Paths: ' + esc(memory.paths.join(', ')) + '</span>' : '') + (memory.stale ? '<span class="bbadge">Unused for 30 days</span>' : '') +
     '<span>' + esc(memory.scope.chat ? 'Chat: ' + memory.scope.chat : 'Project-wide') + '</span>' +
-    [['pin',memory.pinned ? 'Unpin' : 'Pin'],['priority','Priority: ' + (memory.priority || 0)],['scope','Scope'],['archive',memory.archived ? 'Restore' : 'Archive'],['history','History']].map(function(a){
+    [['tags','Tags'],['paths','Paths'],['pin',memory.pinned ? 'Unpin' : 'Pin'],['priority','Priority: ' + (memory.priority || 0)],['scope','Scope'],['archive',memory.archived ? 'Restore' : 'Archive'],['history','History']].map(function(a){
       return '<button type="button" class="btn xs ghost" data-memory-action="' + esc(a[0]) + '" data-id="' + esc(memory.id) + '">' + esc(a[1]) + '</button>';
     }).join('') + '</div>';
 }
@@ -22,7 +24,7 @@ export function wireMemoryTools(el, view, memories, filters, refresh) {
   var form = el.querySelector('#brain-filters');
   form.onsubmit = function(e){
     e.preventDefault();
-    ['q','agent','since','until'].forEach(function(key){ filters[key] = form.elements[key].value; });
+    ['q','agent','since','until','tag'].forEach(function(key){ filters[key] = form.elements[key].value; });
     filters.archived = form.elements.archived.checked; refresh();
   };
   function mutate(url, body, method){ return api(base + url, { method: method || 'POST', body: JSON.stringify(body) }).then(function(result){
@@ -34,6 +36,10 @@ export function wireMemoryTools(el, view, memories, filters, refresh) {
     button.onclick = async function(){
       var m = memories.find(function(m){ return m.id === button.dataset.id; }); if (!m) return;
       var action = button.dataset.memoryAction, patch;
+      if (action === 'tags' || action === 'paths') {
+        var value = await askText(action === 'tags' ? 'Tags (comma-separated)' : 'Path globs (comma-separated; blank means any file)', { value: (m[action] || []).join(', ') });
+        if (value === null) return; patch = {}; patch[action] = value.split(',').map(function(v){ return v.trim(); }).filter(Boolean);
+      }
       if (action === 'pin') patch = { pinned: !m.pinned };
       if (action === 'archive') patch = { archived: !m.archived };
       if (action === 'priority') {
@@ -64,6 +70,7 @@ export function wireMemoryTools(el, view, memories, filters, refresh) {
       if (patch) mutate('/' + encodeURIComponent(m.id), patch, 'PATCH');
     };
   });
+  el.querySelectorAll('[data-tag]').forEach(function(button){ button.onclick = function(){ filters.tag = button.dataset.tag; refresh(); }; });
   var extras = document.createElement('div'); extras.className = 'brain-extras';
   extras.innerHTML = '<div class="brain-actions"><button class="btn xs ghost" data-md>Export Markdown to repo</button><button class="btn xs ghost" data-url>Import Markdown URL</button><button class="btn xs ghost" data-why>Why was this injected?</button></div><div data-duplicates></div><div data-injections></div>';
   el.querySelector('.brain').appendChild(extras);
@@ -79,8 +86,9 @@ export function wireMemoryTools(el, view, memories, filters, refresh) {
     api(base + '/injections?chat=' + encodeURIComponent(view.chatId || 'main')).then(function(result){
       extras.querySelector('[data-injections]').innerHTML = '<h3>Memories included in each turn</h3>' + (result.injections.length ? result.injections.slice().reverse().map(function(e){
         return '<details><summary>Turn ' + esc(e.payload.turn) + ' · ' + esc(e.agentId) + ' · ' + esc(new Date(e.ts).toLocaleString()) + '</summary>' +
-          (e.payload.memories.length ? e.payload.memories.map(function(m){ return '<p>' + esc(m.text) + ' — score ' + esc(m.score.toFixed(3)) + ' · ' + esc(m.reason) + ' · priority ' + esc(m.priority) + '</p><pre>' + esc(JSON.stringify(m.detail || {}, null, 2)) + '</pre>'; }).join('') : '<p>No memories injected.</p>') + '</details>';
+          (e.payload.memories.length ? e.payload.memories.map(function(m){ return '<p>' + esc(m.text) + ' — score ' + esc(m.score.toFixed(3)) + ' · ' + esc(m.reason) + ' · priority ' + esc(m.priority) + '</p><pre>' + esc(JSON.stringify(m.detail || {}, null, 2)) + '</pre>' + feedbackHtml(m, e.id); }).join('') : '<p>No memories injected.</p>') + '</details>';
       }).join('') : '<p>No recorded turns yet. Native continuity uses its packet inspector.</p>');
+      wireFeedback(extras.querySelector('[data-injections]'), base, refresh);
     }).catch(function(e){ toast(e.message); });
   };
   api(base + '/duplicates').then(function(result){

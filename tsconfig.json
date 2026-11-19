@@ -7,6 +7,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
+    "allowJs": true,
     "jsx": "react-jsx",
     "declaration": true,
     "sourceMap": true,
@@ -15,5 +16,5 @@
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/cli/mcp-turn.js"]
 }

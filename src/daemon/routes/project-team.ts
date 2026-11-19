@@ -1,9 +1,12 @@
+import { registerTeamsR4Routes } from "./teams-r4.js";
 import type { Express } from 'express';
 import { loadPolicy } from "../../core/team-policy.js";
 import { repoOf } from "../team.js";
 import type { RouteContext, WithRuntime } from './context.js';
 /** Register project-team routes in the order established by LoomDaemon.routes(). */
-export function registerProjectTeamRoutes(app: Express, ctx: Pick<RouteContext, "team">, withRuntime: WithRuntime): void {
+export function registerProjectTeamRoutes(app: Express, ctx: Pick<RouteContext, "team" | "host" | "port" | "exposedIps">, withRuntime: WithRuntime): void {
+
+  registerTeamsR4Routes(app, ctx, withRuntime);
 
   app.get("/api/projects/:id/teammates", withRuntime(async (rt, _req, res) => {
     res.json({ teammates: await ctx.team.teammates(rt) });

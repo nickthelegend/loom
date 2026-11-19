@@ -1,0 +1,4 @@
+#phone-r4-open{white-space:nowrap}
+.phone-pane{overflow:auto;max-height:80vh;padding:20px}.phone-tools{display:grid;gap:20px}.phone-tools section,.phone-tools form{display:grid;gap:10px}.phone-tools label{display:flex;gap:10px;align-items:center}.phone-tools textarea,.phone-tools input,.phone-tools select{background:var(--card);color:var(--foreground);border:1px solid var(--border);padding:8px}.phone-chips{display:flex;gap:8px;overflow:auto}
+#feed,#feedlive,.diffwrap,.xterm{zoom:var(--phone-text-scale,1)}
+.phone-contrast{--muted-foreground:#333;--border:#555;--git-add:#145522;--git-del:#8c1420}.phone-contrast.dark,.phone-contrast .dark{--muted-foreground:#eee;--border:#999;--git-add:#9effae;--git-del:#ff9ba7}

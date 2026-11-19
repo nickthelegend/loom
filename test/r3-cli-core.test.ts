@@ -99,7 +99,9 @@ describe("2.1 aliases and completions", () => {
 
 it("opens a fifth TUI view and renders observed standings, empty data and unknown costs", () => {
   expect(cycleView("diff")).toBe("scoreboard");
-  expect(cycleView("scoreboard")).toBe("thread");
+  expect(cycleView("scoreboard")).toBe("orchestra");
+  expect(cycleView("orchestra")).toBe("approvals");
+  expect(cycleView("approvals")).toBe("thread");
   expect(renderTabs("scoreboard")).toContain("5 Scoreboard");
   expect(paletteItems([], [], null).find(p => p.id === "view:scoreboard")).toBeTruthy();
   const board = modelScoreboard([]);

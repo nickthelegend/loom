@@ -1,3 +1,4 @@
+import { notificationMachine } from "./src/r4-phone/model";
 // Must be first: gives Hermes crypto.getRandomValues, which the Loom Cloud
 // relay (noble ciphers, relay-client) needs before any of it loads.
 import "react-native-get-random-values";
@@ -12,6 +13,11 @@ import "react-native-get-random-values";
  * optional; "continue without an account" is remembered.
  */
 
+import { PhoneBoard } from "./src/r4-phone/board";
+import { PhoneProject } from "./src/r4-phone/project";
+import { useNotificationReplies } from "./src/r4-phone/replies";
+import { usePhonePreferences } from "./src/r4-phone/preferences";
+import { setHighContrast } from "./src/theme";
 import { scopeOf } from "./src/cache-model";
 import { parseLocation, accentOf } from "./src/shell-model";
 import { ACCENT_KEY, onAccent, setAccent } from "./src/theme";
@@ -25,7 +31,7 @@ import { useEffect, useState } from "react";
 import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AccountSheet, Avatar } from "./src/account";
-import { decideApproval, getProject, kv, listMachines, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
+import { decideApproval, getProject, phoneApi, kv, listMachines, loadCreds, setUnauthorizedHandler, switchMachine, type Creds, type Project } from "./src/api";
 import { credsOf, machineForPush } from "./src/machines-model";
 import { FleetScreen } from "./src/fleet";
 import { enablePush, onApprovalAction, onNotificationOpen, registerApprovalActions } from "./src/push";
@@ -58,6 +64,9 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const auth = useAuth();
   const lock = usePhoneLock();
+  useNotificationReplies(lock.ready, lock.locked);
+  const phonePreferences = usePhonePreferences();
+  setHighContrast(phonePreferences.highContrast);
   const entry = usePhoneEntry();
   const [revealed, setRevealed] = useState(false);
   useEffect(() => { if (lock.ready && !lock.locked) setRevealed(true); }, [lock.ready, lock.locked]);
@@ -86,7 +95,7 @@ export default function App() {
   }, [creds, lock.ready, lock.locked]);
   // A tapped push notification, waiting for credentials to open its project.
   const [openingTeam, setOpeningTeam] = useState(false);
-  const [opening, setOpening] = useState<NotificationRoute | null>(null);
+  const [opening, setOpening] = useState<(NotificationRoute & { clientId?: string; daemon?: unknown }) | null>(null);
 
   useEffect(() => {
     void Promise.all([loadCreds(), loadAuthSkipped()]).then(async ([saved, skip]) => {
@@ -129,9 +138,10 @@ export default function App() {
   useEffect(
     () =>
       onNotificationOpen((data) => {
+        if ((data as { screen?: string } | null)?.screen === "phone-brief") { setRoute({ name: "board" }); return; }
         if (isTeamMention(data)) { setOpeningTeam(true); return; }
         const r = notificationRoute(data);
-        if (r) setOpening(r);
+        if (r) { const target = data as Record<string, unknown>; setOpening({ ...r, clientId: typeof target.clientId === "string" ? target.clientId : undefined, daemon: target.daemon }); }
       }),
     [],
   );
@@ -139,17 +149,19 @@ export default function App() {
     if (!opening || !creds || !lock.ready || lock.locked) return;
     const want = opening;
     setOpening(null);
-    void getProject(creds, want.projectId)
-      .then(({ project }) =>
-        setRoute({
-          name: "project",
-          project,
-          from: "board",
-          ...(want.chat ? { chat: { id: want.chat, title: "" } } : {}),
-          focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), ...(want.crewId ? { crewId: want.crewId } : {}), n: Date.now() },
-        }),
-      )
-      .catch(() => {}); // a project this pairing can't see (or one since removed): stay put
+    void (async () => {
+      const { machines } = await listMachines();
+      const identities = await Promise.all(machines.map(async m => ({ m, id: await kv.get("loom.push-client." + m.token) })));
+      const machine = notificationMachine(identities, want, true);
+      if (!machine) return;
+      const target = credsOf(machine) as Creds;
+      const { project } = await phoneApi<{ project: Project }>(target, `/api/projects/${want.projectId}`);
+      const active = await switchMachine(machine.id);
+      if (!active || active.token !== target.token) return;
+      setCreds(target);
+      setRoute({ name: "project", project, from: "board", ...(want.chat ? { chat: { id: want.chat, title: "" } } : {}),
+        focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), ...(want.crewId ? { crewId: want.crewId } : {}), n: Date.now() } });
+    })().catch(() => {});
   }, [opening, creds, lock.ready, lock.locked]);
 
   useEffect(() => {
@@ -228,7 +240,8 @@ export default function App() {
           {...(creds ? { onCancel: () => setRoute({ name: "board" }) } : {})}
         />
       ) : route.name === "board" ? (
-        <BoardScreen
+        <PhoneBoard
+          onMachineOpen={(c, project, chat) => { setCreds(c); setRoute({ name: "project", project, chat, focus: { tab: "thread", n: Date.now() } }); }}
           creds={creds}
           initialApprovals={pendingApprovals}
           onApprovalsOpened={() => setPendingApprovals(false)}
@@ -265,7 +278,7 @@ export default function App() {
           }
         />
       ) : (
-        <ProjectScreen
+        <PhoneProject
           key={`${route.project.id}:${route.chat?.id ?? ""}:${route.focus?.n ?? ""}`}
           creds={creds}
           project={route.project}

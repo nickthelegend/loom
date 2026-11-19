@@ -1,5 +1,17 @@
 #!/usr/bin/env node
+import { registerR4Onboard } from "./r4-onboard.js";
+import { registerR4Insights } from "./r4-insights.js";
+import { registerCostCommands } from "./r4-cost.js";
+import { registerR4Orchestra } from "./r4-orch.js";
+import { registerR4Review } from "./r4-review.js";
+import { registerAutomationCli } from "./r4-auto.js";
+import { registerTeamsR4Cli } from "./r4-teams.js";
+import { registerAgenticCli } from "./r4-agentic.js";
+import { registerWorkspaceCommands } from "./r4-workspace.js";
+import { addFromProfile, registerR4Agents } from "./r4-agents.js";
+import { registerPhoneCommands } from "./r4-phone.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
+import { registerR4Brain } from "./r4-brain.js";
 /**
  * loom — one CLI for all your coding agents.
  *
@@ -56,7 +68,7 @@ import {
   holdWaiting,
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
-import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
+import { DEFAULT_PORT } from "../daemon/system.js";
 import { ensureLoomHome, findProject, loomHome, readDaemonConfig } from "../core/registry.js";
 import { formatEvent as formatProgress, runEvents, type ProgressEvent } from "./run-progress.js";
 import { VERSION } from "../version.js";
@@ -206,6 +218,7 @@ program
     }
     const token = readRunnerToken();
     if (readRunnerConfig().enabled && token && !process.env.GH_TOKEN) process.env.GH_TOKEN = token;
+    const { LoomDaemon } = await import("../daemon/server.js");
     const daemon = new LoomDaemon({ host: opts.host, port });
     let bound: { host: string; port: number };
     try {
@@ -254,7 +267,7 @@ program
       return;
     }
     if (running) {
-      const { BUILD_REV } = await import("../daemon/server.js");
+      const { BUILD_REV } = await import("../daemon/system.js");
       const health = (await fetch(`http://${running.host}:${running.port}/api/health`)
         .then((r) => r.json())
         .catch(() => ({}))) as { rev?: string };
@@ -749,7 +762,7 @@ program
   .command("version")
   .description("CLI build vs the daemon's — the mismatch loom up --restart fixes")
   .action(async () => {
-    const { BUILD_REV } = await import("../daemon/server.js");
+    const { BUILD_REV } = await import("../daemon/system.js");
     console.log(`cli     ${BUILD_REV}`);
     try {
       const client = await ensureDaemon();
@@ -1218,7 +1231,7 @@ program
   .option("--since <date>", "created on or after this ISO date")
   .option("--until <date>", "created on or before this ISO date")
   .option("--chat <id>", "include memories scoped to this chat")
-  .action(async (words: string[], opts: { explain?: boolean; kind?: string; agent?: string; since?: string; until?: string; chat?: string }) => {
+  .action(async (words: string[], opts: { explain?: boolean; kind?: string; agent?: string; since?: string; until?: string; chat?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const { hits } = await client.searchBrain(project.id, words.join(" "), {
@@ -1238,9 +1251,9 @@ program
   .description("remember a fact or decision, optionally for only one chat")
   .option("--kind <kind>", "memory kind", "fact")
   .option("--chat <id>", "only inject in this chat")
-  .action(async (words: string[], opts: { kind: string; chat?: string }) => {
+  .action(async (words: string[], opts: { kind: string; chat?: string; paths?: string }) => {
     const client = await ensureDaemon(), project = await currentProject(client);
-    const result = await client.remember(project.id, opts.kind as import("../core/brain.js").MemoryKind, words.join(" "), opts.chat);
+    const result = await client.remember(project.id, opts.kind as import("../core/brain.js").MemoryKind, words.join(" "), opts.chat, opts.paths?.split(",").map(s => s.trim()).filter(Boolean));
     console.log(`${result.memory.id} · ${result.created ? "learned" : "already known"}`);
   });
 
@@ -1249,9 +1262,9 @@ program
   .description("list learned memories, including pin, priority and stale status")
   .option("--stale", "only memories unused for 30 days")
   .option("--archived", "include archived memories")
-  .action(async (opts: { stale?: boolean; archived?: boolean }) => {
+  .action(async (opts: { stale?: boolean; archived?: boolean; tag?: string; sort?: string }) => {
     const client = await ensureDaemon(), project = await currentProject(client);
-    const { memories } = await client.listBrainMemories(project.id, opts.archived);
+    const { memories } = await client.listBrainMemories(project.id, opts.archived, opts.tag, opts.sort);
     for (const m of memories.filter(m => !opts.stale || m.stale)) console.log(`${m.id} ${m.kind} ${m.pinned ? "pinned " : ""}priority=${m.priority ?? 0}${m.stale ? " stale" : ""}${m.archived ? " archived" : ""} · ${m.text}`);
   });
 
@@ -1868,11 +1881,11 @@ program
   .command("brain:export [file]")
   .description("write this project's brain to a file (or stdout) so it can travel")
   .option("--md <file>", "write Markdown inside the repo (refuses an existing file)")
-  .action(async (file: string | undefined, opts: { md?: string }) => {
+  .action(async (file: string | undefined, opts: { md?: string; tag?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    if (opts.md) { const out = await client.exportBrainMarkdown(project.id, opts.md); console.log(`Brain exported → ${out.file}`); return; }
-    const doc = await client.exportBrain(project.id);
+    if (opts.md) { const out = await client.exportBrainMarkdown(project.id, opts.md, opts.tag); console.log(`Brain exported → ${out.file}`); return; }
+    const doc = await client.exportBrain(project.id, opts.tag);
     const json = JSON.stringify(doc, null, 2);
     if (file) {
       const fs = await import("node:fs");
@@ -3333,6 +3346,7 @@ program
       if (a === "exec") {
         // Inside a runner's container: run one claimed job, then exit (D70).
         if (!opts.job || !opts.team) throw new Error("runner exec needs --job and --team");
+        const { LoomDaemon } = await import("../daemon/server.js");
         const daemon = new LoomDaemon({ host: "127.0.0.1", port: 0, runnerExec: { teamId: opts.team, jobId: opts.job, done: (ok) => process.exit(ok ? 0 : 1) } });
         await daemon.listen();
         return;
@@ -3524,7 +3538,9 @@ program
   });
 
 program
-  .command("agents:add <kind>")
+  .command("agents:add [kind]")
+  .usage("<kind> [options] | --profile <name> [options]")
+  .option("--profile <name>", "use a saved agent profile")
   .option("--account <id-or-label>", "CLI account to use (loom accounts)")
   .description("add agent sessions to this project")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
@@ -3539,8 +3555,9 @@ program
   .option("--cmd <command>", 'for acp: the ACP agent command, e.g. "gemini --experimental-acp"')
   .action(
     async (
-      kind: string,
+      kind: string | undefined,
       opts: {
+        profile?: string;
         as?: string;
         account?: string;
         role?: string;
@@ -3554,6 +3571,8 @@ program
         cmd?: string;
       },
     ) => {
+    if (opts.profile) return addFromProfile(kind, { ...opts, profile: opts.profile }, ensureDaemon, currentProject);
+    if (!kind) return fail("specify a kind or --profile");
     const count = Number(opts.count);
     if (!Number.isInteger(count) || count < 1 || count > 8) fail("--count must be an integer from 1 to 8");
     const client = await ensureDaemon();
@@ -5481,6 +5500,19 @@ program.command("completion")
     if (shell === "candidates") console.log(completionWords(program, expandAlias(words, readAliases(), program.commands.map(c => c.name())), Object.keys(readAliases())).join("\n"));
     else console.log(completionScript(shell));
   });
+
+registerR4Onboard(program, { ensureDaemon, currentProject });
+registerR4Insights(program);
+registerR4Brain(program, ensureDaemon, currentProject);
+registerCostCommands(program, ensureDaemon);
+registerR4Orchestra(program, ensureDaemon, currentProject);
+registerR4Review(program);
+registerAutomationCli(program, ensureDaemon, currentProject);
+registerTeamsR4Cli(program, ensureDaemon, currentProject);
+registerAgenticCli(program);
+registerWorkspaceCommands(program);
+registerR4Agents(program, ensureDaemon, currentProject);
+registerPhoneCommands(program);
 
 async function main() {
   const args = process.argv.slice(2);

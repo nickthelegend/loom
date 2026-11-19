@@ -112,7 +112,8 @@ describe("Orchestra 2.1 batch", () => {
   });
 
   it("detects idle workers, clears stalls on reports and safely reassigns just one task", async () => {
-    const run = await start({ goal: "sleep:2500", workers: ["worker", "lead"], stallMinutes: 0.005 });
+    // the task must outlive two stall windows and a report even on a slow runner; the run is aborted at the end
+    const run = await start({ goal: "sleep:10000", workers: ["worker", "lead"], stallMinutes: 0.005 });
     await waitUntil(async () => (await get(run)).tasks.every(t => Boolean(t.stalledAt)));
     const task = (await get(run)).tasks[0]!;
     const originalDir = task.dir;

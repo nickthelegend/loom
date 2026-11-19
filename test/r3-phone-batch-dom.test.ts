@@ -84,7 +84,8 @@ it("cancels a hold when scrolling and leaves the existing click-to-review intera
   row.dispatchEvent(new m.w.MouseEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }));
   row.dispatchEvent(new m.w.MouseEvent("pointermove", { bubbles: true, clientX: 0, clientY: 30 }));
   await new Promise(r => setTimeout(r, 550));
-  expect((m.w.document.querySelector("#box") as HTMLTextAreaElement).value).toBe("");
+  // The chat draft is saved on the daemon, so an earlier test's text may come back; the cancelled hold adds nothing.
+  expect((m.w.document.querySelector("#box") as HTMLTextAreaElement).value).not.toContain("reviewed.txt:1 (new)");
   row.dispatchEvent(new m.w.MouseEvent("click", { bubbles: true }));
   expect(m.w.document.querySelector(".cmteditor input")).not.toBeNull();
 });

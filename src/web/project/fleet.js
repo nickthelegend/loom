@@ -173,7 +173,7 @@ export function createFleet(view) {
       return '<div class="frow' + (a.busy ? " busy" : "") + '" data-fagent="' + esc(a.id) + '">' +
         '<span class="fg">' + agentGlyph(a.kind, a.id) + "</span>" +
         '<span class="fn"><b>' + esc(lbl) + "</b>" + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</span>" +
-        '<span class="fs">' + (a.busy ? '<span class="fspin"></span>working' + (a.since ? " \u00b7 " + fleetSince(a.since) : "") : '<span class="fidle"></span>idle') + "</span>" +
+        '<span class="fs">' + (a.busy ? '<span class="fspin"></span>working' + (a.since ? " \u00b7 " + fleetSince(a.since) : "") : '<span class="fidle"></span>' + (a.asleep ? 'Asleep' : 'idle')) + "</span>" +
         '<span class="fa">' +
           (a.chat ? '<button class="fthr" type="button" data-fchat="' + esc(a.chat) + '" data-fpid="' + esc(info.id) + '" title="open this thread">' + ICONS.thread + "<span>" + esc(chatName) + "</span></button>" : "") +
           (last && last.line ? '<span class="fline">' + esc(last.line) + '<span class="ft">' + rel(last.ts) + "</span></span>" : (a.chat ? "" : '<span class="fline">no activity yet</span>')) +

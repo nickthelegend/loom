@@ -366,7 +366,7 @@ import { ORCH_RUN_ST } from './transcript.js';
           html: "loom/review on " + who + "’s " + pr + (m.reviewer ? " by " + esc(labelOf(String(m.reviewer))) : "") + ": " + verdict };
       }
       // Phase 4: landing safely (D52–D64)
-      case "mention": return { icon: ICONS.team, cls: "", html: who + " mentioned <b>@" + esc(m.to) + "</b> · " + esc((c && c.text) || "") };
+      case "mention": return { icon: ICONS.team, cls: "", html: who + " mentioned <b>@" + esc(m.to) + "</b> · " + mentionShareHtml((c && c.text) || "") };
       case "goal_landed": return { icon: ICONS.check, cls: "ok", html: who + "’s " + teamFeedGoal(m.runId, c) + " landed — " + pr + " merged" + (m.costUsd ? " (" + money(m.costUsd) + ")" : "") };
       case "goal_needs_someone": return { icon: ICONS.alert, cls: "warn", html: who + "’s " + pr + " needs someone" + (m.reason ? ": " + esc(String(m.reason)) : "") };
       case "goal_adopted": return { icon: ICONS.team, cls: "live", html: "<b>" + esc(m.by || e.github || "someone") + "</b> adopted " + (m.owner ? "<b>" + esc(m.owner) + "</b>’s " : "") + pr };
@@ -442,6 +442,13 @@ import { ORCH_RUN_ST } from './transcript.js';
   }
 
   var teamFeedFilters = {};
+  function mentionShareHtml(text){
+    return String(text || '').split(/(https?:\/\/[^\s]+)/g).map(function(part){
+      try { var url = new URL(part); if (!url.username && !url.password && /^\/share\/[A-Za-z0-9_-]{20,64}$/.test(url.pathname)) return '<a href="' + esc(url.href) + '" target="_blank" rel="noopener noreferrer">Open shared work</a>'; } catch (e) {}
+      return esc(part);
+    }).join('');
+  }
+
   function teamFeedHtml(t, n){
     var feed = (t.feed || []).slice(-100).reverse();
     var head = '<div class="tsech">Team feed<span class="n">' + (t.feed || []).length + "</span></div>";

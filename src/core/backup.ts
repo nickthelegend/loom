@@ -19,6 +19,7 @@ import path from "node:path";
 import { listProjects, loomHome } from "./registry.js";
 
 const SKIP_HOME = new Set(["orchestra", "crews", "proof", "models", "backups"]);
+SKIP_HOME.add("agent-environment");
 
 export interface BackupResult {
   file: string;

@@ -7,6 +7,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Help centre (#449): bundled searchable guides, a palette command and status-bar Help button, `loom guide`, `/api/help`, and phone Help.
+- What's new (#449): installed-version highlights appear once per device after an update, with Show me links, `loom whatsnew`, and replay from Help.
+- Feature tours (#449): replayable Orchestra, Brain, Triggers and Review walkthroughs extend the existing demo engine and remember device progress.
+- Terminal tutorial (#449): four interactive offline Demo lessons for send, steer, fleet and memory, with saved progress and `--resume`.
+- Project readiness (#449): scored API, `loom ready --fix`, web Settings and phone Project tools, with previews and additive instruction/ignore fixes.
+- Starter prompts (#449): existing generic empty-chat suggestions now use detected stack and Git state through a shared API on web and phone.
+- Starter templates (#449): extend the existing template API and pickers with API, CLI, static-site and Python starters; `loom init --template` also accepts directories and Git URLs.
+- Demo scenarios (#449): extend `loom try` with offline fleet, multi-agent review and learned/reused memory scenarios, plus web and phone buttons.
+- Provider setup guide (#449): extend existing provider controls with four tested steps in Settings ▸ Setup and `loom providers:guide`, from a key to a default model agent.
+- Examples library (#449): install bundled recipes, fleets, disabled project triggers and prompt templates from Home, phone or `loom examples install` without replacing existing examples.
+
+- Extend existing tool counters with correlated outcomes, failure rates and measured average duration by tool and agent in `loom insights tools`, project APIs, Observatory and phone cards (#450).
+- Extend existing turn-duration metrics with first-output and turn p50/p95 by model and agent, durable stream timing, `loom insights latency`, APIs and Observatory charts (#450).
+- Approval wait percentiles, responders and most-asked commands in `loom insights approvals` and Observatory, with confirmed owner/owner-phone suggestions for non-shell tool-wide allow rules (#450).
+- Extend digest error collapsing with normalized failed-turn groups, counts, last-seen times and example links in `loom insights errors`, project APIs, Observatory and the phone (#450).
+- Compare adjacent periods for turns, finish rate, spend and changed lines via `loom insights compare --period 7d`, the project API, Observatory tiles and digest direction markers (#450).
+- Extend the event log with filtered, paginated `loom events` queries, a project query API and an Observatory table with saved per-project filters (#450).
+- Project reliability and speed alert rules for finish rate, turn minutes, errors per hour and queue depth, persisted and evaluated by the daemon with existing desktop/phone notifications; CLI, web and phone create/list/pause/test controls (#450).
+- Extend existing file diff statistics with edit, re-edit and rewind hot spots via `loom insights files`, project APIs and an Observatory card that opens files (#450).
+- Agent working-time timesheets by project, agent and UTC day, excluding recorded human waits and overlapping work; `loom insights hours --csv`, project APIs, an Observatory chart and phone summary (#450).
+
+- Price overrides in USD per million tokens through `loom prices`, `/api/prices`, and Settings → Models, shared by existing estimates without inventing unknown prices (#452).
+- Export existing usage breakdowns by agent, model, chat or day with date filters, JSON/CSV CLI and API output, a Usage download, and phone sharing; exports include every chat (#452).
+- Per-chat spend caps through `loom chat:budget`, the project API and web/phone chat cost menus, with a needs-you state and Raise action before another turn starts (#452).
+- Calendar-month project budgets with an 80% warning, month-end run-rate projection, CLI controls, and progress bars in web and phone Usage (#452).
+- Per-project spend alert preferences in Settings and `loom budget:alerts`, delivering agent, chat, daily model and monthly warnings/pauses through configured Slack, Discord, SMTP or paired-phone push destinations (#452).
+- What-if token repricing with `loom costs:whatif`, the project API and “On another model” chat controls on web and phone, preserving unknown-price markers (#452).
+- Extend existing cache-hit percentages with per-model money saved at known cache prices in Usage, `loom costs --cache`, CSV exports and phone usage bars (#452).
+- Compare model prices, catalog context sizes, last health latency, recorded finish rates and average costs through `loom models:compare` and the web model picker (#452).
+- Extend existing recorded standings and saved fleets with budget-aware `loom fleets:suggest`, `/api/fleets/suggest`, and web/phone fleet-editor suggestions with a reason for each pick (#452).
+- Opt-in Saver mode at a chosen share of daily or monthly spend, selecting a named alias only when there is no explicit agent, chat or turn model; configure it on web/phone or `loom budget:saver`, with a composer indicator and thread note (#452).
+
+- Add tasks to active Orchestra runs with optional worker/model and dependency selection through `orchestra:add`, the project API, web and phone (#453).
+- Skip individual Orchestra tasks without aborting the run; dependent tasks retain an explicit skipped reason, with CLI, web and phone controls (#453).
+- Hold and release an Orchestra run's dispatch while current workers finish; durable Held indicators and controls on web, phone and CLI (#453).
+- Extend the existing plan-only preview with validated rename, remove, reorder and reassignment editing on web/phone, plus `orchestra:approve --plan edited.json` (#453).
+- Replay saved Orchestra plans with `orchestra:rerun`, optional replacement fleets and failed-task selection, and Run again on web/phone (#453).
+- Compare two saved Orchestra runs through `orchestra:diff`, the project compare API and web/phone views of outcomes, elapsed time, cost and changed files; complements the existing Ask several agent comparison (#453).
+- Export complete Orchestra run reports with goals, task results, costs, times, changed files and open questions via `orchestra:report --md`, API, web Download and phone Share; complements worker progress reports (#453).
+- Require per-worker done checks with `--check` and recipe/run options; bounded repair rounds return failure output to workers before integration, with web/phone configuration (#453).
+- Extend existing worker timeout support with `--task-minutes`: tasks exceeding their per-turn limit need a human to Extend, Reassign or Skip, available through API and web/phone (#453).
+- Broadcast notes with `orchestra:say` and web/phone Note to all: current workers receive live steering or a queued follow-up, and later worker briefings retain the note (#453).
+
+- **Review inbox (#454).** `loom review:inbox`, the scoped API, a Home card and the phone inbox collect unreviewed chat and run changes, including unmerged run task branches. Loaded projects share cached event projections; unopened projects are reported without starting agents, and clients refresh once a minute or on request.
+- **Keep or discard a hunk (#454).** Web and phone diffs can stage or discard a version-checked hunk, with Undo for the last discard and protection for unrelated staged files and project boundaries.
+- **Loom line attribution (#454).** `loom blame <file>[:line]` and “Who wrote this?” trace recorded line edits to their chat, turn, agent and prompt, remapping line offsets through later turns.
+- **Change summaries (#454).** Extends the existing review triage with per-file plain-language summaries, lockfile and large-change flags, `loom review:summary`, and web and phone review panels.
+- **Resolve conflicts with an agent (#454).** `loom git:resolve` and web/phone controls hand both sides and the base to the selected agent, including conflicts prepared from an Apply or landing branch; Visible conflict actions open the review panel; failed hand-offs abort only merges they prepared. Holds are local to the project checkout, clear after an external commit or abort, and can be released explicitly.
+- **Verify before commit (#454).** Owner-configured project commands run asynchronously after existing secret checks and before manual, automatic and split commits in that checkout. Verification defaults to ten minutes (`verifyTimeoutMs` is configurable); failures and timeouts hold the commit, retain output, and can be sent to an agent from CLI, web or phone.
+- **Split commits (#454).** `loom git:split [--apply]` proposes offline file groups by directory and type, optionally refined by a model; web and phone editors can adjust groups before committing through existing hooks and safety checks.
+- **Pull request review (#454).** `loom review:pr <number|url> [agents…]` extends existing read-only reviewers to GitHub and GitLab diffs, with saved editable comment drafts on web and phone for users to copy and post themselves. Scoped callers can fetch only the project origin repository; owners may review other repositories.
+- **Viewed files (#454).** Versioned per-chat and per-run markers show review progress on web and phone; subsequent file changes invalidate viewed state and return changes to the inbox.
+
+- Debounced file-change triggers with `--on-change`, `{{files}}`, admin-only configuration, bounded 15-second checks in open projects, and exclusion of `.git`, `.loom`, and worktrees (#455).
+- Project event triggers for failed turns, merged PRs, failed CI, completed Orchestra runs, and expired approvals, with event fields and protection against self-triggering and automation chains (#455).
+- Branch triggers watch local and fetched remote-tracking commits and supply `{{commits}}` and `{{range}}` (#455).
+- Plain-language schedules preview their cron expression and next five runs in CLI, web, and phone; creation and editing retain the existing admin-only gate, with run/pause/resume available to the owner’s phone (#455).
+- Trigger conditions for clean/dirty trees, file globs, local hours, and owner-only bounded commands record skipped firings in run history (#455).
+- Owner-managed automation quiet hours hold triggers and timed queue prompts durably and release them afterwards, with web and phone held counts (#455).
+- Extended existing signed Orchestra completion webhooks into project event subscriptions with the same secret and headers, durable delivery logs, retries, and Send again controls (#455).
+- Schedules, incoming webhooks, and event triggers can queue Orchestra recipes, Orchestra goals, or saved routes (#455).
+- Public URL watches detect page or selected JSON-value changes with old/new prompt values, bounded responses and timeouts, and DNS-pinned public-address checks (#455).
+- Pause all automation indefinitely or for a duration; triggers pause after configurable consecutive failures and notify the owner through the existing needs-input channel (#455).
+
+- **Repo prompt templates (#456).** `loom shared templates publish <name>` writes `.loom/shared/templates/<name>.md`; web and phone Team libraries show validated Team entries alongside personal templates, with variable rendering.
+- **Repo Orchestra recipes (#456).** `loom shared recipes publish <name>` writes `.loom/shared/recipes/<name>.json`; CLI, web and phone can explicitly run a shared recipe, with actionable errors for fleet entries unavailable locally.
+- **Pass a chat (#456).** `loom pass @login --chat <id> --note "…"` and web/phone Pass actions deliver an expiring read-only hand-off with a summary, branch and open questions through the existing encrypted teammate mention. Links use a reachable address when available and explain when a teammate needs Share-live or network access.
+- **Team standup (#456).** `loom team standup --since 1d [--post slack|discord]` and web/phone Team cards group starts, merges and waiting work by person using the existing feed, presence and local history; posting is POST-only and requires the owner or a bridge bound to that project.
+- **Review requests (#456).** `loom share --review @login` and web/phone review actions share a changes snapshot through a mention. Visitors can approve or request changes with a note; verdicts appear as chat annotations and never enter agent input.
+- **Shared-chat comments (#456).** Read-only visitors can comment on a message with a self-reported name. Links cap lifetime submissions at 100; owners can reply or remove annotations on web and phone, including after revocation. Dollar sequences in comments and transcript labels remain literal.
+- **Share changes (#456).** `loom share --changes`, Source Control's Share changes button and phone sharing create expiring read-only file lists and redacted per-file diff snapshots, including new files.
+- **Share-link controls (#456).** Optional passcodes, successful-open counts, last-opened times and an opt-in first-open desktop/web/phone notification extend existing read-only links. Passcodes are hashed and visitor grants expire with the link. Stored payloads are cleared on revocation or expiry cleanup, annotations are retained for 30 days after expiry, and link reads are cached.
+- **Follow in Share live (#456).** Guests can follow the owner's scroll position and open-file preview in their shared chat; presence shows who is following. File previews are sent only while a guest follows, with immediate updates on entry and chat switches. Following pauses when the owner leaves the shared chat and never opens a private chat.
+
+- MCP `loom://` resources expose scoped chats, memories, boards and Orchestra run reports over HTTP and stdio (#457).
+- Existing named prompt templates are also MCP prompts, with required arguments from their `{{variables}}` (#457).
+- Six MCP tools expose the existing queue, approvals, task retry, review, costs and triggers with project access checks (#457).
+- `loom_consult` asks another agent or model a read-only side question, records the exchange in the asking thread and charges its usage to the asking agent (#457).
+- Extend the existing Loom-tools switch with per-tool project controls in web Preferences and phone Tools, plus attributed call logs and `loom mcp:log` (#457).
+- `loom api` makes authenticated daemon calls with inline or file JSON and a nonzero exit on HTTP errors (#457).
+- Owner-enabled project hooks execute `.loom/hooks/turn-finished`, `needs-you` and `run-completed` with bounded execution, JSON stdin, project logs, CLI and web/phone controls; consent stays outside the repository (#457).
+- Draft a disabled, editable SKILL.md from a finished chat using `loom skill:from-chat`, the web Save as skill menu or phone Tools; `loom skill:lint` checks front matter (#457).
+- TUI Orchestra and Approvals tabs and palette entries show runs, live tasks and pending decisions, with task retry and allow/deny commands (#457).
+- `loom wait <chat|run>` waits for a chat to become idle or a run to settle, with outcome exit codes, timeout and one-object JSON output (#457).
+
+- **Desktop tray (#459).** Running-turn count, needs-you and running-chat menus, chat navigation and a quick-send window; Preferences offers “Keep Loom running in the tray when the window closes” (opt-in on Windows/Linux); a missing tray host falls back to quitting. Tray refreshes run every 10 seconds.
+- **Mission control (#459).** A live cross-project chat grid with last line, elapsed time, reported cost and inline Stop/Steer, available from Home, the palette, `GET /api/mission` and `loom mission`. Orchestra/Crew controls target their own instances and label when Stop ends the run or crew. Event-driven projections avoid per-chat history scans; windows and panes share 10-second polls.
+- **Needs-you inbox (#459).** Pending approvals, agent questions, failed turns and paused runs in one panel with j/k and a/d triage, sidebar count, `GET /api/inbox` and `loom inbox`; scoped devices see only their projects. Loaded logs use bounded, incremental projections, dormant paused metadata is cached without opening event logs, and later turns clear resolved failures.
+- **Named layouts (#459).** Split persistence already existed; named arrangements now retain each pane's project/chat and reopen from the palette or desktop Window menu, with owner-device persistence and per-window active arrangements.
+- **Chat pop-outs (#459).** Browser and desktop windows open a chat with minimal chrome, independent navigation and the existing live event stream shared with the main window.
+- **Project notes (#459).** Daemon-stored Markdown notes in a right-side pad, selection-to-chat sending, `GET/PUT /api/projects/:id/notes`, `loom notes`, and phone read/edit views; revision checks prevent overwriting edits from another device.
+- **Custom colour themes (#459).** Extends existing light/dark and accent presets with four bundled themes, validated JSON import/export and live previews with Apply/Cancel in Preferences → Appearance.
+- **Project organisation (#459).** Chat pinning/folders already existed; projects now support pins, named collapsible sections and drag ordering, saved for the owner and refreshed across windows.
+- **Recent-chat switcher (#459).** Ctrl+Tab / Ctrl+Shift+Tab preview recently used chats across projects and open the selection on release, preserving independent split-pane selections.
+- **Files from this chat (#459).** A panel and `loom chat-files` index received attachments and produced images/screenshots, with authenticated open/download, copy-path and jump-to-message actions, confined to existing files inside the source project, with code-reference fragments and line numbers normalized.
+
+- **Agent profiles (#458).** Save kind, model, effort, access and standing instructions with `loom profiles save|list|rm`; use `loom agents:add --profile` or the web and phone Add agent profile pickers.
+- **Archive improvements (#458).** Extend existing archive menus with `loom chat:archive --restore`, archived-only lists and search, phone archive browsing, and optional per-project idle auto-archive.
+- **Chat labels (#458).** `loom chat:label` and web/phone label editors add colored chips and label filters to chat lists.
+- **Turn time limits (#458).** Project and agent settings bound turn duration, interrupt the exact agent through existing admission controls, and show needs-you with Continue; configure from Settings or `loom agents:limit --turn-minutes`.
+- **Idle sleep (#458).** Stop idle processes while preserving roster, baton and saved sessions; wake on the next message and show Asleep in the web, phone and `loom agents`.
+- **Catch me up (#458).** `loom catchup` and unread controls summarize new activity offline, with an explicit helper-model opt-in.
+- **Duplicate agents (#458).** `loom agents:clone --count --model` and web/phone Duplicate actions copy settings into independent sessions without copying environment secrets or native session IDs.
+- **Per-agent environment (#458).** Owner and unscoped-device editors and `loom agents:env` set private daemon-side values for process startup; clients see names only, event and stream output redact values of at least eight characters, and backups exclude them.
+- **Retry policy (#458).** Optional bounded retries with backoff handle rate-limit/network failures only when no file changed, retain Stop/admission and budget checks, and show and account for each attempt.
+
+- **Phone Now (#460).** Running turns, unanswered questions and approvals from every paired computer open the correct project and chat; background requests use independent pairing transports. Held approvals include their deadline, retry when quiet ends, and leave a visible timeout entry. Also available in the web panel and `loom phone now`.
+- **Phone quiet hours and snooze (#460).** Shared owner nightly windows defaulting to the phone/browser timezone, Snooze 1h / until morning and an explicit hold-approvals choice are persisted by `PUT /api/push/quiet` and enforced before push delivery; phone, web and CLI controls are included.
+- **Per-chat notifications (#460).** Long-press a phone chat row or use the web chat menu to choose all, needs-you only or muted; the daemon shares owner preferences across web and phones; scoped pairings stay isolated. Chat mute always allows approvals. `loom phone notify` changes the same preference.
+- **Notification text replies (#460).** Finished-turn and question alerts offer Reply, routed by pairing identity through the existing persistent outbox and delivery receipts after the biometric lock opens; reconnect retries also cover non-active computers.
+- **Phone quick replies (#460).** Editable, reorderable local chips above the composer insert Continue, Run the tests or Explain that; the web composer has matching locally saved replies.
+- **Phone wide layout (#460).** Tablet and landscape screens show a project tab rail, chat list and the existing project pane together; switching tabs and chats keeps the screen's existing draft state.
+- **Morning brief (#460).** A phone Board card combines yesterday's finished turns and spend with waiting PRs across paired computers, including unavailable-source notices. An optional local daily reminder opens the Board; web and `loom phone brief` expose the same report.
+- **Phone chat swipe actions (#460).** Swipe a chat row for existing pin/read controls plus mute, with haptic feedback and an undo toast; long-press provides the same accessible actions.
+- **Phone trigger editing (#460).** Extends the shipped run/pause list with owner-phone schedule and webhook creation/editing, agent selection, next-runs preview and one-time webhook secrets. The existing API accepts `phoneEditor: true` for these owner operations while preserving legacy clients.
+- **Phone text size and contrast (#460).** Device-local text scale and high contrast apply to chat, diffs and terminal output, with matching web appearance controls.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,
@@ -35,6 +154,17 @@ Release notes: docs/release-notes/v2.1.0.md.
 - **Scoreboard CSV (#418).** Export recorded model standings with `loom scoreboard --csv`, the web download button, or phone sharing; quoted cells preserve data and neutralize spreadsheet formulas.
 - **Agent option validation (#418).** Validate argument arrays, typed options, sampling and effort before saving; web/phone editors and `loom agents:options` show actionable errors without replacing valid configuration.
 - **Weekly scoreboard digest (#418).** `loom digest --scoreboard`, the web scoreboard and phone model settings summarize seven days of results; owners can opt into a once-per-Monday UTC desktop notification that survives restarts.
+
+- **Ask the brain (#451):** offline answers with cited memory ids through `brain:ask`, the project API and web/phone Memory; the configured helper model is an explicit opt-in.
+- **Memory tags (#451):** persistent tags, editable chips and filters on web/phone, `brain:tag`, and `--tag` on search, list and export; tags survive portable round trips.
+- **Path-scoped memories (#451):** `brain:add --paths` and web/phone editors restrict briefings to mentioned files or recent chat edits, including pins, with file matches in `brain:why`.
+- **Project brain inbox (#451):** opt into review before saving extracted memories, then approve, edit or reject through the project API, web/phone or `brain:inbox`; pending proposals never enter retrieval.
+- **Brain packs (#451):** save filtered packs, install JSON files or owner-authorized bounded public URLs, list and remove whole packs using `brain:pack` and web/phone controls while preserving scope, privacy, expiry and outside-content trust.
+- **Memory usage and feedback (#451):** extend existing usage counts, web sorting and turn explanations with Helpful/Wrong feedback, review of wrong memories, phone usage sorting and `brain:stats`.
+- **Docs as knowledge (#451):** `brain:sources` and web/phone controls index repo Markdown/text into read-only chunks, refresh changed files before retrieval with bounded, failure-tolerant scans and stable chunk ids, and cite file/line origins in answers and turn explanations.
+- **What the brain learned (#451):** `brain:diff --since 7d`, the project changes API and web/phone change strips show additions, edits, merges and archives from the event journal.
+- **Learn from merged PRs (#451):** tracked merge events collect PR titles, descriptions and review comments as lower-trust, chat-scoped memories; review mode holds them in the project inbox learning starts with new merges, skips short comments, caps proposals and stops retries after three failures.
+- **Brain interview (#451):** `brain:teach` and web/phone forms ask for test commands, conventions and areas to leave alone, then save the answers as typed project memories.
 
 - **Memory search filters (#419):** combine kind, learning agent and inclusive creation dates in the web/phone Memory views and `loom brain:search` flags.
 - **Markdown brain export (#419):** extend JSON export with `loom brain:export --md docs/BRAIN.md` and web/phone controls; repo writes require owner/admin, stay inside the repo and preserve existing files.

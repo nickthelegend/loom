@@ -28,10 +28,11 @@ export function OrchestraRecipes(props: { creds: Creds; projectId: string; onRun
 export function OrchestraOptionFields(props: {
   budget: string; setBudget: (s: string) => void; stall: string; setStall: (s: string) => void;
   limits: string; setLimits: (s: string) => void; webhook: string; setWebhook: (s: string) => void;
+  check: string; setCheck: (s: string) => void; checkRounds: string; setCheckRounds: (s: string) => void; taskMinutes: string; setTaskMinutes: (s: string) => void;
   planOnly: boolean; setPlanOnly: (b: boolean) => void;
 }) {
   return <View style={{ gap: 8 }}>
-    {[["Budget (USD)", props.budget, props.setBudget], ["Stalled after (minutes)", props.stall, props.setStall],
+    {[["Done check command", props.check, props.setCheck], ["Check repair rounds", props.checkRounds, props.setCheckRounds], ["Task time limit (minutes)", props.taskMinutes, props.setTaskMinutes], ["Budget (USD)", props.budget, props.setBudget], ["Stalled after (minutes)", props.stall, props.setStall],
       ["Per-kind limits (e.g. echo=2)", props.limits, props.setLimits], ["Completion webhook URL", props.webhook, props.setWebhook]].map(([label, value, setter]) =>
       <View key={String(label)}><Text style={{ color: T.dim }}>{String(label)}</Text><TextInput accessibilityLabel={String(label)} style={field} value={value as string} onChangeText={setter as (s: string) => void} autoCapitalize="none" /></View>)}
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Switch value={props.planOnly} onValueChange={props.setPlanOnly} /><Text style={{ color: T.text }}>Approve plan before starting workers</Text></View>
@@ -55,11 +56,8 @@ export function OrchestraRunExtras(props: { creds: Creds; projectId: string; run
     } catch (e) { setMessage((e as Error).message); }
     finally { setBusy(false); }
   };
-  const preview = run.planOnly && !run.planApprovedAt;
   const retry = run.tasks.filter(t => !run.applied && run.status !== "moved" && (t.stalledAt || ["failed", "cancelled", "conflict", "needs_input"].includes(t.status)));
   return <View style={{ gap: 8 }}>
-    {preview ? <View><Text style={{ color: T.text }}>Plan preview</Text>{run.tasks.map(t => <Text selectable key={t.id} style={{ color: T.dim, marginVertical: 6 }}>{t.title}{"\n"}{t.prompt}{"\n"}After: {t.dependsOn.join(", ") || "none"}</Text>)}
-      {run.tasks.length && run.status === "waiting_human" ? <Action title="Approve plan" disabled={busy} onPress={() => void action("/approve-plan", {})} /> : null}</View> : null}
     <Text style={{ color: T.dim }}>Spent ${run.costUsd.toFixed(3)} · budget {run.budgetUsd == null ? "uncapped" : `$${run.budgetUsd}`}</Text>
     {!["completed", "failed", "aborted", "moved"].includes(run.status) ? <View><TextInput accessibilityLabel="Run budget in USD" placeholder="Budget in USD" placeholderTextColor={T.faint} style={field} value={budget} onChangeText={setBudget} keyboardType="decimal-pad" />
       <Action title="Set budget" disabled={busy || !budget} onPress={() => void action("/budget", { maxUsd: Number(budget) })} /></View> : null}

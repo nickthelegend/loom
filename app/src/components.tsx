@@ -1,10 +1,11 @@
+import { Text } from "./r4-phone/preferences";
 import { diffLocations, type DiffLocation } from "./phone-batch-model";
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
 import { MessagePressable, type ChatActions } from "./chat-composer";
 
 import { createContext, useContext, useState } from "react";
-import { Alert, Image, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Image, Platform, Pressable, ScrollView, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
 import { actOnLoop, interrupt, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";

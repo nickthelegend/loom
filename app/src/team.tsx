@@ -1,5 +1,6 @@
+import { R4Standup } from "./r4-teams";
 import { TeamSharing } from "./sharing";
-import { filterTeamActivity } from "./sharing-model";
+import { filterTeamActivity, mentionShareUrl } from "./sharing-model";
 /**
  * Loom Teams on the phone: which of your teammates' agents are live right now
  * and what they're about. Intent only (goal and task titles, the files each
@@ -456,7 +457,7 @@ function TouchedFiles(props: { presence: TeamPresence[] }) {
 
 function FeedRow(props: { e: TeamFeedEvent; now: number }) {
   const { e } = props;
-  const url = e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_") || e.type.startsWith("deploy_")
+  const url = e.type === "mention" ? mentionShareUrl(e.content?.text) : e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_") || e.type.startsWith("deploy_")
     ? openable(e.meta?.url) ?? openable(e.meta?.prUrl)
     : openable(e.meta?.prUrl);
   const color = FEED_COLOR[e.type] ?? T.faint;
@@ -503,7 +504,7 @@ function FeedRow(props: { e: TeamFeedEvent; now: number }) {
       onPress={() => void Linking.openURL(url).catch(() => {})}
       activeOpacity={0.7}
       accessibilityRole="link"
-      accessibilityLabel={`${sentence(e)}. Open on GitHub`}
+      accessibilityLabel={`${sentence(e)}. ${e.type === "mention" ? "Open shared work" : "Open on GitHub"}`}
       style={{ ...style, minHeight: TAP, alignItems: "center" }}
     >
       {body}
@@ -918,6 +919,7 @@ export function TeamSection(props: { creds: Creds; refreshKey?: number }) {
   return (
     <View style={{ gap: spacing.sm }}>
       <SectionLabel text={team && teams.length === 1 ? `Team · ${team.name}` : "Team"} />
+      <R4Standup creds={props.creds} />
       {body}
       {err && status ? <Text style={{ color: T.err, fontSize: 12, textAlign: "center" }}>{err}</Text> : null}
     </View>

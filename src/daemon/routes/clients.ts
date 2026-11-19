@@ -29,7 +29,7 @@ export function registerClientsRoutes(app: Express, ctx: Pick<RouteContext, "aut
     if (!token?.trim()) return void res.status(400).json({ error: "missing token" });
     const wanted = Array.isArray(kinds) ? kinds.filter((k): k is string => typeof k === "string" && (PUSH_CATEGORIES as string[]).includes(k)) : undefined;
     ctx.auth.setPushToken(me.id, token.trim(), platform, wanted, groupByProject === true);
-    res.json({ registered: true, kinds: wanted ?? PUSH_CATEGORIES });
+    res.json({ registered: true, clientId: me.id, kinds: wanted ?? PUSH_CATEGORIES });
   });
 
   app.delete("/api/push/register", (req, res) => {

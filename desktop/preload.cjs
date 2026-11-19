@@ -16,6 +16,8 @@ window.addEventListener("DOMContentLoaded", function () {
 // passthrough. The browser build just types the path instead.
 contextBridge.exposeInMainWorld("loomNative", {
   webview: true,
+  tray: function (enabled) { return ipcRenderer.invoke("loom:tray", enabled); },
+  popChat: function (url) { return ipcRenderer.invoke("loom:pop-chat", url); },
   pickFolder: function () {
     return ipcRenderer.invoke("loom:pick-folder");
   },

@@ -1,3 +1,4 @@
+import { AgenticToolsPanel } from "./r4-agentic";
 /**
  * Tools — the three project surfaces the phone was missing entirely:
  *
@@ -61,9 +62,10 @@ import {
 import { Sheet } from "./observatory";
 import { T, radii, spacing } from "./theme";
 
-type ToolsTab = "skills" | "mcp" | "agents";
+type ToolsTab = "skills" | "mcp" | "agents" | "loom";
 
 const TOOLS_TABS: ReadonlyArray<{ key: ToolsTab; label: string }> = [
+  { key: "loom", label: "Loom" },
   { key: "skills", label: "Skills" },
   { key: "mcp", label: "MCP servers" },
   { key: "agents", label: "Agents" },
@@ -76,7 +78,9 @@ export function ToolsView(props: { creds: Creds; project: Project; onAgentsChang
       <View style={{ borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: T.panel }}>
         <Segmented options={TOOLS_TABS} value={tab} onChange={setTab} accent={T.line2} />
       </View>
-      {tab === "skills" ? (
+      {tab === "loom" ? (
+        <AgenticToolsPanel creds={props.creds} projectId={props.project.id} />
+      ) : tab === "skills" ? (
         <SkillsPanel creds={props.creds} projectId={props.project.id} />
       ) : tab === "mcp" ? (
         <McpPanel creds={props.creds} projectId={props.project.id} />

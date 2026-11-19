@@ -1,3 +1,4 @@
+import { validateControls } from "./orchestra-r4/model.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createHmac, randomBytes } from "node:crypto";
@@ -17,6 +18,7 @@ export interface OrchestraTimelineEvent {
 }
 
 export function validateOrchestraOptions(opts: OrchestraStartOptions): void {
+  validateControls(opts);
   for (const key of ["maxUsd", "stallMinutes"] as const) {
     const value = opts[key];
     if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) throw new Error(`${key} must be a positive number`);
@@ -48,6 +50,7 @@ export function runRecipeOptions(run: OrchestraRun): OrchestraStartOptions {
     return id.includes("@") ? id : id + (w.model ? `@${w.model}` : "") + (w.effort ? `:${w.effort}` : "");
   };
   return { goal: run.goal, orchestrator: spec(run.orchestrator), workers: run.workerDetails?.map(spec) ?? run.workers,
+    check: run.check, checkRounds: run.checkRounds, taskMinutes: run.taskMinutes,
     maxParallel: run.maxParallel, maxRounds: run.maxRounds, plan: run.plan, planOnly: run.planOnly,
     maxUsd: run.budgetUsd, kindLimits: run.kindLimits, stallMinutes: run.stallMinutes, webhookUrl: run.webhookUrl, race: run.race, compare: run.compare, team: false };
 }

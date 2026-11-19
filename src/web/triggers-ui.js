@@ -5,6 +5,7 @@
  * Approach credit: Nuphos (Apache-2.0, © Zeabur Inc.).
  */
 
+import { mountAutomation } from "./auto-r4.js";
 import { copyText } from "./clipboard.js";
 import { api } from "./connection.js";
 import { esc } from "./format.js";
@@ -29,6 +30,10 @@ export function openTriggers(pid, projectName) {
 
   function when(t) {
     if (t.kind === "webhook") return "webhook";
+    if (t.kind === "file") return "changes in " + t.onChange;
+    if (t.kind === "event") return t.on;
+    if (t.kind === "branch") return "commits on " + t.onCommit;
+    if (t.kind === "url") return "watch " + t.watchUrl;
     return t.cron ? "cron " + t.cron : "every " + (t.everyMin % 1440 === 0 ? t.everyMin / 1440 + "d" : t.everyMin % 60 === 0 ? t.everyMin / 60 + "h" : t.everyMin + "m");
   }
 
@@ -62,6 +67,7 @@ export function openTriggers(pid, projectName) {
       '<div class="field"><label>Agent <span class="opt">optional — default: whoever holds the baton</span></label><input id="tragent" spellcheck="false"></div>' +
       '</div><div class="pillrow"><button class="btn primary sm" id="tradd">Add trigger</button></div></details>';
     body.innerHTML = h;
+    mountAutomation(body, pid, load);
     reveal = null;
     document.getElementById("trsubscribe").onclick = function(){ api(base + "/calendar-link", { method: "POST", body: "{}" }).then(function(r){ return copyText(location.origin + r.path); }).then(function(){ toast("Private calendar URL copied — anyone holding it can read schedule names"); }).catch(function(e){ toast(e.message); }); };
     document.getElementById("trrevoke").onclick = function(){ api(base + "/calendar-link", { method: "DELETE" }).then(function(){ toast("Calendar URL revoked"); }).catch(function(e){ toast(e.message); }); };

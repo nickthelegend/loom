@@ -1,3 +1,4 @@
+import { MemoryKnowledgeFields, MemoryFeedback } from "./r4-brain";
 import { useEffect, useState } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, updateMemory, type Creds, type Memory } from "./api";
@@ -12,7 +13,7 @@ function Input({ value, onChange, placeholder }: { value: string; onChange: (val
 }
 interface History { eventId: number; by: string; ts: number; op: string; text?: string; patch?: object; after?: object }
 interface Duplicate { a: Memory; b: Memory; similarity: number; suggestedText: string }
-interface Injection { id: number; agentId: string; payload: { turn: number; memories: Array<{ id: string; text: string; score: number; reason: string; detail?: object }> } }
+interface Injection { id: number; agentId: string; payload: { turn: number; memories: Array<{ id: string; text: string; score: number; reason: string; detail?: object; source?: { file: string; line: number } }> } }
 
 export function MemoryActions({ creds, projectId, memory, onChanged }: { creds: Creds; projectId: string; memory: Memory; onChanged: () => void }) {
   const [history, setHistory] = useState<History[] | null>(null);
@@ -29,6 +30,7 @@ export function MemoryActions({ creds, projectId, memory, onChanged }: { creds: 
       <Button label={memory.archived ? "Restore" : "Archive"} onPress={() => void run(() => updateMemory(creds, projectId, memory.id, { archived: !memory.archived }))} />
       <Button label="History" onPress={() => void run(async () => setHistory((await api<{ history: History[] }>(creds, base + "/history")).history))} />
     </View>
+    <MemoryKnowledgeFields creds={creds} projectId={projectId} memory={memory} onChanged={onChanged} />
     <Input value={priority} onChange={setPriority} placeholder="Injection priority" />
     <Input value={chat} onChange={setChat} placeholder="Chat ID (blank means project-wide)" />
     <Button label="Save priority and scope" onPress={() => void run(() => updateMemory(creds, projectId, memory.id, { priority: memoryPriority(priority), scope: { ...memory.scope, chat: chat.trim() || undefined } }))} />
@@ -65,7 +67,7 @@ export function MemoryTools({ creds, projectId, onChanged }: { creds: Creds; pro
     </View>)}
     {selected ? <View style={{ gap: 6 }}><Input value={merged} onChange={setMerged} placeholder="Merged wording" /><Button label="Merge and archive other memory" onPress={() => void run(async () => { await post("/merge", { keep: selected.a.id, other: selected.b.id, text: merged }); setSelected(null); setDuplicates([]); onChanged(); })} /></View> : null}
     <Button label="Why was this injected?" onPress={() => void run(async () => setInjections((await api<{ injections: Injection[] }>(creds, base + "/injections")).injections))} />
-    {injections?.slice().reverse().map(i => <View key={i.id} style={{ gap: 6 }}><Text style={{ color: T.dim }}>Turn {i.payload.turn} · {i.agentId}</Text>{i.payload.memories.length ? i.payload.memories.map(m => <Text key={m.id} style={{ color: T.text }}>{m.text} · score {m.score.toFixed(3)} · {m.reason}{"\n"}{JSON.stringify(m.detail ?? {})}</Text>) : <Text style={{ color: T.dim }}>No memories injected.</Text>}</View>)}
+    {injections?.slice().reverse().map(i => <View key={i.id} style={{ gap: 6 }}><Text style={{ color: T.dim }}>Turn {i.payload.turn} · {i.agentId}</Text>{i.payload.memories.length ? i.payload.memories.map(m => <View key={m.id}><Text style={{ color: T.text }}>{m.text} · score {m.score.toFixed(3)} · {m.reason}{"\n"}{JSON.stringify(m.detail ?? {})}</Text><MemoryFeedback creds={creds} projectId={projectId} memory={m} injection={i.id} onChanged={onChanged} /></View>) : <Text style={{ color: T.dim }}>No memories injected.</Text>}</View>)}
     {injections?.length === 0 ? <Text style={{ color: T.dim }}>No recorded turns. Native continuity uses its packet inspector.</Text> : null}
     {notice ? <Text style={{ color: T.dim }}>{notice}</Text> : null}
     {error ? <Text style={{ color: T.err }}>{error}</Text> : null}

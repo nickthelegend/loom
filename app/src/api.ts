@@ -2364,3 +2364,6 @@ export interface OrchestraRecipe { name: string; options: { goal: string } & imp
 export interface StarterTemplate { name: string; description: string }
 export const getStarterTemplates = (c: Creds) => api<{ templates: StarterTemplate[] }>(c, "/api/init-templates");
 export const validateProjectConfig = (c: Creds, id: string) => api<{ valid: boolean; errors: Array<{ path: string; message: string }>; warnings: string[] }>(c, `/api/projects/${encodeURIComponent(id)}/config/validate`);
+
+import { pairedApi } from "./r4-phone/transport";
+export const phoneApi = pairedApi(() => new ConnectionManager(), settle);

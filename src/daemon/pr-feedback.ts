@@ -4,6 +4,7 @@ import { execFile } from "../core/process.js";
 import { logbook } from "../core/logbook.js";
 import { prFromUrl, readPrRecords, recordOpenedPr, savePrRecord, type PrRecord, type TrackedPr } from "../core/pr-feedback.js";
 import type { ProjectRuntime } from "./runtime.js";
+import type { NewEvent } from "../types.js";
 
 export const PR_POLL_MS = 120_000;
 const FIELDS = "state,mergeable,statusCheckRollup,reviews,comments,url,headRefOid";
@@ -90,7 +91,10 @@ export class PrFeedback {
       if (prior && prior.chat !== chat) throw new Error(`PR already belongs to chat ${prior.chat}`);
       const row = recordOpenedPr(this.rt.info.dir, view.url, { chat, source: "delivery", ...(info.agentId ? { agentId: info.agentId } : {}) });
       if (row.state === "OPEN") {
-        if (view.state === "MERGED" || view.state === "CLOSED") await this.apply(row, view);
+        if (view.state === "MERGED" || view.state === "CLOSED") {
+          const event = await this.apply(row, view);
+          if (event) this.rt.log.append(event);
+        }
         else {
           Object.assign(row, { mergeable: view.mergeable, headRefOid: view.headRefOid, checkedAt: Date.now() });
           savePrRecord(this.rt.info.dir, row);
@@ -106,33 +110,51 @@ export class PrFeedback {
     if (this.polling) return this.polling;
     this.polling = this.serial(async () => {
       if (Date.now() < this.retryAt) return;
+      const announcements: NewEvent[] = [];
+      let failed = false;
+      const fail = (error: unknown) => {
+        failed = true;
+        logbook.warn("pr", "PR feedback poll failed; retrying later", String(error), this.rt.info.id);
+      };
       try {
-        await flushIntakePrs(this.rt.info.dir);
         for (const row of readPrRecords(this.rt.info.dir)) {
           if (this.stopped) break;
           if (row.state !== "OPEN") continue;
-          const view = row.provider === "gitlab" ? await gitlabView(row.repo, row.prNumber, this.rt.chats().find(c => c.id === row.chat)?.prFeedback === "ci+reviews") : JSON.parse(await this.gh(["pr", "view", String(row.prNumber), "--repo", row.repo, "--json", FIELDS])) as PrView;
-          if (this.stopped) break;
-          await this.apply(row, view);
+          try {
+            const view = row.provider === "gitlab" ? await gitlabView(row.repo, row.prNumber, this.rt.chats().find(c => c.id === row.chat)?.prFeedback === "ci+reviews") : JSON.parse(await this.gh(["pr", "view", String(row.prNumber), "--repo", row.repo, "--json", FIELDS])) as PrView;
+            if (this.stopped) break;
+            const event = await this.apply(row, view);
+            if (event) announcements.push(event);
+          } catch (error) { fail(error); }
         }
+      } catch (error) { fail(error); }
+      // Merge observers (notably Brain) can start their own gh reads. Finish
+      // this poll's I/O and persist terminal states before notifying them, then
+      // publish the entire batch without yielding to an observer's async work.
+      for (const event of announcements) {
+        try { this.rt.log.append(event); } catch (error) { fail(error); }
+      }
+      // Integration hooks must not delay or suppress terminal announcements.
+      try {
+        await flushIntakePrs(this.rt.info.dir);
         await completeLinearIssues(this.rt.info.dir, readPrRecords(this.rt.info.dir).filter(p => p.state === "MERGED").map(p => p.url));
+      } catch (error) { fail(error); }
+      if (failed) {
+        this.retryAt = Date.now() + Math.min(30 * 60_000, PR_POLL_MS * 2 ** Math.min(++this.failures, 4));
+      } else {
         this.failures = 0;
         this.retryAt = 0;
-      } catch (error) {
-        this.retryAt = Date.now() + Math.min(30 * 60_000, PR_POLL_MS * 2 ** Math.min(++this.failures, 4));
-        logbook.warn("pr", "PR feedback poll failed; retrying later", String(error), this.rt.info.id);
       }
     }).finally(() => { this.polling = null; });
     return this.polling;
   }
 
-  private async apply(row: PrRecord, view: PrView): Promise<void> {
+  private async apply(row: PrRecord, view: PrView): Promise<NewEvent | undefined> {
     if (!["OPEN", "MERGED", "CLOSED"].includes(view.state)) throw new Error("gh returned an invalid PR state");
     Object.assign(row, { state: view.state, mergeable: view.mergeable, headRefOid: view.headRefOid, checkedAt: Date.now() });
     if (row.state !== "OPEN") {
-      this.rt.log.append({ kind: "status", chat: row.chat, payload: { state: "pr_feedback", text: `PR #${row.prNumber} ${row.state === "MERGED" ? "merged" : "closed without merging"}`, prNumber: row.prNumber, url: row.url } });
       savePrRecord(this.rt.info.dir, row);
-      return;
+      return { kind: "status", chat: row.chat, payload: { state: "pr_feedback", text: `PR #${row.prNumber} ${row.state === "MERGED" ? "merged" : "closed without merging"}`, prNumber: row.prNumber, url: row.url } };
     }
     savePrRecord(this.rt.info.dir, row);
     const chat = this.rt.chats().find(c => c.id === row.chat);

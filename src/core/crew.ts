@@ -321,6 +321,8 @@ export class CrewEngine {
   private closed = false;
   private loops = new Map<string, Promise<void>>();
   private stopping = new Map<string, Promise<void>>();
+  /** A Stop still winding down: the goal is already marked stopped, its turns and commits not yet settled. */
+  private halting = new Map<string, Promise<unknown>>();
   private seatTurns = new Map<string, Promise<unknown>>();
   private testControllers = new Map<string, Set<AbortController>>();
   private teamRechecks = new Map<string, ReturnType<typeof setTimeout>>();
@@ -469,6 +471,8 @@ export class CrewEngine {
 
   /** Give the crew a goal. It plans in the channel and (by default) waits for your OK. */
   async goal(id: string, text: string, play?: CrewConfig["play"], request?: { id: string; to: string }): Promise<CrewGoal> {
+    // a Stop still settling finishes first: its interrupts and commits belong to the old goal
+    await this.halting.get(id)?.catch(() => {});
     const cfg = this.config(id);
     const st = this.state(cfg);
     const selectedPlay = this.validPlay(play ?? cfg.play ?? "ship");
@@ -603,18 +607,25 @@ export class CrewEngine {
     this.save(st);
     const timer = this.teamRechecks.get(id); if (timer) clearTimeout(timer); this.teamRechecks.delete(id);
     for (const controller of this.testControllers.get(id) ?? []) controller.abort();
-    const stopped = await Promise.allSettled([...this.agents].filter(([key]) => key.startsWith(`${id}/`)).map(([, agent]) => agent.interrupt()));
-    const failure = stopped.find(result => result.status === "rejected");
-    if (failure?.status === "rejected") {
-      g.recovery = `teammate shutdown is unverified: ${String(failure.reason)}`; this.save(st);
-      throw new NativeQuiescenceUnknown(g.recovery);
-    }
-    // a commit already under way lands before Stop returns, so nothing writes to the branch after it
-    await this.loops.get(id);
-    await this.gitChain;
-    this.assertNativeIdle(st);
-    this.host.coordinator?.()?.onRunEnd?.(this.coordination(id)!);
-    this.phase(cfg, st, "stopped", {});
+    // The goal reads as stopped from here on, so a new goal (or Resume) can arrive before this settles,
+    // on a slow machine especially. Wait for this goal's own loop only, and announce only this goal.
+    const loop = this.loops.get(id);
+    const settle = (async () => {
+      const stopped = await Promise.allSettled([...this.agents].filter(([key]) => key.startsWith(`${id}/`)).map(([, agent]) => agent.interrupt()));
+      const failure = stopped.find(result => result.status === "rejected");
+      if (failure?.status === "rejected") {
+        g.recovery = `teammate shutdown is unverified: ${String(failure.reason)}`; this.save(st);
+        throw new NativeQuiescenceUnknown(g.recovery);
+      }
+      // a commit already under way lands before Stop returns, so nothing writes to the branch after it
+      await loop;
+      await this.gitChain;
+      this.assertNativeIdle(st);
+      this.host.coordinator?.()?.onRunEnd?.(this.coordination(id)!);
+      if (st.goal?.id === g.id && g.status === "stopped") this.phase(cfg, st, "stopped", { goalId: g.id });
+    })();
+    this.halting.set(id, settle);
+    try { await settle; } finally { if (this.halting.get(id) === settle) this.halting.delete(id); }
     return g;
   }
 

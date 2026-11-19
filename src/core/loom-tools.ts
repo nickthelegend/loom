@@ -1,10 +1,10 @@
 /** Credentials exist only while an agent turn is alive; they never enter daemon.json. */
 import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { McpServerConfig } from "../types.js";
 import { writeMcpSession, type McpSession } from "./mcp.js";
 
-export interface LoomToolScope { project: string; api: string; run?: string; task?: string }
+export interface LoomToolScope { project: string; api: string; run?: string; task?: string; alive?: boolean; agent?: string; chat?: string; turnId?: string }
 const credentials = new Map<string, LoomToolScope>();
 export function loomToolScope(token: string | undefined): LoomToolScope | undefined {
   return token ? credentials.get(token) : undefined;
@@ -15,19 +15,20 @@ export function writeLoomMcpSession(mcps: McpServerConfig[] | undefined, scope?:
   if (!scope) return writeMcpSession(mcps);
   if (!scope.api) throw new Error("Loom tools require a listening daemon");
   const token = randomBytes(32).toString("hex");
+  scope = { ...scope, alive: true, turnId: randomUUID() };
   credentials.set(token, scope);
   try {
     const session = writeMcpSession([
       { name: "loom", url: "", command: process.execPath,
-        args: import.meta.url.endsWith(".ts")
-          ? ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../cli/index.ts", import.meta.url)), "mcp-server"]
-          : [fileURLToPath(new URL("../cli/index.js", import.meta.url)), "mcp-server"],
+        // A turn's child must not load the general CLI (and its adapter graph)
+        // before making its first request. Keep this entry point transport-only.
+        args: [fileURLToPath(new URL("../cli/mcp-turn.js", import.meta.url))],
         env: { LOOM_MCP_API: scope.api, LOOM_MCP_TOKEN: token, LOOM_PROJECT_ID: scope.project,
           ...(scope.run ? { LOOM_RUN_ID: scope.run } : {}), ...(scope.task ? { LOOM_TASK_ID: scope.task } : {}) } },
       ...(mcps ?? []),
     ])!;
     const cleanup = session.cleanup;
-    session.cleanup = () => { credentials.delete(token); cleanup(); };
+    session.cleanup = () => { scope!.alive = false; credentials.delete(token); cleanup(); };
     return session;
   } catch (error) {
     credentials.delete(token);
