@@ -16,7 +16,7 @@
  * model's API price — kept apart from `usd`, which stays what was reported.
  */
 
-import { estimateUsd, type PriceBook } from "./prices.js";
+import { estimateUsd, modelKey, type PriceBook } from "./prices.js";
 import type { LoomEvent } from "../types.js";
 
 export interface UsageSlice {
@@ -31,6 +31,8 @@ export interface UsageSlice {
   ms: number;
   /** Unpriced turns' tokens at their model's API price — an estimate, never in usd. */
   estUsd: number;
+  cacheShare?: number;
+  cacheSavedUsd?: number | null;
 }
 
 export interface UsageAgent extends UsageSlice {
@@ -94,7 +96,7 @@ function dayOf(ts: number): string {
 
 export function usageReport(
   events: readonly LoomEvent[],
-  opts: { since?: number; kinds?: Record<string, string>; models?: Record<string, string>; prices?: PriceBook | null } = {},
+  opts: { since?: number; kinds?: Record<string, string>; models?: Record<string, string>; prices?: PriceBook | null; allChats?: boolean; onSlice?: (agentId: string, day: string, slice: UsageSlice) => void } = {},
 ): UsageReport {
   const since = opts.since ?? 0;
   const agents = new Map<string, UsageAgent>();
@@ -102,7 +104,8 @@ export function usageReport(
   const chats = new Map<string, UsageSlice>();
   const days = new Map<string, UsageSlice>();
   const tools = new Map<string, { calls: number; failures: number }>();
-  const pending = new Map<string, number>(); // agent → turn_cost not yet tied to a turn
+  const pending = new Map<string, number>();
+  const pendingAt = new Map<string, LoomEvent>(); // agent → turn_cost not yet tied to a turn
   const totals = blank();
   let toolCalls = 0, toolFailures = 0, errors = 0, prompts = 0, questions = 0, filesChanged = 0, linesAdded = 0, linesRemoved = 0, unpriced = 0;
 
@@ -126,12 +129,14 @@ export function usageReport(
     const who = e.agentId ?? "unknown";
 
     if (e.kind === "status" && p.state === "turn_cost") {
+      pendingAt.set(who, e);
       pending.set(who, (pending.get(who) ?? 0) + num(p.costUsd));
       continue;
     }
     if (e.kind === "run_complete") {
       const owed = pending.get(who) ?? 0;
       pending.delete(who);
+      pendingAt.delete(who);
       const usd = owed > 0 ? owed : num(p.costUsd);
       const t: UsageSlice = {
         usd,
@@ -143,6 +148,7 @@ export function usageReport(
         ms: num(p.durationMs),
         estUsd: 0,
       };
+      t.cachedIn = Math.min(t.cachedIn, t.tokensIn);
       const named = String(p.model ?? opts.models?.[who] ?? "");
       if (!usd && (t.tokensIn || t.tokensOut)) t.estUsd = estimateUsd({ model: named, ...t }, opts.prices ?? null) ?? 0;
       // a turn that didn't name its model ran on whatever the agent defaults to
@@ -158,6 +164,7 @@ export function usageReport(
       add(slice(models, model), t);
       add(slice(chats, e.chat ?? "main"), t);
       add(slice(days, dayOf(e.ts)), t);
+      opts.onSlice?.(who, dayOf(e.ts), t);
       continue;
     }
     if (e.kind === "tool_call") {
@@ -194,9 +201,18 @@ export function usageReport(
     if (!usd) continue;
     agent(who).usd += usd;
     totals.usd += usd;
-    slice(models, opts.models?.[who] || "unknown").usd += usd;
+    const e = pendingAt.get(who)!;
+    slice(models, String(e.payload.model ?? opts.models?.[who] ?? "unknown")).usd += usd;
+    slice(chats, e.chat ?? "main").usd += usd;
+    slice(days, dayOf(e.ts)).usd += usd;
+    opts.onSlice?.(who, dayOf(e.ts), { ...blank(), usd });
   }
 
+  for (const [model, s] of models) {
+    const p = opts.prices?.models[modelKey(model)];
+    s.cacheShare = s.tokensIn ? s.cachedIn / s.tokensIn : 0;
+    s.cacheSavedUsd = p?.cacheRead === undefined ? (s.cachedIn ? null : 0) : s.cachedIn * Math.max(0, p.in - p.cacheRead);
+  }
   const bySpend = <T extends UsageSlice>(a: T, b: T) => b.usd - a.usd || b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut) || b.turns - a.turns;
   return {
     since,
@@ -217,7 +233,7 @@ export function usageReport(
     },
     byAgent: [...agents.values()].sort(bySpend),
     byModel: [...models.entries()].map(([model, s]) => ({ model, ...s })).sort(bySpend),
-    byChat: [...chats.entries()].map(([chat, s]) => ({ chat, ...s })).sort(bySpend).slice(0, 20),
+    byChat: [...chats.entries()].map(([chat, s]) => ({ chat, ...s })).sort(bySpend).slice(0, opts.allChats ? undefined : 20),
     byDay: [...days.entries()].map(([day, s]) => ({ day, ...s })).sort((a, b) => a.day.localeCompare(b.day)),
     byTool: [...tools.entries()].map(([tool, t]) => ({ tool, ...t })).sort((a, b) => b.calls - a.calls).slice(0, 20),
   };

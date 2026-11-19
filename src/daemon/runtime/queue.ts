@@ -1,3 +1,4 @@
+import { enforceCostBudget, type CostHost } from "../../core/cost-r4/budgets.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import { blockedBy } from "../../core/goal-lanes.js";
 import { OrchestraEngine } from "../../core/orchestra.js";
@@ -21,7 +22,7 @@ import { CLOCK_TICK_MS, questionHold } from '../runtime-support.js';
 import type { TurnOptions, TurnResult } from "./turns.js";
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
-export interface RuntimeQueueHost {
+export interface RuntimeQueueHost extends CostHost {
   queue: PromptQueue;
   agents: ReadonlyMap<string, AnyAgent>;
   routeState: () => RouteState | null;
@@ -254,19 +255,23 @@ export class RuntimeQueue {
     // A queued prompt goes once. After a restart one task went twice in the same millisecond, and each
     // send cut the other's turn short — five starts and stops in nine seconds (#302).
     if (this.dispatching.has(item.id)) return;
-    const holder = this.host.validHolder();
-    if (to && holder && holder !== to) await this.host.handoff(to, { source: item.source });
-    // ...and never over a turn: an agent that's mid-turn by the time we get here gets it back, first in line
-    const target = to ?? this.host.validHolder();
-    if (target && this.host.busySince.has(target)) { this.host.queue.unshift(item); return; }
+    enforceCostBudget(this.host, item.chat ?? "main");
     this.dispatching.add(item.id);
-    setTimeout(() => this.dispatching.delete(item.id), 60_000).unref?.();
-    await this.host.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true,
-      capturedModel: item.model, capturedEffort: item.effort,
-      requestId: item.continuity?.requestId ?? (item.editedAt ? `queue:${item.id}:edit:${item.editedAt}` : `queue:${item.id}`),
-      ...(item.continuity ? { capturedModel: item.continuity.model, capturedEffort: item.continuity.effort ?? null } : {}),
-      ...(item.plan ? { plan: true } : {}),
-      ...(item.length ? { length: item.length } : {}),
-      ...(item.by ? { by: item.by } : {}) });
+    try {
+      const holder = this.host.validHolder();
+      if (to && holder && holder !== to) await this.host.handoff(to, { source: item.source });
+      // ...and never over a turn: an agent that's mid-turn by the time we get here gets it back, first in line
+      const target = to ?? this.host.validHolder();
+      if (target && this.host.busySince.has(target)) { this.host.queue.unshift(item); return; }
+      await this.host.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true,
+        capturedModel: item.model, capturedEffort: item.effort,
+        requestId: item.continuity?.requestId ?? (item.editedAt ? `queue:${item.id}:edit:${item.editedAt}` : `queue:${item.id}`),
+        ...(item.continuity ? { capturedModel: item.continuity.model, capturedEffort: item.continuity.effort ?? null } : {}),
+        ...(item.plan ? { plan: true } : {}),
+        ...(item.length ? { length: item.length } : {}),
+        ...(item.by ? { by: item.by } : {}) });
+    } finally {
+      this.dispatching.delete(item.id);
+    }
   }
 }

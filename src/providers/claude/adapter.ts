@@ -21,6 +21,7 @@
  * process group, and stopping it proves every tool it started is gone.
  */
 
+import { safetyDecision } from "../../core/safety.js";
 import { attachedImages } from "../attachments.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -268,6 +269,15 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       settingSources: ["user", "project", "local"],
       includePartialMessages: true,
       ...this.permissions(session, input.runtimeMode),
+      hooks: { PreToolUse: [{ hooks: [async event => {
+        if (event.hook_event_name !== "PreToolUse") return {};
+        const policy = this.options.autoPolicy?.();
+        if (!policy?.safety) return {};
+        const d = safetyDecision(event.tool_name, event.tool_input as Record<string, unknown>, input.cwd, policy.safety);
+        if (!d.deny) return {};
+        this.emit(input.threadId, "runtime.warning", { message: `Safety denied ${event.tool_name}: ${d.deny}` });
+        return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: d.deny } };
+      }] }] },
       ...(resume ? { resume, ...(input.forkSession ? { forkSession: true, sessionId } : {}) } : { sessionId }),
       ...(input.forkSession && input.resumeSessionAt ? { resumeSessionAt: input.resumeSessionAt } : {}),
       ...(model ? { model } : {}),
@@ -359,6 +369,12 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       return { behavior: "deny", message: "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn." };
     }
     const base = s.basePermissionMode;
+    const safety = this.options.autoPolicy?.()?.safety;
+    if (safety) {
+      const d = safetyDecision(tool, toolInput, s.info.cwd, safety);
+      if (d.deny) return { behavior: "deny", message: d.deny };
+      if (d.allow && (base === "default" || base === "bypassPermissions")) return { behavior: "allow", updatedInput: toolInput };
+    }
     if (base === "bypassPermissions") return { behavior: "allow", updatedInput: toolInput };
     // Auto: Claude's acceptEdits asks about everything past file edits; Loom answers with its Auto
     // policy — commands and reads inside the project run, the rest is refused naming the rule that fired

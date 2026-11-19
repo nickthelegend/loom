@@ -7,6 +7,7 @@
  *   Board  — agents, your cards, issues and PRs, in four columns.
  *   Brain  — the memory the project has learned, grouped by kind.
  *   Diff   — the working tree: changed files and a colourised patch.
+ *   Scoreboard — recorded model wins, finishes, durations and costs.
  *
  * shift+tab cycles the views; ctrl+p is the command palette; /route runs a
  * pipeline across agents; /pair drops a QR to pair your phone — all without
@@ -33,6 +34,7 @@ import {
   formatBoard,
   formatBrain,
   formatDiff,
+  formatScoreboard,
   logoLines,
   paletteItems,
   parseSlash,
@@ -60,7 +62,8 @@ interface AppProps {
   initial: ProjectStatus;
 }
 
-function App({ client, initial }: AppProps) {
+/** Exported for tests, which render it with a stub client. */
+export function App({ client, initial }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -78,6 +81,7 @@ function App({ client, initial }: AppProps) {
   const [thread, setThread] = useState<string[]>(() => [...logoLines(cols), ""]);
   const [board, setBoard] = useState<BoardData | null>(null);
   const [brain, setBrain] = useState<{ memories: Memory[]; stats: { total: number; byKind: Record<string, number> } } | null>(null);
+  const [scoreboard, setScoreboard] = useState<import("../core/scoreboard.js").Scoreboard | null>(null);
   const [diff, setDiff] = useState<TreeShape | null>(null);
   const [viewErr, setViewErr] = useState<string | null>(null);
   const [scroll, setScroll] = useState(0);
@@ -154,6 +158,7 @@ function App({ client, initial }: AppProps) {
       const fail = (e: unknown) => alive && setViewErr(e instanceof Error ? e.message : String(e));
       if (view === "board") client.board(project.id).then((b) => { if (alive) { setBoard(b); done(); } }).catch(fail);
       else if (view === "brain") client.brain(project.id, { limit: 200 }).then((r) => { if (alive) { setBrain(r); done(); } }).catch(fail);
+      else if (view === "scoreboard") client.scoreboard(project.id).then((r) => { if (alive) { setScoreboard(r); done(); } }).catch(fail);
       else client.tree(project.id).then((r) => { if (alive) { setDiff(r.tree); done(); } }).catch(fail);
     };
     load();
@@ -325,7 +330,8 @@ function App({ client, initial }: AppProps) {
         setNotice(err instanceof Error ? err.message : String(err));
       }
     },
-    [client, project.id, push, exit],
+    // /prompt sends to the agent selected now, with the holder and name as they are now
+    [client, project.id, project.name, project.holder, selected, push, exit],
   );
 
   const onSubmit = useCallback(async () => {
@@ -381,8 +387,9 @@ function App({ client, initial }: AppProps) {
     if (viewErr) return ["", pc.red(`  ${viewErr}`)];
     if (view === "board") return board ? formatBoard(board, cols) : [pc.dim("  loading board…")];
     if (view === "brain") return brain ? formatBrain(brain.memories, brain.stats, cols) : [pc.dim("  loading brain…")];
+    if (view === "scoreboard") return scoreboard ? formatScoreboard(scoreboard, cols) : [pc.dim("  loading scoreboard…")];
     return diff ? formatDiff(diff, cols) : [pc.dim("  loading diff…")];
-  }, [view, thread, board, brain, diff, viewErr, cols]);
+  }, [view, thread, board, brain, diff, scoreboard, viewErr, cols]);
 
   const total = viewLines.length;
   const maxScroll = Math.max(0, total - vh);

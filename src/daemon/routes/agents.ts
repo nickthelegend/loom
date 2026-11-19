@@ -1,3 +1,4 @@
+import { readModelRouting, validateAgentOptions } from "../../core/model-routing.js";
 import type { Express } from 'express';
 import { listModelsForKind } from '../system.js';
 import type { WithRuntime } from './context.js';
@@ -29,6 +30,7 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
         return void res.status(400).json({ error: "model must be a string" });
       }
       try {
+        if (options !== undefined) validateAgentOptions(kind, options);
         const agents = Array.from({ length: count }, () => rt.addAgent(kind.trim(), {
           id: id ?? as,
           role,
@@ -50,7 +52,8 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       const kind = typeof req.query.kind === "string" ? req.query.kind.trim() : "";
       if (!knownAgentKinds().includes(kind)) return void res.status(400).json({ error: `unknown agent kind "${kind}"` });
       const { models, source } = await listModelsForKind(kind);
-      res.json({ kind, count: models.length, models, source });
+      const choices = [...Object.keys(readModelRouting().aliases), ...models];
+      res.json({ kind, count: choices.length, models: choices, source });
     }),
   );
 
@@ -125,7 +128,8 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       const agent = rt.config.agents.find((a) => a.id === String(req.params.agentId));
       if (!agent) return void res.status(404).json({ error: "unknown agent" });
       const { models, source } = await listModelsForKind(agent.kind);
-      res.json({ kind: agent.kind, count: models.length, models, source });
+      const choices = [...Object.keys(readModelRouting().aliases), ...models];
+      res.json({ kind: agent.kind, count: choices.length, models: choices, source });
     }),
   );
 

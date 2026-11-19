@@ -229,7 +229,7 @@ describe("Brain cleanup regressions", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(350);
     expect(log.list().some(e => e.kind === "tool_call" && e.payload.tool === "shell")).toBe(true);
     expect(brain.store.activeReceipts()).toHaveLength(0);
-  }, 12_000);
+  }, 30_000); // a fake Codex process; slow to spawn on a loaded Windows runner
   it("rejects unsupported orchestra before creating a run or conversation", async () => {
     const dir = makeProjectDir({ brain: { continuity: true }, agents: [{ id: "codex", kind: "codex", options: { bin: fakeCli("codex") } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);

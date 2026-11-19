@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, Request } from 'express';
 import type { WithRuntime } from './context.js';
 /** Register config routes in the order established by LoomDaemon.routes(). */
 export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): void {
@@ -20,9 +20,11 @@ export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): vo
   app.patch(
     "/api/projects/:id/config",
     withRuntime(async (rt, req, res) => {
+      if (req.body?.defaultEffort !== undefined && (req as Request & { projectScope?: string[] | null }).projectScope) return void res.status(403).json({ error: "project effort requires an unscoped session" });
       const body = (req.body ?? {}) as Parameters<typeof rt.patchConfig>[0];
       try {
         const cfg = rt.patchConfig({
+          defaultEffort: body.defaultEffort,
           loomTools: body.loomTools,
           brain: body.brain,
           projection: body.projection,
@@ -31,6 +33,7 @@ export function registerConfigRoutes(app: Express, withRuntime: WithRuntime): vo
           safety: body.safety,
         });
         res.json({
+          defaultEffort: cfg.defaultEffort ?? "",
           loomTools: Boolean(cfg.loomTools),
           brain: cfg.brain ?? {},
           projection: cfg.projection ?? {},

@@ -1,3 +1,4 @@
+import { R4FleetSuggest } from "./r4-cost";
 /**
  * Fleets on the phone (#369): N workers of one agent on one model — "execbot on gpt‑5.6‑sol ×2",
  * "claude on Opus 5.5 ×2" — added to an orchestra run next to the agents ticked above. Each row goes
@@ -67,6 +68,7 @@ export function FleetEditor(props: {
 
   return (
     <View style={{ gap: 8 }}>
+      <R4FleetSuggest creds={props.creds} onUse={rows => props.onChange(rows)} />
       {props.rows.length > 0 && (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {props.rows.map((f, i) => (

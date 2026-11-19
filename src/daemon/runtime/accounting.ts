@@ -1,3 +1,6 @@
+import { usageReport } from "../../core/usage.js";
+import { observeCostBudgets } from "../../core/cost-r4/alerts.js";
+import { enforceCostBudget } from "../../core/cost-r4/budgets.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import {
   readProjectState,
@@ -22,7 +25,7 @@ export interface RuntimeAccountingHost {
 
 /** Owns accounting state for exactly one open project. */
 export class RuntimeAccounting {
-  constructor(private readonly host: RuntimeAccountingHost) { }
+  constructor(private readonly host: RuntimeAccountingHost) { observeCostBudgets(host); }
 
   // -------------------------------------------------------------------------
   // Cost telemetry — O(1) incremental, rehydrated from the log on open
@@ -57,10 +60,24 @@ export class RuntimeAccounting {
       Number.isFinite(cap) && cap! > 0 ? { capUsd: cap!, spentUsd: this.spendTodayFor(agentId) } : undefined);
   }
 
+  private rehydrating = false;
+
   rehydrateCosts(): void {
-    for (const event of this.host.log.list({ kinds: ["status", "run_complete"] })) {
-      this.trackCost(event);
-    }
+    this.rehydrating = true;
+    try {
+      for (const event of this.host.log.list({ kinds: ["status", "run_complete"] })) this.trackCost(event);
+    } finally { this.rehydrating = false; }
+    // Replay is linear; only current spend can pause an agent, once per agent.
+    for (const agentId of Object.keys(this.budgets())) this.pauseAtCap(agentId);
+  }
+
+  private pauseAtCap(agentId: string): void {
+    const cap = this.budgets()[agentId];
+    if (!Number.isFinite(cap) || !cap || cap <= 0 || this.quarantined()[agentId]) return;
+    const spent = this.spendTodayFor(agentId);
+    if (spent < cap) return;
+    this.quarantine(agentId, `${BUDGET_PAUSE_REASON}$${cap.toFixed(2)}/day`, false);
+    this.host.appendIfOpen({ kind: "status", agentId, payload: { state: "budget_exceeded", budgetUsd: cap, spentTodayUsd: spent } });
   }
 
   trackCost(event: LoomEvent): void {
@@ -80,22 +97,13 @@ export class RuntimeAccounting {
         // the hard stop); this makes the pause visible when the spend happens,
         // so a looping agent shows as paused NOW rather than at its next ask,
         // and the burn panel's "over" and the roster's "paused" agree in time.
-        const cap = this.budgets()[agentId];
-        if (
-          Number.isFinite(cap) &&
-          cap! > 0 &&
-          this.spendTodayFor(agentId) >= cap! &&
-          !this.quarantined()[agentId]
-        ) {
-          this.quarantine(agentId, `${BUDGET_PAUSE_REASON}$${cap!.toFixed(2)}/day`, false);
-          this.host.appendIfOpen({
-            kind: "status",
-            agentId,
-            payload: { state: "budget_exceeded", budgetUsd: cap, spentTodayUsd: this.spendTodayFor(agentId) },
-          });
-        }
+        if (!this.rehydrating) this.pauseAtCap(agentId);
       }
     } else if (event.kind === "run_complete") {
+      const reported = Number(event.payload.costUsd ?? 0);
+      if (!this.pricedTurn.get(agentId) && Number.isFinite(reported) && reported > 0) {
+        this.costs.totalUsd += reported; entry.usd += reported; this.recentFor(agentId).usd.push(reported);
+      }
       const ms = Number(event.payload.durationMs ?? 0);
       if (ms > 0 && !event.payload.error) this.recentFor(agentId).ms.push(ms);
       // Adapters that report token usage (codex, claude-code, …) carry it on
@@ -179,28 +187,21 @@ export class RuntimeAccounting {
    * What one agent has really spent since local midnight.
    *
    * Read from the log, using the same rule the running cost totals use: a
-   * turn's money arrives on a `turn_cost` status and nowhere else. (The same
-   * figure is copied onto `run_complete` for the exported span; counting both
-   * would double every turn.) Adapters that report tokens but no dollars —
+   * turn's money arrives on a `turn_cost` status, or only on `run_complete`.
+   * The shared usage ledger prefers the status so a copied completion cost
+   * never charges the same turn twice. Adapters that report tokens but no dollars —
    * codex, agy — contribute 0, honestly, because they hand us no price.
    */
   spendTodayFor(agentId: string, now = Date.now()): number {
-    const since = startOfDay(now);
-    let usd = 0;
-    for (const e of this.host.log.list({ kinds: ["status"], sinceTs: since })) {
-      if (e.agentId !== agentId) continue;
-      if (e.payload.state !== "turn_cost") continue;
-      usd += Number(e.payload.costUsd ?? 0) || 0;
-    }
-    return usd;
+    const report = usageReport(this.host.log.list({ kinds: ["status", "run_complete"], sinceTs: startOfDay(now), allBranches: true }), { since: startOfDay(now) });
+    return report.byAgent.find(a => a.agentId === agentId)?.usd ?? 0;
   }
 
   /**
    * The spend ledger as a daily series, per agent per day.
    *
    * "What did this project cost me last week" had no answer short of reading
-   * turn by turn. Same source of truth as spendTodayFor — turn_cost statuses
-   * and nowhere else — bucketed by local day. Tokens ride along from
+   * turn by turn. Same source of truth as spendTodayFor — turn_cost statuses with completion-only fallback — bucketed by local day. Tokens ride along from
    * run_complete, keyed the same way, so 'which agent is eating the tokens'
    * (#17) is the same walk as 'what did this cost' (#16). Days with no spend
    * simply don't appear; a chart can zero-fill, the API doesn't lie.
@@ -214,64 +215,16 @@ export class RuntimeAccounting {
     byAgent: Record<string, { usd: number; turns: number; tokensIn: number; tokensOut: number }>;
   }> {
     const since = startOfDay(now) - (days - 1) * 24 * 60 * 60 * 1000;
-    const buckets = new Map<
-      string,
-      {
-        usd: number;
-        turns: number;
-        tokensIn: number;
-        tokensOut: number;
-        byAgent: Record<string, { usd: number; turns: number; tokensIn: number; tokensOut: number }>;
-      }
-    >();
-    const dayOf = (ts: number): string => {
-      const d = new Date(ts);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    };
-    const bucket = (ts: number) => {
-      const key = dayOf(ts);
-      let b = buckets.get(key);
-      if (!b) {
-        b = { usd: 0, turns: 0, tokensIn: 0, tokensOut: 0, byAgent: {} };
-        buckets.set(key, b);
-      }
-      return b;
-    };
-    const agentSlot = (
-      b: ReturnType<typeof bucket>,
-      agentId: string,
-    ): { usd: number; turns: number; tokensIn: number; tokensOut: number } => {
-      let s = b.byAgent[agentId];
-      if (!s) {
-        s = { usd: 0, turns: 0, tokensIn: 0, tokensOut: 0 };
-        b.byAgent[agentId] = s;
-      }
-      return s;
-    };
-    for (const e of this.host.log.list({ kinds: ["status", "run_complete"], sinceTs: since })) {
-      const agentId = e.agentId ?? "unknown";
-      if (e.kind === "status" && e.payload.state === "turn_cost") {
-        const usd = Number(e.payload.costUsd ?? 0) || 0;
-        if (usd <= 0) continue;
-        const b = bucket(e.ts);
-        b.usd += usd;
-        agentSlot(b, agentId).usd += usd;
-      } else if (e.kind === "run_complete") {
-        const tin = Number(e.payload.inputTokens ?? e.payload.tokensIn ?? 0) || 0;
-        const tout = Number(e.payload.outputTokens ?? e.payload.tokensOut ?? 0) || 0;
-        const b = bucket(e.ts);
-        b.turns += 1;
-        b.tokensIn += tin;
-        b.tokensOut += tout;
-        const s = agentSlot(b, agentId);
-        s.turns += 1;
-        s.tokensIn += tin;
-        s.tokensOut += tout;
-      }
-    }
-    return [...buckets.entries()]
-      .map(([day, b]) => ({ day, ...b }))
-      .sort((a, b) => a.day.localeCompare(b.day));
+    const events = this.host.log.list({ kinds: ["status", "run_complete"], sinceTs: since, allBranches: true });
+    const byDay = new Map<string, Record<string, { usd: number; turns: number; tokensIn: number; tokensOut: number }>>();
+    const report = usageReport(events, { since, onSlice: (agentId, day, slice) => {
+      let agents = byDay.get(day);
+      if (!agents) { agents = Object.create(null); byDay.set(day, agents!); }
+      const a = agents![agentId] ??= { usd: 0, turns: 0, tokensIn: 0, tokensOut: 0 };
+      a.usd += slice.usd; a.turns += slice.turns; a.tokensIn += slice.tokensIn; a.tokensOut += slice.tokensOut;
+    } });
+    return report.byDay.map(row => ({ day: row.day, usd: row.usd, turns: row.turns, tokensIn: row.tokensIn, tokensOut: row.tokensOut,
+      byAgent: byDay.get(row.day) ?? {} }));
   }
 
   /** Every budgeted agent: its cap, what it has spent today, and whether it's out. */
@@ -320,6 +273,7 @@ export class RuntimeAccounting {
    * the recovery. A budget of 0/unset means no budget, and nothing is enforced.
    */
   enforceBudget(agentId: string, now = Date.now()): void {
+    enforceCostBudget(this.host);
     const budgetUsd = this.budgets()[agentId];
     if (!Number.isFinite(budgetUsd) || !budgetUsd || budgetUsd <= 0) {
       this.liftBudgetPause(agentId, now);
