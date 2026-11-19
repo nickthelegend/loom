@@ -5,7 +5,7 @@ description: Split Loom goals into parallel worktrees, select saved fleets or sc
 
 # Orchestrate one project
 
-Require Loom ≥ 2.0.0.
+Require Loom ≥ 2.1.0.
 
 Use an orchestra for one goal with parallel implementation or competing solutions.
 Run from the intended Loom project. Require a git repository and known agents.
@@ -35,6 +35,13 @@ test commands, boundaries, and dependency hints in the goal.
   adapter reports dollar costs or that this replaces provider billing limits.
 - `--solo`: keep tasks on this machine even when team runners are available.
 - `--no-watch`: return after starting. Capture the printed run ID.
+- `--kind-limits '{"codex":2}'`: cap parallel workers of an agent kind within this run.
+- `--stall-minutes 15`: mark workers with no output or reports as stalled; their
+  occupied slots are not freed until the attempt actually stops.
+- `--webhook-url URL`: send a signed run-completion notification. The daemon creates
+  a private project signing secret; owners retrieve it through the webhook-secret
+  API for the receiver. Keep it out of URLs and goals. Delivery is attempted once
+  on successful completion, with the result recorded on the run.
 
 Several tasks may use the same agent kind as separate sessions.
 Split tasks by files and dependencies to reduce merge conflicts.
@@ -105,6 +112,29 @@ loom orchestrate "Implement a smaller parser with equivalent tests" -w codex,ope
 Compare the actual task diffs and test results before choosing an entrant.
 Do not combine a race with automatic apply: choosing the winner is a separate step.
 
+For a planner preview before implementation:
+
+```sh
+loom orchestrate "Plan the parser fix and its tests" -o codex -w opencode --plan-only --solo --no-watch
+loom orchestra RUN_ID --json
+loom orchestra:graph RUN_ID
+loom orchestra:approve RUN_ID
+```
+
+`--plan-only` runs the planner and holds workers for explicit approval; it is separate
+from `--plan` file generation. Inspect the goal, tasks and fleet before approving.
+Planning still consumes model budget, and `--plan-only` cannot be combined with
+`--race`. Graph prints Mermaid. To reuse a run's goal, resolved fleet and options:
+
+```sh
+loom recipes
+loom recipes save parser-fix RUN_ID
+loom recipes run parser-fix
+```
+
+Listing includes existing queue recipes too; `recipes run` starts an Orchestra recipe.
+Inspect saved options and the target project's agents before launching another run.
+
 ## Follow and steer
 
 Replace `RUN_ID` with the returned ID; do not guess it.
@@ -132,6 +162,15 @@ local completion; inspect its branch/PR rather than applying blindly.
 Reply to questions with `loom orchestra:reply`, then wait again on the same ID.
 A wait timeout does not abort workers. For an interrupted, resumable run, use
 `loom orchestra:resume RUN_ID` after checking its current state.
+
+To follow a run as NDJSON, use `loom watch --run RUN_ID --json`. It stays attached
+through waiting_human and ends at completed, failed, aborted or moved; it cannot be
+combined with `--all`. Stopping the watcher leaves work running.
+
+`loom orchestra:retry RUN_ID TASK_ID codex@MODEL_ID:high` retries a failed, blocked
+or stalled task on the selected agent/model while preserving its worktree. Inspect
+the prior attempt and returned IDs first; this starts work, not a second status query.
+Run timelines retain per-attempt starts, endings, reports and reassignments.
 
 ## Report from a worker
 

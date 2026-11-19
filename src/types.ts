@@ -279,6 +279,7 @@ export interface BrainConfig {
 import type { ServerConfig } from "./core/servers.js";
 
 export interface ProjectConfig {
+  defaultEffort?: "low" | "medium" | "high";
   /** Local titles by default; model opts into a bounded provider request. */
   chatTitles?: "local" | "model";
   name: string;
@@ -302,7 +303,7 @@ export interface ProjectConfig {
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
   proof?: import("./daemon/proof.js").ProofConfig;
   /** Where orchestra worktrees go (default: ~/.loom/orchestra, or beside the project when it's on another disk). */
-  orchestra?: { worktreeDir?: string };
+  orchestra?: { worktreeDir?: string; prune?: { days: number; keep: number } };
   /** `loom review` and the council's reviews: how long one reviewer may take before it's left out (default 15 minutes). */
   review?: { timeoutMin?: number };
   /** Agent that receives messages when nobody holds the baton. */
@@ -345,6 +346,8 @@ export interface ProjectConfig {
   git?: {
     /** Commit each turn's changes as they land, agent as co-author. */
     commitPerTurn?: boolean;
+    branchPerChat?: boolean;
+    messageModel?: string;
     /** Dragging a card to Working checks out task/<id>-<slug>. */
     branchPerTask?: boolean;
     /**
@@ -649,6 +652,7 @@ export function isAdapter(a: AnyAgent): a is Adapter {
 // ---------------------------------------------------------------------------
 
 export interface AgentStatus {
+  permissionIndicator?: string;
   capabilities: { steer: boolean };
   id: string;
   kind: string;
@@ -772,3 +776,8 @@ export interface CostSummary {
   tokensOut: number;
   byAgent: AgentCost[];
 }
+
+/** Session organization metadata added in Loom 2.2. */
+export interface ChatInfo { labels?: import("./core/agents-r4/chats.js").Label[] }
+
+export interface ChatInfo { restoredAt?: number }

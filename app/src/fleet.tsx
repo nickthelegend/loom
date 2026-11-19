@@ -52,13 +52,14 @@ function sinceText(ts: number | null | undefined, now: number): string {
 
 function AgentRow(props: { a: ActivityAgent; now: number; onPress: () => void }) {
   const { a } = props;
+  const asleep = (a as ActivityAgent & { asleep?: boolean }).asleep;
   const title = a.chatTitle ?? (a.chat && a.chat !== "main" ? a.chat : a.chat ? "Main" : null);
   return (
     <TouchableOpacity
       onPress={props.onPress}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={`${a.id}, ${a.busy ? "working" : "idle"}${title ? `, in ${title}` : ""}. Open thread`}
+      accessibilityLabel={`${a.id}, ${a.busy ? "working" : asleep ? "Asleep" : "idle"}${title ? `, in ${title}` : ""}. Open thread`}
       style={{
         flexDirection: "row",
         gap: 10,
@@ -83,7 +84,7 @@ function AgentRow(props: { a: ActivityAgent; now: number; onPress: () => void })
           {a.holdsBaton ? <Text style={{ color: T.shuttle, fontSize: 11 }}>⟵ baton</Text> : null}
         </View>
         <Text style={{ color: a.busy ? T.ok : T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>
-          {a.busy ? `● working ${sinceText(a.since, props.now)}` : "○ idle"}
+          {a.busy ? `● working ${sinceText(a.since, props.now)}` : asleep ? "○ Asleep" : "○ idle"}
           {title ? ` · ${title}` : ""}
         </Text>
         {a.last?.line ? (
@@ -248,7 +249,7 @@ export function FleetScreen(props: {
         ) : !data ? (
           <ActivityIndicator color={T.dim} style={{ marginTop: 30 }} />
         ) : !projects.length ? (
-          <Empty text="No project is open on the daemon right now. Open one from the board and its agents show up here." />
+          <Empty text="No project is open on the daemon right now. Open one from the board and its agents show up here." action="Open projects" onAction={props.onBack} />
         ) : (
           projects.map((p) => (
             <View key={p.project.id} style={{ gap: spacing.sm }}>

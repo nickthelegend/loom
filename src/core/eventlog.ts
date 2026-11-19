@@ -5,6 +5,7 @@
  * Fallback store: JSONL (if node:sqlite is unavailable, or LOOM_STORE=jsonl).
  */
 
+import { redactValue } from "./redact.js";
 import { chatLineage } from "./chat-branches.js";
 import { readProjectState } from "./registry.js";
 import { MAIN_CHAT } from "../types.js";
@@ -80,7 +81,7 @@ export class EventLog implements EventJournal {
       ts: e.ts ?? Date.now(),
       kind: e.kind,
       // Match durable JSON semantics and detach from caller-owned objects.
-      payload: JSON.parse(JSON.stringify(e.payload)) as Record<string, unknown>,
+      payload: redactValue(JSON.parse(JSON.stringify(e.payload))) as Record<string, unknown>,
       ...(e.agentId ? { agentId: e.agentId } : {}),
       ...(e.chat ? { chat: e.chat } : {}),
       ...(branch !== "0" || e.branch ? { branch } : {}),
@@ -98,10 +99,10 @@ export class EventLog implements EventJournal {
     const chats = !opts.allBranches && (opts.chat !== undefined || opts.activeLineages)
       ? readProjectState(this.projectDir).chats ?? [] : [];
     const selected = chats.filter(c => c.branches && (opts.chat === undefined || c.id === opts.chat));
-    if (!selected.length) return this.store.list(opts);
+    if (!selected.length) return this.store.list(opts).map(redactValue);
     const lineages = new Map(selected.map(c => [c.id, chatLineage(c)]));
     const events = this.store.list({ ...opts, limit: undefined }).filter(e => lineages.get(e.chat ?? MAIN_CHAT)?.(e) ?? true);
-    return opts.limit ? events.slice(-opts.limit) : events;
+    return (opts.limit ? events.slice(-opts.limit) : events).map(redactValue);
   }
 
   /** How many events match, without reading them. */
@@ -126,7 +127,7 @@ export class EventLog implements EventJournal {
     const store = this.continuity;
     if (!store) throw new ContinuityError("unsupported", "native continuity requires SQLite; legacy JSONL is still readable");
     const result = store.capture(request, () => this.store.append({ ts: Date.now(), kind: "message",
-      chat: request.conversationId, branch: this.activeBranch(request.conversationId), payload: { text: request.text, author: request.source === "user" ? "user" : "loom", requestId: request.id } }));
+      chat: request.conversationId, branch: this.activeBranch(request.conversationId), payload: { text: redactValue(request.text), author: request.source === "user" ? "user" : "loom", requestId: request.id } }));
     // Capture and its idempotency row commit together before clients see either.
     if (result.created) this.emitter.emit("event", result.event);
     return result;

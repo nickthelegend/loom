@@ -1,7 +1,7 @@
 import { BRAND_ICON_ALIAS,BRAND_TITLES } from '../daemon/brand-icons.ts';
 /** Browser agents module. See README.md for ownership and startup. */
 import { api } from './connection.js';
-import { esc,hue } from './format.js';
+import { avatarSrc,esc,hue } from './format.js';
 import { toast } from './notifications.js';
 import { state } from './state.js';
 import { shortModel } from './permissions.js';
@@ -74,7 +74,7 @@ import { shortModel } from './permissions.js';
   /** The brand mark, or a hue monogram for a kind that has none — never blank. */
   function agentGlyph(kind, id, cls){
     var pic = id && state.project && (state.project.agents || []).filter(function(a){ return a.id === id && a.avatar; })[0];
-    if (pic && /^data:image\/(png|jpeg|webp);base64,/.test(pic.avatar)) return '<img class="agpic' + (cls ? " " + cls : "") + '" src="' + pic.avatar + '" alt="">';
+    if (pic && avatarSrc(pic.avatar)) return '<img class="agpic' + (cls ? " " + esc(cls) : "") + '" src="' + esc(avatarSrc(pic.avatar)) + '" alt="">';
     if (hasBrand(kind)) return brandMark(kind, cls);
     var h = hue(String(id || kind || "?"));
     return '<span class="agmono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 20%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +

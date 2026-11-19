@@ -1,3 +1,4 @@
+import { orchestraSharePage, withShareCountdown } from "../../core/share-page.js";
 import { openShare } from "../../core/shares.js";
 import { threadReplay } from "../../core/replay.js";
 import type { Express } from 'express';
@@ -16,10 +17,14 @@ export function registerPublicRoutes(app: Express, ctx: Pick<RouteContext, "term
     if (!share || !ctx.runtime) return void res.status(404).type("text/plain").send("This link has expired or was revoked.");
     try {
       const rt = await ctx.runtime(share.projectId);
-      const events = rt.log.list({ chat: share.chat, limit: 20_000 });
+      const run = share.runId ? rt.orchestra.get(share.runId) : null;
+      if (share.runId && !run) return void res.status(404).type("text/plain").send("This run is no longer available.");
+      const html = run ? orchestraSharePage(run, rt.info.name) : threadReplay(rt.log.list({ chat: share.chat, limit: 20_000 }), { project: rt.info.name, chat: share.title });
+      const page = withShareCountdown(html, share.expiresAt);
       res.setHeader("content-type", "text/html; charset=utf-8");
-      res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
-      res.send(threadReplay(events, { project: rt.info.name, chat: share.title }));
+      res.setHeader("referrer-policy", "no-referrer");
+      res.setHeader("content-security-policy", page.csp);
+      res.send(page.html);
     } catch {
       res.status(404).type("text/plain").send("This thread isn't available any more.");
     }

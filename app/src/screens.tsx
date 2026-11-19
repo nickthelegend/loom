@@ -1,3 +1,13 @@
+import { R4AgentSessions } from "./r4-agents";
+import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
+import { ProjectTools } from "./cli-tools";
+import { GitReviewPanel } from "./git-review";
+import * as Crypto from "expo-crypto";
+import { outbox } from "./outbox";
+import { ChatSearch } from "./phone-search";
+import { lineQuestion, type PendingMessage, type DiffLocation } from "./phone-batch-model";
+import { ProjectSharing, TeammateMentions } from "./sharing";
+import { SafetyButton, withSecretRetry } from "./safety";
 import { useDaemonDraft, copyChat, TemplateForm, type ChatPresentation, type ChatActions } from "./chat-composer";
 import { firstUnread, variables } from "./chat-composer-model";
 /**
@@ -9,6 +19,9 @@ import { firstUnread, variables } from "./chat-composer-model";
  * it is actually about.
  */
 
+import { ShellSearch } from "./shell-search";
+import { scopeOf } from "./cache-model";
+import { parseLocation } from "./shell-model";
 import { forecastLine } from "./forecast-model";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { INSTALL_URL, open as openLink } from "./links";
@@ -35,7 +48,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage, getTeamRunners, moveChat, getBranches, createBranch, activateBranch, type BranchListing } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
-import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
+import { applyEvent, applyStream, mergeMissed, reconcileLive, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
@@ -413,6 +426,7 @@ function ProjectCard(props: { p: Project; onPress: () => void }) {
           <Text numberOfLines={1} style={{ color: T.text, fontWeight: "600", fontSize: 15, flexShrink: 1 }}>
             {p.name}
           </Text>
+          {!!p.presence?.length && <Text accessibilityLabel={p.presence.map(person => person.name).join(", ") + " present"} style={{ color: T.ok, fontSize: 12 }}>● {p.presence.length}</Text>}
           {p.needsInput ? (
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.warn }} />
           ) : working ? (
@@ -433,12 +447,15 @@ function ProjectCard(props: { p: Project; onPress: () => void }) {
 
 export function BoardScreen(props: {
   creds: Creds;
-  onOpen: (p: Project) => void;
+  onOpen: (p: Project, chat?: { id: string; title: string }) => void;
   onUnpair: () => void;
   /** Opens the Fleet screen: every agent in every open project. */
   onFleet: () => void;
   /** The avatar in the header; opens the account sheet. */
   accountButton?: React.ReactNode;
+  initialApprovals?: boolean;
+  onApprovalsOpened?: () => void;
+  entryHint?: string;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -463,6 +480,7 @@ export function BoardScreen(props: {
   // Pending approvals across every open project (from /api/activity); null = unknown.
   const [approvals, setApprovals] = useState<number | null>(null);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
+  useEffect(() => { if (props.initialApprovals) { setApprovalsOpen(true); props.onApprovalsOpened?.(); } }, [props.initialApprovals]);
   const lastApprovals = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -577,6 +595,8 @@ export function BoardScreen(props: {
           Welcome back
         </Text>
 
+        <ShellSearch creds={props.creds} onOpen={props.onOpen} />
+
         {/* stat tiles — real Loom metrics */}
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           <StatTile value={String(projects.length)} label="Projects" />
@@ -584,6 +604,7 @@ export function BoardScreen(props: {
           <StatTile value={spend > 0 ? usd(spend) : "$0"} label="Spend" />
         </View>
 
+        {props.entryHint ? <Text style={{ color: T.thread, padding: 12 }}>{props.entryHint}</Text> : null}
         <ApprovalBanner count={approvals ?? 0} onPress={() => setApprovalsOpen(true)} />
 
         {err && <Sys color={T.err} text={cachedAt ? `${err} Showing this phone's copy, ${savedAgo(cachedAt)}.` : err} />}
@@ -811,7 +832,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
+type Tab = "sharing" | "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -820,6 +841,7 @@ type Tab = "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory
  */
 const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "thread", label: "Thread" },
+  { key: "sharing", label: "Sharing" },
   { key: "orchestra", label: "Orchestra", accent: T.thread },
   { key: "crew", label: "Crew", accent: T.shuttle },
   { key: "observatory", label: "Observatory", accent: T.primary },
@@ -851,6 +873,9 @@ export function ProjectScreen(props: {
   /** Open on this tab (a tapped push notification: its goal's Orchestra tab). */
   initialTab?: "thread" | "orchestra" | "crew";
   initialCrewId?: string;
+  initialAction?: "new-chat";
+  sharedDraft?: string;
+  onSharedDraft?: () => void;
   /** With initialTab "orchestra": open on this run. */
   initialRunId?: string;
 }) {
@@ -859,12 +884,33 @@ export function ProjectScreen(props: {
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
   const [crewFocus, setCrewFocus] = useState(props.initialCrewId);
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
+  const [locationReady, setLocationReady] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    void kv.get("loom.location." + scopeOf(creds.url)).then(async raw => {
+      if (gone) return;
+      const last = parseLocation(raw);
+      if (last?.project === project.id) {
+        if (!props.initialChat) {
+          const result = await getChats(creds, project.id).catch(() => null);
+          if (gone) return;
+          setChatId(result && !result.chats.some(c => c.id === last.chat) ? "main" : last.chat);
+        }
+        if (!props.initialChat && !props.initialTab && TABS.some(t => t.key === last.tab)) setTab(last.tab as Tab);
+      }
+      setLocationReady(true);
+    }).catch(() => { if (!gone) setLocationReady(true); });
+    return () => { gone = true; };
+  }, [creds.url, project.id]);
+  useEffect(() => {
+    if (locationReady) void kv.set("loom.location." + scopeOf(creds.url), JSON.stringify({ project: project.id, chat: chatId, tab })).catch(() => {});
+  }, [locationReady, creds.url, project.id, chatId, tab]);
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
   const [importing, setImporting] = useState(false);
   const [groupOpen, setGroupOpen] = useState<{ g: NonNullable<Chat["group"]>; chats: Chat[] } | null>(null);
   const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
-  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
+  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => { setChats(chats); }).catch(() => {});
   // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
   const act = async (fn: () => Promise<unknown>, gone?: string) => {
     try {
@@ -878,7 +924,7 @@ export function ProjectScreen(props: {
     }
   };
   // New chat asks who answers and on which model (new-chat.tsx), then opens it
-  const [newChatOpen, setNewChatOpen] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(props.initialAction === "new-chat");
   const newChat = () => setNewChatOpen(true);
   const chatCreated = (chat: Chat) => {
     setNewChatOpen(false);
@@ -943,9 +989,9 @@ export function ProjectScreen(props: {
     setCommitting(push ? "push" : "commit");
     try {
       await gitStage(creds, project.id, tree.files.map((f) => f.path).filter((p) => !p.startsWith(".loom/")));
-      const r = await gitCommit(creds, project.id, commitMsg.trim());
+      const r = await withSecretRetry("commit", override => gitCommit(creds, project.id, commitMsg.trim(), override));
       let note = `Committed ${r.sha} · ${r.files} file${r.files === 1 ? "" : "s"}`;
-      if (push) note += ` · pushed ${(await gitPush(creds, project.id)).branch}`;
+      if (push) note += ` · pushed ${(await withSecretRetry("push", override => gitPush(creds, project.id, override))).branch}`;
       setCommitMsg("");
       setErr(null);
       Alert.alert("Done", note);
@@ -965,6 +1011,16 @@ export function ProjectScreen(props: {
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
   );
   const { text, setText, error: draftError } = useDaemonDraft(creds, project.id, chatId);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [offlineQueue, setOfflineQueue] = useState<PendingMessage[]>([]);
+  useEffect(() => {
+    let live = true;
+    const update = () => void outbox(creds).then(q => { if (live) setOfflineQueue([...q.items]); }).catch(() => {});
+    update(); const timer = setInterval(update, 1000);
+    return () => { live = false; clearInterval(timer); };
+  }, [creds]);
+  const askLine = (line: DiffLocation) => { setText(t => (t ? t + "\n\n" : "") + lineQuestion(line)); setTab("thread"); };
+
   /** What's lined up behind the running turn — see core/prompt-queue.ts. */
   const [queue, setQueue] = useState<QueueView | null>(null);
   const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
@@ -1098,8 +1154,32 @@ export function ProjectScreen(props: {
         setHistoryErr(e instanceof Error ? e.message : String(e));
         retryHistory = setTimeout(() => setHistoryTry((n) => n + 1), 4000);
       });
+    // Every (re)connection opens with a hello, and replays nothing: what landed while the
+    // feed was down is fetched here — the events since the newest one shown, and the
+    // replies being typed now (a stale half-reply would otherwise sit there).
+    const catchUp = () => {
+      void getEvents(creds, project.id, chatId, 1000, lastId.current)
+        .then(({ events: missed }) => {
+          if (!live || !missed.length) return;
+          const mine = missed.filter((e) => !e.chat || e.chat === chatId);
+          lastId.current = Math.max(lastId.current, ...mine.map((e) => e.id));
+          setEvents((prev) => mergeMissed(prev, missed, chatId));
+          for (const e of mine) setLive((m) => applyEvent(m, e));
+        })
+        .catch(() => {});
+      void getEvents(creds, project.id, chatId, 1)
+        .then(({ live: typing }) => {
+          if (live) setLive((m) => reconcileLive(m, typing, chatId));
+        })
+        .catch(() => {});
+    };
     const close = openLiveStream(creds, project.id, (raw) => {
       const frame = raw as { type?: string; event?: LoomEvent; chat?: string } & Partial<StreamFrame>;
+      if (frame?.type === "hello") {
+        // the first page hasn't landed yet: it will cover this
+        if (threadFresh.current) catchUp();
+        return;
+      }
       if (frame?.type === "stream") {
         if ((frame.chat || "main") === chatId && frame.agentId && frame.text) {
           const f = frame as StreamFrame;
@@ -1130,8 +1210,9 @@ export function ProjectScreen(props: {
       if (ev.chat && ev.chat !== chatId) return; // a different chat
       lastId.current = ev.id;
       setEvents((prev) => [...prev, ev]);
+      if (ev.kind === "run_complete") haptic.success();
       if (ev.kind === "message" && ev.agentId && !ev.payload?.reasoning) {
-        haptic.success(); // a reply landed where you're looking
+
         setSeen((s) => {
           const next = markRead(s, chatId, ev.id);
           if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
@@ -1257,7 +1338,9 @@ export function ProjectScreen(props: {
 
   // /btw <question>: a side chat, read-only and outside the thread (#376)
   const [sideQ, setSideQ] = useState<string | null>(null);
+  const sending = useRef(false);
   const send = async () => {
+    if (sending.current) return;
     if (stt.listening) void stt.toggle(); // stop dictation on send
     const template = /^\/template\s+(.+)$/i.exec(text.trim());
     if (template) {
@@ -1277,24 +1360,16 @@ export function ProjectScreen(props: {
     const typed = text.trim();
     const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
     if (!message) return;
-    attach.clear();
-    haptic.tap();
-    setText("");
-    sttBase.current = "";
+    sending.current = true;
     setErr(null);
     try {
-      if (selected && selected !== project.holder) await handoff(creds, project.id, selected);
-      const res = await sendMessage(creds, project.id, message, selected ?? undefined, chatId, plan ? { plan: true } : undefined);
-      // a prompt to a busy agent joins the queue: show it now, not at the next poll
-      if ((res as { queued?: number }).queued) {
-        void getQueue(creds, project.id)
-          .then(setQueue)
-          .catch(() => {});
-      }
-    } catch (e) {
-      setText(current => current || message);
-      setErr(e instanceof Error ? e.message : String(e));
-    }
+      const q = await outbox(creds);
+      await q.add({ id: Crypto.randomUUID(), project: project.id, chat: chatId, text: message,
+        ...(selected ? { agentId: selected } : {}), ...(plan ? { plan: true } : {}) });
+      attach.clear(); setText(current => current === text ? "" : current); sttBase.current = ""; haptic.tap();
+      setOfflineQueue([...q.items]);
+    } catch (e) { composerError(e); }
+    finally { sending.current = false; }
   };
 
   // Steer (#373): hold Send while a turn runs here and what you typed goes into that turn now,
@@ -1392,7 +1467,7 @@ export function ProjectScreen(props: {
       void api(creds, composerBase + "/presentation", { method: "PUT", body: JSON.stringify({ eventId: id, expanded }) }).catch(composerError);
     },
   };
-  const threadCtx = { creds, projectId: project.id, agents: project.agents.map(a => a.id), branches: branchCtx, composer: composerActions };
+  const threadCtx = { askLine, creds, projectId: project.id, agents: project.agents.map(a => a.id), branches: branchCtx, composer: composerActions };
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
@@ -1447,6 +1522,7 @@ export function ProjectScreen(props: {
             {`$${presentation.costUsd.toFixed(4)} · ${presentation.tokens} tokens · ${presentation.turns} turns`}
           </Text>
         </TouchableOpacity>
+        <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (
@@ -1544,6 +1620,7 @@ export function ProjectScreen(props: {
 
       {tab === "thread" ? (
         <>
+          <R4AgentSessions creds={creds} project={project} chat={chatId} unread={unreadId} events={events} onChat={setChatId} onChanged={() => { refreshProject(); reloadChats(); }} />
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
           {(
             <ScrollView
@@ -1711,6 +1788,13 @@ export function ProjectScreen(props: {
           <Sheet visible={bookmarks !== null} onClose={() => setBookmarks(null)} title="Bookmarks">
             {!bookmarks?.length ? <Text style={{ color: T.dim, padding: 16 }}>No bookmarks yet.</Text> : bookmarks.map(b => <TouchableOpacity key={b.event.id} onPress={() => { setBookmarks(null); if (b.chat === chatId) void jumpMessage(b.event.id).catch(composerError); else { bookmarkJump.current = { chat: b.chat, id: b.event.id }; setChatId(b.chat); } }} style={{ padding: 16 }}><Text style={{ color: T.text }}>{b.title} · {String(b.event.payload.text ?? "")}</Text></TouchableOpacity>)}
           </Sheet>
+          <TouchableOpacity accessibilityRole="button" onPress={() => setSearchOpen(o => !o)} style={{ padding: 10 }}><Text style={{ color: T.dim }}>Search this chat</Text></TouchableOpacity>
+          {searchOpen && <ChatSearch creds={creds} project={project.id} chat={chatId} events={events} onJump={id => { setSearchOpen(false); void jumpMessage(id).catch(composerError); }} />}
+          {props.sharedDraft ? <View style={{ padding: 10 }}><Text style={{ color: T.dim }}>Shared text · choose a chat, then add it to your draft</Text><Text numberOfLines={4} style={{ color: T.text }}>{props.sharedDraft}</Text><Btn label="Add shared text" onPress={() => { setText(t => (t ? t + "\n\n" : "") + props.sharedDraft); props.onSharedDraft?.(); }} /><Btn label="Discard shared text" onPress={() => props.onSharedDraft?.()} /></View> : null}
+          {offlineQueue.filter(i => i.project === project.id && i.chat === chatId).map(i => <View key={i.id} style={{ padding: 10 }}>
+            <Text style={{ color: i.error ? T.err : T.dim }}>{i.error || "Waiting to send"} · {i.text.slice(0, 100)}</Text>
+            <Btn label="Discard queued message" onPress={() => void outbox(creds).then(async q => { await q.remove(i.id); setOfflineQueue([...q.items]); }).catch(composerError)} />
+          </View>)}
           <ThreadCtx.Provider value={threadCtx}>
           <FlatList
             ref={listRef}
@@ -1964,6 +2048,8 @@ export function ProjectScreen(props: {
                 onSelect={setSelected}
               />
               <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} chat={chats.find((c) => c.id === chatId) ?? null} onChanged={() => { refreshProject(); reloadChats(); }} />
+              <ModelRoutingSheet creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
+              <SafetyButton creds={creds} projectId={project.id} onChanged={refreshProject} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>
@@ -2021,7 +2107,9 @@ export function ProjectScreen(props: {
                 </Text>
               ) : null;
             })()}
+            <ModelEstimateLine creds={creds} projectId={project.id} agentId={selectedAgent?.id} chat={chatId} text={text} model={chats.find(c => c.id === chatId)?.model || selectedAgent?.model} />
             <AttachBar items={attach.items} onRemove={attach.remove} />
+            <TeammateMentions creds={creds} projectId={project.id} text={text} onChange={setText} />
             <View
               style={{
                 flexDirection: "row",
@@ -2140,6 +2228,8 @@ export function ProjectScreen(props: {
             setTab("thread");
           }}
         />
+      ) : tab === "sharing" ? (
+        <ProjectSharing creds={creds} projectId={project.id} chat={chatId} />
       ) : tab === "orchestra" ? (
         <OrchestraView
           creds={creds}
@@ -2324,11 +2414,15 @@ export function ProjectScreen(props: {
                       </TouchableOpacity>
                     ))}
                   </View>
-                  <DiffView patch={tree.patch} maxHeight={520} />
+                  <DiffView patch={tree.patch} maxHeight={520} onAsk={askLine} />
                 </View>
               ) : (
                 <Sys text="working tree is clean" />
               )}
+              <GitReviewPanel creds={creds} id={project.id} chat={chatId} agent={selected ?? project.holder ?? undefined} checkpoints={checkpoints ?? []} onMessage={setCommitMsg} onRewind={() => {
+                void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(e => setErr(String(e)));
+                void getCheckpoints(creds, project.id).then(x => setCheckpoints(x.checkpoints)).catch(e => setErr(String(e)));
+              }} />
               {/* Rewind: the files as they were before a turn — the desktop's rewind menu */}
               {checkpoints && checkpoints.length ? (
                 <View style={{ gap: 2, marginTop: spacing.md }}>

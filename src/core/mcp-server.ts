@@ -27,6 +27,12 @@ function tool<T extends z.ZodRawShape>(name: string, description: string, shape:
 }
 
 const tools: Tool[] = [
+  tool("scoreboard", "Recorded model standings for accessible projects.", { project: id.optional(), window: z.enum(["7d", "30d", "all"]).optional() }, "read",
+    (c, a) => c.scoreboard(a.project ?? "all", a.window ?? "30d")),
+  tool("fleets", "List saved machine-wide fleets. Requires an owner or unscoped device.", {}, "read", c => c.fleets()),
+  tool("try", "Create or reopen a demo project on this machine. Requires an owner or unscoped device.", { dir: id.optional(), agents: z.number().int().min(1).max(8).optional() }, "add", (c, a) => c.tryProject(a)),
+  tool("memory_list", "List project memories, optionally filtered by kind.", { ...project, kind: z.enum(["decision", "constraint", "convention", "fact", "failure", "task"]).optional(), limit: z.number().int().min(1).max(1000).optional() }, "read",
+    (c, a) => c.brain(a.project, { kind: a.kind, limit: a.limit })),
   tool("status", "Accessible project statuses, or one project's status.", { project: id.optional() }, "read",
     (c, a) => a.project ? c.project(a.project) : c.listProjects()),
   tool("projects", "List the projects accessible to this credential.", {}, "read", c => c.listProjects()),

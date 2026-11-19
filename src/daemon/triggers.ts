@@ -5,6 +5,7 @@
  * waiting there skips rather than piling up behind itself.
  */
 
+import { githubCommand } from "../core/integration-triggers.js";
 import { startIntake } from "./intake.js";
 import { logbook } from "../core/logbook.js";
 import { listProjects } from "../core/registry.js";
@@ -18,6 +19,7 @@ const SEEN_MAX = 500;
 export class TriggerRunner {
   private timer: ReturnType<typeof setInterval> | null = null;
   private seen = new Map<string, number>();
+  private firing = new Map<string, Promise<TriggerRun>>();
 
   constructor(private runtime: (projectId: string) => Promise<ProjectRuntime>) {}
 
@@ -45,6 +47,15 @@ export class TriggerRunner {
    * also recorded in the trigger's run history.
    */
   async fire(projectId: string, dir: string, triggerId: string, opts: { kind: "scheduled" | "webhook" | "manual"; body?: unknown; event?: string; delivery?: string }): Promise<TriggerRun> {
+    const key = `${projectId}:${triggerId}`;
+    const prior = this.firing.get(key) ?? Promise.resolve();
+    const next = prior.catch(() => {}).then(() => this.fireOne(projectId, dir, triggerId, opts));
+    this.firing.set(key, next);
+    try { return await next; }
+    finally { if (this.firing.get(key) === next) this.firing.delete(key); }
+  }
+
+  private async fireOne(projectId: string, dir: string, triggerId: string, opts: { kind: "scheduled" | "webhook" | "manual"; body?: unknown; event?: string; delivery?: string }): Promise<TriggerRun> {
     const data = readTriggers(dir);
     const t = data.triggers.find((x) => x.id === triggerId);
     const now = Date.now();
@@ -59,8 +70,12 @@ export class TriggerRunner {
       return run;
     };
     if (!t) return { trigger: triggerId, at: now, ok: false, note: "no such trigger" };
+    const command = t.githubCommand ? githubCommand(opts.body, opts.event) : null;
+    if (t.githubCommand && !command) return record(false, "skipped: requires a trusted /loom issue comment");
+    if (command && t.commandIds?.includes(command.id)) return record(false, "skipped: already delivered");
+    if (command) opts.delivery = `github-comment:${command.id}`;
     if (opts.delivery) {
-      const key = `${triggerId}:${opts.delivery}`;
+      const key = `${projectId}:${triggerId}:${opts.delivery}`;
       if (this.seen.has(key)) return { trigger: triggerId, at: now, ok: false, note: "skipped: already delivered" };
       this.seen.set(key, now);
       if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.keys().next().value!);
@@ -76,21 +91,26 @@ export class TriggerRunner {
         const issues = await startIntake(rt, t.intake.source, undefined, t.intake.mode, t.agent, t.intake.label);
         return record(true, `intake checked ${issues.length} assigned issues`);
       }
-      let chat = t.chat && rt.chats().some((c) => c.id === t.chat) ? t.chat : undefined;
+      let chat = !command && t.chat && rt.chats().some((c) => c.id === t.chat) ? t.chat : undefined;
       if (!chat) {
-        chat = rt.createChat(`⏱ ${t.name}`, t.agent ? { agentId: t.agent } : {}).id;
+        chat = rt.createChat(command ? `GitHub #${command.number}: ${command.prompt.slice(0, 60)}` : `⏱ ${t.name}`, t.agent ? { agentId: t.agent } : {}).id;
         const fresh = readTriggers(dir);
         const cur = fresh.triggers.find((x) => x.id === triggerId);
         if (cur) { cur.chat = chat; writeTriggers(dir, fresh); }
       }
       if (rt.queue.snapshot().items.some((i) => i.chat === chat)) return record(false, "skipped: its last run is still waiting in the queue");
-      const text = opts.body !== undefined || t.kind === "webhook"
+      const text = command ? `${command.prompt}\n\nIssue: ${command.url}` : opts.body !== undefined || t.kind === "webhook"
         ? renderPrompt(t.prompt, opts.body ?? {}, opts.event ?? "", { name: t.name, firedAt: now })
         : renderPrompt(t.prompt, {}, "", { name: t.name, firedAt: now });
       // always one named agent: an "auto" queue item runs a route, and routes answer in the main chat
       const agentId = t.agent ?? rt.baton.holder() ?? rt.config.agents.find((a) => a.enabled !== false)?.id;
       if (!agentId) return record(false, "no agent in this project to run it");
       rt.enqueue({ text: `${text}\n\n(started by the trigger "${t.name}", ${opts.kind})`, chat, source: "user", target: { kind: "agent", agentId } });
+      if (command) {
+        const fresh = readTriggers(dir);
+        const cur = fresh.triggers.find(x => x.id === triggerId);
+        if (cur) { cur.commandIds = [...(cur.commandIds ?? []), command.id].slice(-500); writeTriggers(dir, fresh); }
+      }
       return record(true, rt.queue.paused ? "queued — but this project's queue is paused, so it waits until you resume it" : "queued");
     } catch (e) {
       return record(false, (e as Error).message);

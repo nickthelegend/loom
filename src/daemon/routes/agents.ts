@@ -1,3 +1,5 @@
+import { profiles } from "../../core/agents-r4/store.js";
+import { readModelRouting, validateAgentOptions } from "../../core/model-routing.js";
 import type { Express } from 'express';
 import { listModelsForKind } from '../system.js';
 import type { WithRuntime } from './context.js';
@@ -11,7 +13,12 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
   app.post(
     "/api/projects/:id/agents",
     withRuntime(async (rt, req, res) => {
-      const { kind, id, as, role, options, model, account, count = 1 } = (req.body ?? {}) as {
+      const profileName = req.body?.profile;
+      const caller = req as typeof req & { projectScope?: unknown; guest?: unknown };
+      if (profileName !== undefined && (caller.projectScope || caller.guest)) return void res.status(403).json({ error: "profiles require the owner or an unscoped device" });
+      const profile = profileName === undefined ? undefined : profiles().find(p => p.name === profileName);
+      if (profileName !== undefined && !profile) return void res.status(404).json({ error: "unknown profile" });
+      const { kind, id, as, role, options, model, account, count = 1 } = { ...(profile ? { kind: profile.kind } : {}), ...(req.body ?? {}) } as {
         kind?: string;
         account?: string;
         id?: string;
@@ -29,13 +36,18 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
         return void res.status(400).json({ error: "model must be a string" });
       }
       try {
+        if (profile && kind !== profile.kind) throw new Error("profile kind does not match");
+        if (options !== undefined) validateAgentOptions(kind, options);
+        const merged = { ...(profile?.model ? { model: profile.model } : {}), ...(profile?.effort ? { effort: profile.effort } : {}), ...(profile?.mode ? { permissions: profile.mode } : {}), ...options };
+        validateAgentOptions(kind, merged);
         const agents = Array.from({ length: count }, () => rt.addAgent(kind.trim(), {
           id: id ?? as,
           role,
           account,
-          options: { ...options, ...(model !== undefined ? { model } : {}) },
+          options: { ...merged, ...(model !== undefined ? { model } : {}) },
           ...(count > 1 ? { series: true } : {}),
         }));
+        if (profile?.instructions) for (const agent of agents) rt.setAgentInstructions(agent.id, profile.instructions);
         res.json({ ...agents[0], agents });
       } catch (err) {
         res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -50,7 +62,8 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       const kind = typeof req.query.kind === "string" ? req.query.kind.trim() : "";
       if (!knownAgentKinds().includes(kind)) return void res.status(400).json({ error: `unknown agent kind "${kind}"` });
       const { models, source } = await listModelsForKind(kind);
-      res.json({ kind, count: models.length, models, source });
+      const choices = [...Object.keys(readModelRouting().aliases), ...models];
+      res.json({ kind, count: choices.length, models: choices, source });
     }),
   );
 
@@ -125,7 +138,8 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       const agent = rt.config.agents.find((a) => a.id === String(req.params.agentId));
       if (!agent) return void res.status(404).json({ error: "unknown agent" });
       const { models, source } = await listModelsForKind(agent.kind);
-      res.json({ kind: agent.kind, count: models.length, models, source });
+      const choices = [...Object.keys(readModelRouting().aliases), ...models];
+      res.json({ kind: agent.kind, count: choices.length, models: choices, source });
     }),
   );
 

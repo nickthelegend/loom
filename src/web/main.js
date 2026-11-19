@@ -1,4 +1,8 @@
+import { installAgentsR4 } from "./agents-r4.js";
 /** Browser main module. See README.md for ownership and startup. */
+import { isGuest } from './share-live.js';
+import { restoreWorkspace,installSelectionSync } from './session.js';
+import { installShortcuts } from './shortcuts.js';
 import { api,pairFromHash } from './connection.js';
 import { clog } from './console.js';
 import { labelIcons } from './icons.js';
@@ -15,6 +19,10 @@ import { loadLoomPad,loadUpdate } from './statusbar.js';
 import { openTaskModal } from './tasks.js';
 import { enterWorkspace,inWorkspace,installPaneMode,makeChatsDraggable,paneId,renderWorkspace,workspaceCommand } from './workspace.js';
 import { isSplitShortcut } from './splits.js';
+
+  restoreWorkspace();
+  installSelectionSync();
+  installShortcuts();
 
   document.addEventListener("visibilitychange", function(){ if (!document.hidden) stopTitleFlash(); });
 
@@ -92,6 +100,7 @@ import { isSplitShortcut } from './splits.js';
   mq.addEventListener("change", function(){ clearShell(); route(); });
 
   document.addEventListener("keydown", function(e){
+    if (isGuest()) return;
     // ⌘K / Ctrl+K — the command palette, from anywhere (even mid-type)
     if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "k" || e.key === "K")) {
       if (state.token && !document.querySelector(".scrim")) { e.preventDefault(); openPalette(); }
@@ -197,3 +206,5 @@ import { isSplitShortcut } from './splits.js';
       route();
     }).catch(function(err){ toast(err.message); route(); });
   }
+
+installAgentsR4();

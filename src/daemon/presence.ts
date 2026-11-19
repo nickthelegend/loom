@@ -52,6 +52,14 @@ export class ChatPresenceTracker<T> {
     return { type: "presence", projectId, chat, people: [...(group?.people.values() ?? [])].map((p) => ({ ...p })) };
   }
 
+  project(projectId: string): PresencePerson[] {
+    const people = new Map<string, PresencePerson>();
+    for (const group of this.chats.values()) if (group.projectId === projectId) {
+      for (const person of group.people.values()) people.set(person.id, { ...person });
+    }
+    return [...people.values()];
+  }
+
   private changed(group: ChatPresence<T>): void {
     if (group.pending) return;
     // Coalesce bursts across all sockets in a chat, keeping the final typing

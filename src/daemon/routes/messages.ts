@@ -1,11 +1,14 @@
+import { deliverOnce, DeliveryConflict } from "../../core/message-receipts.js";
+import { logbook } from "../../core/logbook.js";
 import { quoteMessage } from "../../core/chat-composer.js";
 import type { Express } from 'express';
 import { recordRecent } from "../../core/prompts.js";
+import type { TeamLink } from "../team.js";
 import type { WithRuntime } from './context.js';
 import { ContinuityError, Id, Text, parseBounded } from "../../core/continuity/contracts.js";
 import { z } from "zod";
 /** Register messages routes in the order established by LoomDaemon.routes(). */
-export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): void {
+export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime, team?: TeamLink): void {
 
   // { messages: LoomEvent[] }, oldest first, last 1–1000 message events in this chat.
   app.get("/api/projects/:id/chats/:chat/messages", withRuntime(async (rt, req, res) => {
@@ -82,7 +85,7 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
       if (rt.continuity) {
         try { parseBounded(z.strictObject({ text: Text.min(1), agentId: Id.optional(), chat: Id.optional(),
           replyTo: z.number().int().positive().optional(), model: z.string().optional(), effort: z.string().optional(),
-          plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
+          handoff: z.boolean().optional(), deliveryId: z.string().regex(/^[a-zA-Z0-9_-]{8,128}$/).optional(), plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
         catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "invalid continuity request", code: "invalid" }); return; }
       }
       const guest = (req as unknown as { guest?: { chat: string; name: string } }).guest;
@@ -110,21 +113,31 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
       }
       let result;
       try {
-        result = await rt.sendMessage(prompt, agentId, {
-          ...(chat ? { chat } : {}),
-          ...(model !== undefined ? { model } : {}),
-          ...(effort !== undefined ? { effort } : {}),
-          ...(guest ? { by: guest.name } : {}),
-          ...(plan ? { plan: true } : {}),
-          ...(fresh ? { fresh: true } : {}),
-          ...(requestId ? { requestId } : {}),
-          ...(length === "brief" || length === "detailed" ? { length } : {}),
-        });
+        const key = body.deliveryId ?? req.get("Idempotency-Key");
+        if (key !== undefined && (guest || typeof key !== "string" || !/^[a-zA-Z0-9_-]{8,128}$/.test(key))) return void res.status(400).json({ error: "invalid delivery key" });
+        const deliver = async () => {
+          // The phone's agent selection and send share one receipt, so a retry can't take the baton again.
+          if (key && body.handoff === true && agentId && (await rt.status()).holder !== agentId) await rt.handoff(agentId);
+          return rt.sendMessage(prompt, agentId, {
+            ...(chat ? { chat } : {}),
+            ...(model !== undefined ? { model } : {}),
+            ...(effort !== undefined ? { effort } : {}),
+            ...(guest ? { by: guest.name } : {}),
+            ...(plan ? { plan: true } : {}),
+            ...(fresh ? { fresh: true } : {}),
+            ...(requestId ? { requestId } : {}),
+            ...(length === "brief" || length === "detailed" ? { length } : {}),
+          });
+        };
+        result = key ? await deliverOnce(rt.info.dir, req.get("authorization") ?? "", key, body, deliver) : await deliver();
       }
       catch (error) {
+        if (error instanceof DeliveryConflict) return void res.status(409).json({ error: error.message });
         if (!(error instanceof ContinuityError)) throw error;
         res.status(error.code === "invalid" ? 400 : error.code === "unsupported" ? 422 : 409).json({ error: error.message, code: error.code }); return;
       }
+      // Delivery failure must not turn an accepted chat message into a retry.
+      if (!guest) await team?.mention(rt, chat || "main", text).catch(e => logbook.warn("team", "couldn’t deliver chat mentions", String(e)));
       recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
       res.json(result);
     }),

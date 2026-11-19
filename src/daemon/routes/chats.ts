@@ -14,6 +14,7 @@ import { resolveProvider } from "../../core/providers.js";
 import { LoomAskTimeoutError } from "../runtime.js";
 import type { WithRuntime } from './context.js';
 import { threadReplay } from "../../core/replay.js";
+import { shareHours } from "../../core/team-sharing.js";
 import { createShare, listShares, revokeShare } from "../../core/shares.js";
 import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
@@ -137,12 +138,21 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
       const chat = String(req.params.chat || MAIN_CHAT);
       const info = chat === MAIN_CHAT ? { title: "Main" } : rt.chats().find((c) => c.id === chat);
       if (!info) return void res.status(404).json({ error: "no such chat" });
-      const { hours } = (req.body ?? {}) as { hours?: number };
+      let hours: number;
+      try { hours = shareHours(req.body ?? {}); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
       const { share, token } = createShare({ projectId: rt.info.id, chat, title: `${rt.info.name} · ${info.title || "Chat"}`, ...(Number(hours) > 0 ? { hours: Number(hours) } : {}) });
       const host = String(req.headers.host ?? "127.0.0.1");
       res.json({ id: share.id, url: `http://${host}/share/${token}`, expiresAt: share.expiresAt, title: share.title });
     }),
   );
+  app.get("/api/projects/:id/shares", withRuntime(async (rt, _req, res) => {
+    res.json({ shares: listShares().filter(s => s.projectId === rt.info.id).map(({ hash: _h, ...s }) => s) });
+  }));
+  app.delete("/api/projects/:id/shares/:shareId", withRuntime(async (rt, req, res) => {
+    const id = String(req.params.shareId);
+    if (!listShares().some(s => s.id === id && s.projectId === rt.info.id)) return void res.status(404).json({ error: "no such share" });
+    res.json({ revoked: revokeShare(id) });
+  }));
   app.get("/api/shares", (_req, res) => {
     res.json({ shares: listShares().map(({ hash: _h, ...s }) => s) });
   });
@@ -161,6 +171,7 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
       const events = rt.log.list({ chat, limit: 20_000 });
       const html = threadReplay(events, { project: rt.info.name, chat: info.title || "Chat" });
       const file = `${rt.info.name}-${info.title || chat}`.replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 80) || "replay";
+      if (req.query.format === "json") return void res.json({ filename: `${file}.html`, content: html });
       res.setHeader("content-type", "text/html; charset=utf-8");
       res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
       res.setHeader("x-content-type-options", "nosniff");
@@ -216,7 +227,9 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team
   app.get(
     "/api/projects/:id/chats",
     withRuntime(async (rt, _req, res) => {
-      res.json({ chats: rt.chats() });
+      const chats = rt.chats().filter(c => _req.query.archived === undefined || (_req.query.archived === "1" ? c.archived : !c.archived))
+        .filter(c => !_req.query.label || c.labels?.some(l => l.name === _req.query.label));
+      res.json({ chats });
     }),
   );
 

@@ -1,8 +1,14 @@
+import { mountSessionSettings } from "./agents-r4.js";
+import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
+import { renderModelRouting } from './model-routing.js';
+
+import { renderShortcuts } from './shortcuts.js';
+import { renderIntegrationSettings } from "./integrations-ui.js";
 import { agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,logout } from './connection.js';
-import { esc,rel } from './format.js';
+import { avatarSrc,esc,rel } from './format.js';
 import { ICONS,LOADER } from './icons.js';
 import { askConfirm,askText,chime,devicePref,setDevicePref,toast } from './notifications.js';
 import { state } from './state.js';
@@ -37,14 +43,19 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     var pid = (location.hash.match(/^#p\/(.+)$/) || [])[1] || state.pid || null;
     var SECTIONS = [
       { id: "setup", label: "Setup", icon: ICONS.tasks },
+      { id: "ops", label: "Operations", icon: ICONS.console },
       { id: "diagnostics", label: "Diagnostics", icon: ICONS.console },
+      { id: "models", label: "Models", icon: ICONS.gear },
+      { id: "shortcuts", label: "Shortcuts", icon: ICONS.keyboard },
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "accounts", label: "Accounts", icon: ICONS.team },
+      { id: "aliases", label: "CLI aliases", icon: ICONS.console },
       { id: "agentskills", label: "Loom for agents", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
+      { id: "integrations", label: "Integrations & email", icon: ICONS.gear },
       { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
       { id: "about", label: "About", icon: ICONS.info }
     ];
@@ -386,6 +397,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           var on = appearancePref("accent", "cyan") === k;
           return '<button type="button" class="accentsw' + (on ? " on" : "") + '" data-accent="' + k + '" aria-pressed="' + on + '" title="' + k + '" style="--sw:' + ACCENTS[k][0] + '"></button>';
         }).join("") + "</div></div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Motion</div><div class="pd">Reduce animations, or follow your operating system.</div></div><div class="pc">' + seg("motion", [{ v: "system", l: "System" }, { v: "reduce", l: "Reduced" }], appearancePref("motion", "system")) + "</div></div>";
       h += '<div class="sgrouph">Notifications · this device</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">When a long turn finishes</div>' +
         '<div class="pd">A notification when an agent finishes something that took more than 20 seconds, while Loom is in the background.</div></div>' +
@@ -395,6 +407,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      mountSessionSettings(pane, pid);
       bindSeg("devmode", function(v){
         setDevMode(v === "dev");
         toast(v === "dev" ? "Developer mode on \u2014 every tool is back" : "Simple mode \u2014 just what you need");
@@ -410,6 +423,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         toast(v === "on" ? "you’ll hear when long turns finish" : "finish notifications off");
       });
       bindSeg("chime", function(v){ setDevicePref("chime", v === "on"); if (v === "on") chime(); });
+      bindSeg("motion", function(v){ try { localStorage.setItem("loomPref:motion", v); } catch (e) {} applyAppearance(); });
       bindSeg("textsize", function(v){ try { localStorage.setItem("loomPref:textsize", v); } catch (e) {} applyAppearance(); });
       bindSeg("density", function(v){ try { localStorage.setItem("loomPref:density", v); } catch (e) {} applyAppearance(); });
       Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(b){
@@ -543,6 +557,11 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         } else if (u.root && behind > 0) {
           h += '<div class="snote">Your checkout is behind its remote, though the release matches. Pull and rebuild:</div>';
           h += '<code class="scmd">cd ' + esc(u.root) + " && git pull --ff-only && npm install && npm run build\nloom up --restart</code>";
+        }
+        if (u.changelog) {
+          h += '<div class="sgrouph">Changes since ' + esc(u.version) + '</div>';
+          (u.changelog.entries || []).forEach(function(entry){ h += '<div class="st">' + esc(entry.version) + '</div><pre class="scmd ops-output">' + esc(entry.notes) + '</pre>'; });
+          if (!u.changelog.available) h += '<div class="snote">Changelog unavailable. Try again or open the release notes.</div>';
         }
         h += '<div class="updlog" id="updlog" style="display:none"></div>';
         pane.innerHTML = h;
@@ -1013,6 +1032,27 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     }
 
     // ---- About --------------------------------------------------------------
+    function renderAliases(){
+      busy();
+      sapi("/api/aliases").then(function(r){
+        pane.innerHTML = '<div class="snote">Aliases on this computer. Arguments are passed literally to Loom; built-in commands take precedence.</div>' +
+          '<div id="aliasrows">' + Object.keys(r.aliases).map(function(name){
+            return '<div class="psrow"><div class="psinfo"><b>' + esc(name) + '</b><code>' + esc(r.aliases[name].join(" ")) + '</code></div><button class="btn xs outline" data-alias-rm="' + esc(name) + '">Remove</button></div>';
+          }).join("") + '</div><div class="field"><label for="aliasname">Name</label><input id="aliasname" placeholder="review"></div>' +
+          '<div class="field"><label for="aliasargs">Command arguments, one per line</label><textarea id="aliasargs" placeholder="send&#10;--wait&#10;Review my changes"></textarea></div>' +
+          '<button class="btn outline" id="aliassave">Save alias</button><div class="snote" id="aliaserror" role="status"></div>';
+        function change(method, body){
+          sapi("/api/aliases", { method: method, body: JSON.stringify(body) }).then(renderAliases).catch(function(e){
+            var out = pane.querySelector("#aliaserror"); if (out) out.textContent = e.message;
+          });
+        }
+        pane.querySelector("#aliassave").onclick = function(){
+          change("PUT", { name: pane.querySelector("#aliasname").value.trim(), args: pane.querySelector("#aliasargs").value.split("\n") });
+        };
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-alias-rm]"), function(b){ b.onclick = function(){ change("DELETE", { name: b.getAttribute("data-alias-rm") }); }; });
+      }).catch(fail);
+    }
+
     function renderAbout(){
       busy();
       sapi("/api/health").then(function(hh){
@@ -1055,6 +1095,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           '<label class="trsw"><input type="checkbox" data-b="' + p + '-same-approvers"' + (!c || c.approvers === undefined ? ' checked' : '') + '><span>Let everyone listed above answer approvals</span></label>' +
           '<div class="field"><label>Approvers <span class="opt">user ids, comma-separated; empty = nobody</span></label><input data-b="' + p + '-approvers" value="' + esc(c ? (c.approvers || []).join(", ") : "") + '"' + (!c || c.approvers === undefined ? ' disabled' : '') + ' spellcheck="false"></div>' +
           '<div class="field"><label>In channels <span class="opt">ids; blank = any channel the bot is in</span></label><input data-b="' + p + '-channels" value="' + esc(c ? (c.channels || []).join(", ") : "") + '" spellcheck="false"></div>' +
+          (p === "discord" ? '<div class="field"><label>Orchestra progress channel <span class="opt">one thread per run; blank disables</span></label><input data-b="discord-orchestra" value="' + esc((c && c.orchestraChannel) || "") + '"></div>' : '<p class="hintx">Add a /loom slash command with commands scope in your Slack app. /loom &lt;goal&gt; starts Orchestra on this bridge’s project.</p>') +
           '<div class="field"><label>Project <span class="opt">blank = the only one</span></label><input data-b="' + p + '-project" value="' + esc((c && c.project) || "") + '" spellcheck="false"></div>' +
           "</div>" +
           '<div class="pillrow"><button class="btn primary sm" data-save="' + p + '">' + (c && c.enabled ? "Save & reconnect" : "Connect") + "</button>" +
@@ -1071,6 +1112,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       Array.prototype.forEach.call(pane.querySelectorAll("[data-save]"), function(btn){
         btn.onclick = function(){
           var p = btn.getAttribute("data-save"), body = { enabled: true, users: val(p + "-users"), channels: val(p + "-channels"), project: val(p + "-project") };
+          if (p === "discord") body.orchestraChannel = val("discord-orchestra");
           body.approvers = pane.querySelector('[data-b="' + p + '-same-approvers"]').checked ? null : val(p + "-approvers");
           if (val(p + "-bot")) body.botToken = val(p + "-bot");
           if (p === "slack" && val("slack-app")) body.appToken = val("slack-app");
@@ -1091,12 +1133,17 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     function render(){
       gen++;
       if (cur === "diagnostics") renderDiag();
+      else if (cur === "models") renderModelRouting(pane, pid, sapi);
+      else if (cur === "shortcuts") renderShortcuts(pane);
+      else if (cur === "ops") renderOps(pane, sapi, pid);
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
       else if (cur === "accounts") renderAccounts();
+      else if (cur === "aliases") renderAliases();
       else if (cur === "agentskills") renderAgentSkills();
       else if (cur === "cloud") renderCloud();
+      else if (cur === "integrations") renderIntegrationSettings(pane, sapi);
       else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();
       else if (cur === "about") renderAbout();
@@ -1145,7 +1192,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
             ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button>" +
           '<button type="button" class="btn xs ghost psinstr" data-avatar="' + esc(a.id) + '" title="' + (a.avatar ? "change its picture" : "give this agent a picture") + '">' +
-            (a.avatar ? '<img class="psav" src="' + a.avatar + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
+            (avatarSrc(a.avatar) ? '<img class="psav" src="' + esc(avatarSrc(a.avatar)) + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
           (a.avatar ? '<button type="button" class="btn xs ghost" data-avatarx="' + esc(a.id) + '" title="remove its picture" aria-label="remove picture">' + ICONS.x + "</button>" : "") +
           (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
             esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +
@@ -1154,6 +1201,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
           "</div></div>" + '<div class="pscheck" data-chkout="' + esc(a.id) + '"></div>';
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \u00b7 baton " + esc(p.holder || "\u2014") + "</div></div>" +
+        '<div class="psrow"><span class="psinfo">Project config</span><button class="btn xs outline" id="psvalidate">Validate config</button></div><div class="pshint psvalidation" id="psvalidation" role="status"></div>' +
         '<div class="pssec">Agents \u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
         '<div class="pshint">Off agents stay in the roster but can\u2019t take turns or hold the baton. Changes land on the next turn \u2014 no restart. You can\u2019t switch off the baton holder; hand it off first.</div>' +
         '<div class="pssec" style="margin-top:14px">Tools \u2014 skills and MCP servers</div><div class="psrows">' +
@@ -1165,6 +1213,13 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
         '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
+      document.getElementById("psvalidate").onclick = function(){
+        var button = this, out = document.getElementById("psvalidation");
+        button.disabled = true;
+        api("/api/projects/" + encodeURIComponent(pid) + "/config/validate").then(function(r){
+          out.textContent = [r.valid ? ".loom/config.json is valid" : ".loom/config.json is invalid"].concat(r.errors.map(function(e){ return e.path + ": " + e.message; }), r.warnings).join("\n");
+        }).catch(function(e){ out.textContent = e.message; }).finally(function(){ button.disabled = false; });
+      };
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
       drawPsStore();
       api("/api/projects/" + pid + "/skills").then(function(r){
@@ -1194,6 +1249,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         var host = document.getElementById("pspolicies"); if (!host) return;
         var POLS = [
           ["git.commitPerTurn", "Commit each turn", "one commit per turn, agent as co-author, staged by the turn\u2019s own files", (cfg.git || {}).commitPerTurn],
+          ["git.branchPerChat", "Branch per chat", "create a chat branch on its first edit", (cfg.git || {}).branchPerChat],
           ["git.branchPerTask", "Branch per card", "dragging a card to Working checks out task/<id>-<slug>", (cfg.git || {}).branchPerTask],
           ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \u2014 applies to agents spawned from now on", (cfg.git || {}).worktreePerAgent],
           ["git.mergeOnHandoff", "Merge on handoff", "with worktrees on: the baton carries agent/&lt;from&gt; into the next agent\u2019s checkout \u2014 refused when either side has uncommitted work; a conflict stops a route", (cfg.git || {}).mergeOnHandoff],
@@ -1406,6 +1462,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
             '<input id="npname" spellcheck="false" autocomplete="off" placeholder="e.g. landing page">' +
             '<span class="ferr" id="nperr" role="alert"></span>' +
             '<span class="hintx">A new folder under your Loom projects folder, with git and a first commit.</span></div>' +
+          '<div class="field"><label for="nptemplate">Starter template</label><select id="nptemplate"><option value="">Empty project</option></select><span class="hintx" id="nptemplatehint"></span></div>' +
           '<div class="field"><label>Agents <span class="opt">who works here</span></label>' +
             '<div class="npagents" id="npagents"><div class="obsub">looking for agent CLIs…</div></div>' +
             '<span class="hintx">Tick none to use every agent found on this machine. Same agent twice? Raise the count — each gets its own name.</span></div>' +
@@ -1433,6 +1490,12 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       '<button class="btn primary" id="pcreate">Create project<span class="kbd">⌘↵</span></button></div>' +
     "</div>";
     document.body.appendChild(scrim);
+    api("/api/init-templates").then(function(r){
+      if (!scrim.isConnected) return;
+      var select = scrim.querySelector("#nptemplate");
+      select.innerHTML += r.templates.map(function(t){ return '<option value="' + esc(t.name) + '">' + esc(t.name + " — " + t.description) + '</option>'; }).join("");
+    }).catch(function(e){ if (scrim.isConnected) scrim.querySelector("#nptemplatehint").textContent = e.message; });
+
     var closed = false;
     function close(){ closed = true; scrim.remove(); document.removeEventListener("keydown", onKey); }
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
@@ -1533,7 +1596,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
       // a model agent with no model refuses every turn: ask now, not at the first message
       if (picks.model && picks.model.on && !picks.model.model.trim()) return fieldErr("nperr", null, "Model (API) needs a model id — e.g. openrouter/anthropic/claude-opus-5-5.");
       busy("Creating…");
-      api("/api/projects/new", { method: "POST", body: JSON.stringify(agents.length ? { name: name, agents: agents } : { name: name }) })
+      api("/api/projects/new", { method: "POST", body: JSON.stringify(Object.assign({ name: name, template: document.getElementById("nptemplate").value || undefined }, agents.length ? { agents: agents } : {})) })
         .then(function(j){ opened(j.project || {}, j.config, "created"); })
         .catch(function(err){ idle(); fieldErr("nperr", nameEl, cap(err)); });
     }

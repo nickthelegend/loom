@@ -1,3 +1,4 @@
+import { gitlabIdentity } from "./gitlab.js";
 import { recordIntakePr } from "./intake.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +9,7 @@ export type PrFeedbackMode = "off" | "ci" | "ci+reviews";
  * visible as history, but only OPEN rows are polled. Times are epoch milliseconds.
  */
 export interface TrackedPr {
+  provider?: "gitlab";
   prNumber: number;
   /** GitHub owner/name, or hostname/owner/name for GitHub Enterprise. */
   repo: string;
@@ -27,7 +29,9 @@ export interface PrRecord extends TrackedPr {
   signatures: string[];
 }
 
-export function prFromUrl(url: string): { prNumber: number; repo: string } {
+export function prFromUrl(url: string): { prNumber: number; repo: string; provider?: "gitlab" } {
+  const gitlab = gitlabIdentity(url);
+  if (gitlab) return gitlab;
   const u = new URL(url);
   const match = /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/.exec(u.pathname);
   if (u.protocol !== "https:" || u.username || u.password || u.port || !match || !Number.isSafeInteger(Number(match[3]))) {

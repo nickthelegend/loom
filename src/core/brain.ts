@@ -68,6 +68,9 @@ export interface MemoryProvenance {
 }
 
 export interface Memory {
+  pinned?: boolean;
+  priority?: number;
+  archived?: boolean;
   id: string;
   kind: MemoryKind;
   /** One self-contained sentence. Must read true with no surrounding context. */
@@ -110,6 +113,8 @@ export interface Memory {
 
 /** What a caller hands us. The derived fields are ours to compute. */
 export interface NewMemory {
+  pinned?: boolean;
+  priority?: number;
   kind: MemoryKind;
   text: string;
   entities?: string[];
@@ -123,13 +128,16 @@ export interface NewMemory {
 }
 
 export interface MemoryPatch {
+  pinned?: boolean;
+  priority?: number;
+  archived?: boolean;
   scope?: Memory["scope"];
   text?: string;
   kind?: MemoryKind;
   entities?: string[];
   confidence?: number;
   evidence?: string;
-  expiresAt?: number;
+  expiresAt?: number | null;
   untrusted?: boolean;
   private?: boolean;
 }
@@ -142,6 +150,9 @@ export interface MemoryHistoryEntry {
   by: string;
   text?: string;
   reason?: string;
+  patch?: MemoryPatch;
+  before?: Memory;
+  after?: Memory;
 }
 
 /** The portable brain: what a project knows, as a file that can travel. */
@@ -158,14 +169,22 @@ export interface BrainExport {
     chat?: string;
     agent?: string;
     crew?: string;
+    task?: string;
     /** Kept so a round trip can't make a private or untrusted memory shareable (D13, D43). */
     private?: boolean;
     untrusted?: boolean;
+    evidence?: string;
     expiresAt?: number;
+    pinned?: boolean;
+    priority?: number;
   }>;
 }
 
 export interface ListOpts {
+  author?: string;
+  since?: number;
+  until?: number;
+  includeArchived?: boolean;
   crew?: string;
   kind?: MemoryKind;
   chat?: string;
@@ -321,9 +340,13 @@ export function foldMemories(events: LoomEvent[]): Map<string, Memory> {
       if (Array.isArray(patch.entities)) next.entities = patch.entities;
       if (typeof patch.confidence === "number") next.confidence = clamp01(patch.confidence);
       if (typeof patch.evidence === "string") next.evidence = patch.evidence;
-      if (patch.expiresAt !== undefined) next.expiresAt = patch.expiresAt;
+      if (patch.expiresAt === null) delete next.expiresAt;
+      else if (patch.expiresAt !== undefined) next.expiresAt = patch.expiresAt;
       if (typeof patch.untrusted === "boolean") next.untrusted = patch.untrusted;
       if (typeof patch.private === "boolean") next.private = patch.private;
+      if (typeof patch.pinned === "boolean") next.pinned = patch.pinned;
+      if (typeof patch.archived === "boolean") next.archived = patch.archived;
+      if (typeof patch.priority === "number") next.priority = patch.priority;
       if (patch.scope) next.scope = { ...patch.scope };
       byId.set(cur.id, next);
       continue;
@@ -382,9 +405,9 @@ export class Brain {
     return this.cache;
   }
 
-  /** Every live memory, newest first. */
+  /** Pins first by priority, then newest memories. Archived units remain addressable. */
   all(): Memory[] {
-    return [...this.state().values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    return [...this.state().values()].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (b.priority ?? 0) - (a.priority ?? 0) || b.updatedAt - a.updatedAt);
   }
 
   get(id: string): Memory | undefined {
@@ -400,6 +423,10 @@ export class Brain {
   list(opts: ListOpts = {}): Memory[] {
     const now = Date.now();
     let out = this.all();
+    if (!opts.includeArchived) out = out.filter(m => !m.archived);
+    if (opts.author) out = out.filter(m => m.provenance.agentId === opts.author);
+    if (opts.since !== undefined) out = out.filter(m => m.createdAt >= opts.since!);
+    if (opts.until !== undefined) out = out.filter(m => m.createdAt <= opts.until!);
     if (opts.kind) out = out.filter((m) => m.kind === opts.kind);
     if (opts.chat) out = out.filter((m) => !m.scope.chat || m.scope.chat === opts.chat);
     if (opts.agent) out = out.filter((m) => !m.scope.agent || m.scope.agent === opts.agent);
@@ -435,9 +462,13 @@ export class Brain {
         ...(m.scope.chat ? { chat: m.scope.chat } : {}),
         ...(m.scope.agent ? { agent: m.scope.agent } : {}),
         ...(m.scope.crew ? { crew: m.scope.crew } : {}),
+        ...(m.scope.task ? { task: m.scope.task } : {}),
         ...(m.private ? { private: true } : {}),
         ...(m.untrusted ? { untrusted: true } : {}),
         ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+        ...(m.pinned ? { pinned: true } : {}),
+        ...(m.priority !== undefined ? { priority: m.priority } : {}),
+        ...(m.evidence ? { evidence: m.evidence } : {}),
       })),
     };
   }
@@ -463,12 +494,14 @@ export class Brain {
       if (m.expiresAt !== undefined && !(typeof m.expiresAt === "number" && Number.isFinite(m.expiresAt))) continue;
       if (typeof m.expiresAt === "number" && m.expiresAt <= now) continue; // already dead: not resurrected
       const { created } = this.add({
+        pinned: m.pinned, priority: m.priority, private: m.private, untrusted: m.untrusted,
+        evidence: m.evidence, expiresAt: m.expiresAt,
         kind: m.kind,
         text: m.text,
         ...(m.entities?.length ? { entities: m.entities } : {}),
         ...(m.confidence !== undefined ? { confidence: m.confidence } : {}),
-        ...(m.chat || m.agent || m.crew
-          ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}), ...(m.crew ? { crew: m.crew } : {}) } }
+        ...(m.chat || m.agent || m.crew || m.task
+          ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}), ...(m.crew ? { crew: m.crew } : {}), ...(m.task ? { task: m.task } : {}) } }
           : {}),
         // anything but an explicit false keeps the protection: a malformed flag errs private
         ...(m.private !== undefined && m.private !== false ? { private: true } : {}),
@@ -491,17 +524,20 @@ export class Brain {
    * phase 2 needs to skip an extraction call.
    */
   add(input: NewMemory): { memory: Memory; created: boolean } {
+    if (input.priority !== undefined && (!Number.isInteger(input.priority) || Math.abs(input.priority) > 1000)) throw new Error("priority must be an integer from -1000 to 1000");
     const text = input.text.trim();
     if (!text) throw new Error("a memory needs text");
     if (!MEMORY_KINDS_SET.has(input.kind)) throw new Error(`unknown memory kind: ${input.kind}`);
 
     const hash = memoryHash(text);
-    const existing = [...this.state().values()].find(m => m.hash === hash && m.scope.crew === input.scope?.crew);
+    const existing = [...this.state().values()].find(m => m.hash === hash && sameMemoryScope(m.scope, input.scope ?? {}) && !m.archived);
     if (existing) return { memory: existing, created: false };
 
     const ts = Date.now();
     const memory: Memory = {
       id: newMemoryId(),
+      pinned: input.pinned ?? false,
+      priority: input.priority ?? 0,
       kind: input.kind,
       text,
       // Entities the caller names are additive to the ones we can see, because
@@ -552,6 +588,7 @@ export class Brain {
     if (patch.kind !== undefined && !MEMORY_KINDS_SET.has(patch.kind)) {
       throw new Error(`unknown memory kind: ${patch.kind}`);
     }
+    if (patch.priority !== undefined && (!Number.isInteger(patch.priority) || Math.abs(patch.priority) > 1000)) throw new Error("priority must be an integer from -1000 to 1000");
     // Re-derive entities when the text moves, or they describe the old text.
     const full: MemoryPatch =
       patch.text !== undefined && patch.entities === undefined
@@ -600,7 +637,10 @@ export class Brain {
    */
   history(id: string): MemoryHistoryEntry[] {
     const out: MemoryHistoryEntry[] = [];
-    for (const e of this.log.list({ kinds: ["memory_add", "memory_update", "memory_forget"] })) {
+    const events = this.log.list({ kinds: ["memory_add", "memory_update", "memory_forget"] })
+      .filter(e => e.payload.id === id || (e.payload.memory as Memory | undefined)?.id === id);
+    let before: Memory | undefined;
+    for (const e of events) {
       if (e.kind === "memory_add") {
         const m = e.payload.memory as Memory | undefined;
         if (m?.id !== id) continue;
@@ -626,7 +666,36 @@ export class Brain {
         });
       }
     }
+    for (const entry of out) {
+      const after = foldMemories(events.filter(e => e.id <= entry.eventId)).get(id);
+      entry.before = before;
+      entry.after = after;
+      const event = events.find(e => e.id === entry.eventId);
+      if (event?.kind === "memory_update") entry.patch = event.payload.patch as MemoryPatch;
+      before = after;
+    }
     return out;
+  }
+
+  revert(id: string, eventId: number, by: string): Memory {
+    const revision = this.history(id).find(e => e.eventId === eventId)?.after;
+    if (!revision) throw new Error("no such memory revision");
+    return this.update(id, { text: revision.text, kind: revision.kind, entities: revision.entities,
+      scope: revision.scope, confidence: revision.confidence, evidence: revision.evidence ?? "",
+      expiresAt: revision.expiresAt ?? null, private: revision.private ?? false,
+      untrusted: revision.untrusted ?? false, pinned: revision.pinned ?? false,
+      priority: revision.priority ?? 0, archived: revision.archived ?? false }, by);
+  }
+
+  merge(keepId: string, otherId: string, text: string, by: string): Memory {
+    const keep = this.get(keepId), other = this.get(otherId);
+    if (!keep || !other || keep.archived || other.archived || keepId === otherId) throw new Error("choose two live memories");
+    if (!sameMemoryScope(keep.scope, other.scope) || keep.kind !== other.kind) throw new Error("merge requires the same kind and scope");
+    const result = this.update(keepId, { text, entities: [...new Set([...keep.entities, ...other.entities])],
+      pinned: Boolean(keep.pinned || other.pinned), priority: Math.max(keep.priority ?? 0, other.priority ?? 0),
+      private: Boolean(keep.private || other.private), untrusted: Boolean(keep.untrusted || other.untrusted) }, by);
+    this.update(otherId, { archived: true }, by);
+    return result;
   }
 
   stats(): { total: number; byKind: Record<string, number>; expired: number } {
@@ -639,4 +708,18 @@ export class Brain {
     }
     return { total: this.state().size, byKind, expired };
   }
+}
+
+export function sameMemoryScope(a: Memory["scope"], b: Memory["scope"]): boolean {
+  return a.chat === b.chat && a.agent === b.agent && a.crew === b.crew && a.task === b.task;
+}
+
+export function staleMemory(memory: Memory, lastUsed?: number, now = Date.now()): boolean {
+  return !memory.archived && now - (lastUsed ?? memory.createdAt) >= 30 * 24 * 60 * 60_000;
+}
+
+/** Selection is prepared first and recorded only when its briefing is dispatched. */
+export interface MemoryBriefing {
+  briefing: string;
+  record: () => void;
 }
