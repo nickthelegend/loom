@@ -9,6 +9,7 @@ import { registerTeamsR4Cli } from "./r4-teams.js";
 import { registerAgenticCli } from "./r4-agentic.js";
 import { registerWorkspaceCommands } from "./r4-workspace.js";
 import { addFromProfile, registerR4Agents } from "./r4-agents.js";
+import { registerPhoneCommands } from "./r4-phone.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 import { registerR4Brain } from "./r4-brain.js";
 /**
@@ -5509,6 +5510,7 @@ registerTeamsR4Cli(program, ensureDaemon, currentProject);
 registerAgenticCli(program);
 registerWorkspaceCommands(program);
 registerR4Agents(program, ensureDaemon, currentProject);
+registerPhoneCommands(program);
 
 async function main() {
   const args = process.argv.slice(2);

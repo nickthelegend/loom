@@ -115,6 +115,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-agent environment (#458).** Owner and unscoped-device editors and `loom agents:env` set private daemon-side values for process startup; clients see names only, event and stream output redact values of at least eight characters, and backups exclude them.
 - **Retry policy (#458).** Optional bounded retries with backoff handle rate-limit/network failures only when no file changed, retain Stop/admission and budget checks, and show and account for each attempt.
 
+- **Phone Now (#460).** Running turns, unanswered questions and approvals from every paired computer open the correct project and chat; background requests use independent pairing transports. Held approvals include their deadline, retry when quiet ends, and leave a visible timeout entry. Also available in the web panel and `loom phone now`.
+- **Phone quiet hours and snooze (#460).** Shared owner nightly windows defaulting to the phone/browser timezone, Snooze 1h / until morning and an explicit hold-approvals choice are persisted by `PUT /api/push/quiet` and enforced before push delivery; phone, web and CLI controls are included.
+- **Per-chat notifications (#460).** Long-press a phone chat row or use the web chat menu to choose all, needs-you only or muted; the daemon shares owner preferences across web and phones; scoped pairings stay isolated. Chat mute always allows approvals. `loom phone notify` changes the same preference.
+- **Notification text replies (#460).** Finished-turn and question alerts offer Reply, routed by pairing identity through the existing persistent outbox and delivery receipts after the biometric lock opens; reconnect retries also cover non-active computers.
+- **Phone quick replies (#460).** Editable, reorderable local chips above the composer insert Continue, Run the tests or Explain that; the web composer has matching locally saved replies.
+- **Phone wide layout (#460).** Tablet and landscape screens show a project tab rail, chat list and the existing project pane together; switching tabs and chats keeps the screen's existing draft state.
+- **Morning brief (#460).** A phone Board card combines yesterday's finished turns and spend with waiting PRs across paired computers, including unavailable-source notices. An optional local daily reminder opens the Board; web and `loom phone brief` expose the same report.
+- **Phone chat swipe actions (#460).** Swipe a chat row for existing pin/read controls plus mute, with haptic feedback and an undo toast; long-press provides the same accessible actions.
+- **Phone trigger editing (#460).** Extends the shipped run/pause list with owner-phone schedule and webhook creation/editing, agent selection, next-runs preview and one-time webhook secrets. The existing API accepts `phoneEditor: true` for these owner operations while preserving legacy clients.
+- **Phone text size and contrast (#460).** Device-local text scale and high contrast apply to chat, diffs and terminal output, with matching web appearance controls.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

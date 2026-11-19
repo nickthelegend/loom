@@ -1,3 +1,4 @@
+import { Text, usePhonePreferences } from "./r4-phone/preferences";
 /**
  * Terminal on the phone (#380): a shell in the project — its own session ("phone"), so it doesn't
  * fight the desktop's tab — with the keys a phone keyboard lacks: Ctrl‑C, Tab, arrows, Esc.
@@ -5,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, TextInput, TouchableOpacity, View } from "react-native";
 import { openLiveStream, openTerm, termInput, type Creds } from "./api";
 import { applyTermChunk, TERM_KEYS } from "./term-model";
 import { T, radii, spacing } from "./theme";
@@ -13,6 +14,7 @@ import { T, radii, spacing } from "./theme";
 const TERM = "phone";
 
 export function TerminalView(props: { creds: Creds; projectId: string }) {
+  const appearance = usePhonePreferences();
   const [lines, setLines] = useState<string[]>([""]);
   const [cwd, setCwd] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function TerminalView(props: { creds: Creds; projectId: string }) {
       <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.sm }}
         onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <Text selectable style={{ color: "#e6e6e6", fontFamily: T.mono, fontSize: 12, lineHeight: 16 }}>{lines.join("\n")}</Text>
+          <Text selectable style={{ color: appearance.highContrast ? "#ffffff" : "#e6e6e6", fontFamily: T.mono, fontSize: 12, lineHeight: 16 }}>{lines.join("\n")}</Text>
         </ScrollView>
       </ScrollView>
       <ScrollView horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false}

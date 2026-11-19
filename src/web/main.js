@@ -218,3 +218,5 @@ installCostUI();
 installR4Review();
 registerTeamsR4();
 installAgentsR4();
+import { registerPhoneWeb } from './r4-phone.js';
+registerPhoneWeb();

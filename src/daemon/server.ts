@@ -6,6 +6,7 @@ import { registerTeamsR4Public } from "./routes/teams-r4.js";
 import { registerAgenticRoutes } from "./routes/agentic-r4.js";
 import { registerWorkspaceR4Routes } from "./routes/workspace-r4.js";
 import { registerAgentsR4 } from "./routes/agents-r4.js";
+import { registerPhoneRoutes } from "./routes/phone-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -627,6 +628,7 @@ export class LoomDaemon {
     registerPairingRoutes(app, ctx);
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
+    registerPhoneRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
     registerAgentsR4(app, createRuntimeHandler(ctx), ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);

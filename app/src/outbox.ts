@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system";
 import * as Crypto from "expo-crypto";
 import { Platform } from "react-native";
-import { api, kv, type Creds } from "./api";
+import { phoneApi as api, kv, type Creds } from "./api";
 import { Outbox } from "./phone-batch-model";
 
 const boxes = new Map<string, Promise<Outbox>>();
