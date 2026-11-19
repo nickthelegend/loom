@@ -29,9 +29,10 @@ export function learnMergedPr(brain: Brain, event: LoomEvent, data: MergedPrKnow
   return { learned };
 }
 
-function readPr(dir: string, url: string): Promise<MergedPrKnowledge> {
+function readPr(dir: string, url: string, signal: AbortSignal): Promise<MergedPrKnowledge> {
   const gh = (args: string[]) => new Promise<string>((resolve, reject) => {
-    execFile("gh", args, { cwd: dir, timeout: 30_000, maxBuffer: 2_000_000 }, (error, stdout) => error ? reject(error) : resolve(String(stdout)));
+    signal.throwIfAborted();
+    execFile("gh", args, { cwd: dir, signal, timeout: 30_000, maxBuffer: 2_000_000 }, (error, stdout) => error ? reject(error) : resolve(String(stdout)));
   });
   return (async () => {
     const { repo, prNumber } = prFromUrl(url), parts = repo.split("/");
@@ -43,7 +44,10 @@ function readPr(dir: string, url: string): Promise<MergedPrKnowledge> {
 }
 
 /** The existing PR poller emits the merge event. Subscribe without adding a second poller. */
-export function watchMergedPrs(owner: Brain | (() => Brain), log: EventJournal, dir: string, read: ReadPrKnowledge = url => readPr(dir, url)): () => void {
+export function watchMergedPrs(owner: Brain | (() => Brain), log: EventJournal, dir: string, read?: ReadPrKnowledge): () => void {
+  // Closing a project must also stop reads and their follow-up gh commands.
+  const lifetime = new AbortController();
+  const readKnowledge = read ?? (url => readPr(dir, url, lifetime.signal));
   const currentBrain = () => typeof owner === "function" ? owner() : owner;
   let started: number | undefined;
   let closed = false;
@@ -55,7 +59,7 @@ export function watchMergedPrs(owner: Brain | (() => Brain), log: EventJournal, 
       const brain = currentBrain(), url = String(event.payload.url);
       if (brain.knowledge.hasLearnedPr(url) || brain.knowledge.prFailures(url) >= 3) return;
       try {
-        const data = await read(url);
+        const data = await readKnowledge(url);
         if (!closed) learnMergedPr(brain, event, data);
       } catch (error) {
         if (closed) return;
@@ -75,5 +79,5 @@ export function watchMergedPrs(owner: Brain | (() => Brain), log: EventJournal, 
   // ProjectRuntime constructs briefings before assigning its Brain.
   if (typeof owner === "function") pending = pending.then(start);
   else start();
-  return () => { closed = true; unsubscribe(); };
+  return () => { closed = true; unsubscribe(); lifetime.abort(); };
 }
