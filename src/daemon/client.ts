@@ -97,6 +97,7 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  r4Orchestra<T>(id: string, route: string, body?: Record<string, unknown>): Promise<T> { return this.request(body === undefined ? "GET" : "POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${route}`, body); }
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

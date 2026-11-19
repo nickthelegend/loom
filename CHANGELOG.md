@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add tasks to active Orchestra runs with optional worker/model and dependency selection through `orchestra:add`, the project API, web and phone (#453).
+- Skip individual Orchestra tasks without aborting the run; dependent tasks retain an explicit skipped reason, with CLI, web and phone controls (#453).
+- Hold and release an Orchestra run's dispatch while current workers finish; durable Held indicators and controls on web, phone and CLI (#453).
+- Extend the existing plan-only preview with validated rename, remove, reorder and reassignment editing on web/phone, plus `orchestra:approve --plan edited.json` (#453).
+- Replay saved Orchestra plans with `orchestra:rerun`, optional replacement fleets and failed-task selection, and Run again on web/phone (#453).
+- Compare two saved Orchestra runs through `orchestra:diff`, the project compare API and web/phone views of outcomes, elapsed time, cost and changed files; complements the existing Ask several agent comparison (#453).
+- Export complete Orchestra run reports with goals, task results, costs, times, changed files and open questions via `orchestra:report --md`, API, web Download and phone Share; complements worker progress reports (#453).
+- Require per-worker done checks with `--check` and recipe/run options; bounded repair rounds return failure output to workers before integration, with web/phone configuration (#453).
+- Extend existing worker timeout support with `--task-minutes`: tasks exceeding their per-turn limit need a human to Extend, Reassign or Skip, available through API and web/phone (#453).
+- Broadcast notes with `orchestra:say` and web/phone Note to all: current workers receive live steering or a queued follow-up, and later worker briefings retain the note (#453).
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

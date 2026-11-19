@@ -1,3 +1,4 @@
+import { registerOrchestraR4Routes } from "./routes/orchestra-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -651,6 +652,7 @@ export class LoomDaemon {
     registerPromptsRoutes(app, ctx);
     registerProjectTeamRoutes(app, ctx, withRuntime);
     registerApprovalsRoutes(app, ctx, withRuntime);
+    registerOrchestraR4Routes(app, withRuntime);
     registerOrchestraRoutes(app, withRuntime);
     registerCrewsRoutes(app, withRuntime);
     registerProofRoutes(app, withRuntime);
