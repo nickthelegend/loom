@@ -33,6 +33,7 @@ import { state } from './state.js';
         '<span class="apw">wants to use</span><span class="aptool">' + esc(a.tool || "a tool") + "</span>" +
         (when ? '<span class="aprel">' + rel(when) + "</span>" : "") + "</div>" +
       '<div class="apbody">' +
+        (a.expiresAt ? '<p>Auto-denies at ' + esc(new Date(a.expiresAt).toLocaleTimeString()) + '</p>' : '') +
         (body && body !== "{}" ? '<details class="apin"' + (body.length <= 280 ? " open" : "") + "><summary>input \u00b7 " + esc(gist) + "</summary><pre>" + esc(body) + "</pre></details>" : "") +
         '<div class="apact"><input class="apwhy" placeholder="Reason, if you deny (optional)" maxlength="500" aria-label="reason for denying">' +
           (opts.open && a.chat ? '<button class="apopen" type="button" data-apchat="' + esc(a.chat) + '" title="open the thread it came from">thread</button>' : "") +

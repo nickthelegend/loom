@@ -1,7 +1,7 @@
 /** Browser transcript module. See README.md for ownership and startup. */
 import { AGENT_LABELS,agentGlyph,agentLabel,brandMark,hasBrand,kindOf,labelOf } from './agents.js';
 import { approvalCard } from './approvals.js';
-import { esc,hue,mdToHtml,money,tokens } from './format.js';
+import { avatarSrc,esc,hue,mdToHtml,money,tokens } from './format.js';
 import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
 import { state } from './state.js';
@@ -101,7 +101,7 @@ import { shortModel } from './permissions.js';
     var what = t.kind === "file" ? t.file : t.kind === "diff" ? "the uncommitted changes" : t.label || "your request";
     if (p.phase === "started") {
       return '<div class="sys reviewline">\ud83d\udd0d ' + esc((p.agents || []).map(labelOf).join(", ")) + " reviewing " + esc(what) +
-        " \u2014 read-only, nobody takes the baton" + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") +
+        " \u2014 read-only, nobody takes the baton" + (p.checklist ? "<ul>" + p.checklist.map(function(c){ return "<li>☐ " + esc(c) + "</li>"; }).join("") + "</ul>" : "") + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") +
         ((p.unreliable || []).length ? ' <span class="rvwarn">\u26a0 ' + esc(p.unreliable.map(labelOf).join(", ")) + " hasn\u2019t finished a review here yet</span>" : "") + "</div>";
     }
     if (p.phase !== "done") return "";
@@ -187,7 +187,7 @@ import { shortModel } from './permissions.js';
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
     // a picture you gave this agent wins over its brand mark
     var mine = state.project && (state.project.agents || []).filter(function(a){ return a.id === s && a.avatar; })[0];
-    if (mine && /^data:image\/(png|jpeg|webp);base64,/.test(mine.avatar)) return '<span class="av pic"><img src="' + mine.avatar + '" alt=""></span>';
+    if (mine && avatarSrc(mine.avatar)) return '<span class="av pic"><img src="' + esc(avatarSrc(mine.avatar)) + '" alt=""></span>';
     if (s.indexOf("ask:") === 0) k = "model";
     if (hasBrand(k)) return '<span class="av">' + brandMark(k) + "</span>";
     var h = hue(s);
@@ -426,6 +426,9 @@ import { shortModel } from './permissions.js';
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
     }
     // a model agent moving to its next model (a busy or app-only free model), and a CLI stopping early: say so
+    if (e.kind === "status" && p.state === "model_cap_warning") return '<div class="sys">' + esc(p.text || "") + "</div>";
+    if (e.kind === "status" && p.state === "git_failed") return '<div class="sys warnline">Git: ' + esc(p.text || "commit failed") + "</div>";
+    if (e.kind === "status" && p.state === "chat_branch") return '<div class="sys">Branch: ' + esc(p.branch || "") + "</div>";
     if (e.kind === "status" && p.state === "model_fallback") {
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }
@@ -611,6 +614,8 @@ import { shortModel } from './permissions.js';
     // row folds when it ends, see thread.js) and once it is done; the rest of
     // the usage reports feed the agent's context meter, not the thread.
     if (e.kind === "status") {
+      if (p.state === "memory_injection") return '<details class="sys memory-injection"><summary>Why was this injected? · Turn ' + esc(p.turn) + '</summary>' +
+        ((p.memories || []).length ? p.memories.map(function(m){ return '<p>' + esc(m.text) + ' · score ' + esc(Number(m.score).toFixed(3)) + ' · ' + esc(m.reason) + '</p>'; }).join('') : '<p>No memories injected.</p>') + '</details>';
       if (p.state === "compacting") return '<div class="sys live compacting" data-agent="' + esc(e.agentId || "") + '"><span class="busy"></span> ' +
         esc(labelOf(e.agentId)) + " is compacting its context\u2026</div>";
       if (p.state === "native_compacted") return '<div class="sys">\u21bb ' + esc(labelOf(e.agentId)) + " compacted its context" +
@@ -619,7 +624,7 @@ import { shortModel } from './permissions.js';
       return "";
     }
     if (e.kind === "approval") {
-      if (p.phase === "requested") return approvalCard({ approvalId: p.approvalId, agent: e.agentId, tool: p.tool, input: p.input, ts: e.ts });
+      if (p.phase === "requested") return approvalCard({ approvalId: p.approvalId, agent: e.agentId, tool: p.tool, input: p.input, expiresAt: p.expiresAt, sessionOption: p.sessionOption, ts: e.ts });
       if (p.phase === "decided") return '<div class="sys apl">' + (p.behavior === "allow" ? '<span class="ok">\u2713 allowed</span> ' : '<span class="no">\u2715 denied</span> ') +
         esc(p.tool || "tool") + " for " + esc(labelOf(e.agentId)) + (p.message ? " \u2014 " + esc(p.message) : "") + "</div>";
     }

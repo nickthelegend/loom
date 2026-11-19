@@ -82,12 +82,12 @@ export function parseSlash(text: string): SlashCommand | null {
 
 export const HELP_LINES = [
   pc.bold("  keys"),
-  pc.dim("    shift+tab         switch view: Thread · Board · Brain · Diff"),
+  pc.dim("    shift+tab         switch view: Thread · Board · Brain · Diff · Scoreboard"),
   pc.dim("    tab               shift agent (handoff happens when you send)"),
   pc.dim("    pgup / pgdn       scroll the view · enter send · esc back/interrupt"),
   pc.dim("    ctrl+p palette    ·  ctrl+c quit"),
   pc.bold("  commands"),
-  pc.dim("    /board · /brain · /diff · /thread   jump to a view"),
+  pc.dim("    /board · /brain · /diff · /thread · /scoreboard   jump to a view"),
   pc.dim("    /route <name|a,b,c> <task>   run a pipeline across agents"),
   pc.dim("    /routes                      list named pipelines"),
   pc.dim("    /handoff <agent>             pass the baton now"),
@@ -140,6 +140,7 @@ export function paletteItems(
     { id: "view:thread", label: "go to Thread", hint: "the conversation", action: { type: "view", view: "thread" } },
     { id: "view:board", label: "go to Board", hint: "agents · issues · PRs", action: { type: "view", view: "board" } },
     { id: "view:brain", label: "go to Brain", hint: "learned memory", action: { type: "view", view: "brain" } },
+    { id: "view:scoreboard", label: "go to Scoreboard", hint: "model standings", action: { type: "view", view: "scoreboard" } },
     { id: "view:diff", label: "go to Diff", hint: "working tree", action: { type: "view", view: "diff" } },
   );
   for (const a of switchableAgents(agents)) {
@@ -179,16 +180,17 @@ export function paletteItems(
 }
 
 // ---------------------------------------------------------------------------
-// Views — the tabbed faces of the TUI (Thread · Board · Brain · Diff)
+// Views — the tabbed faces of the TUI (Thread · Board · Brain · Diff · Scoreboard)
 // ---------------------------------------------------------------------------
 
-export type ViewName = "thread" | "board" | "brain" | "diff";
-export const VIEWS: ViewName[] = ["thread", "board", "brain", "diff"];
+export type ViewName = "thread" | "board" | "brain" | "diff" | "scoreboard";
+export const VIEWS: ViewName[] = ["thread", "board", "brain", "diff", "scoreboard"];
 const VIEW_LABEL: Record<ViewName, string> = {
   thread: "Thread",
   board: "Board",
   brain: "Brain",
   diff: "Diff",
+  scoreboard: "Scoreboard",
 };
 
 /** The tab strip — active tab bright and underlined, the rest dim. */
@@ -391,4 +393,17 @@ export function filterPalette(items: PaletteItem[], query: string): PaletteItem[
     if (i === q.length) scored.push({ item, rank: 1, idx: hay.length });
   }
   return scored.sort((a, b) => a.rank - b.rank || a.idx - b.idx).map((s) => s.item);
+}
+
+/** Keep the same recorded rates and unknown markers as the web scoreboard. */
+export function formatScoreboard(board: import("../core/scoreboard.js").Scoreboard, width = 80): string[] {
+  const pct = (n: number | null) => n === null ? "—" : `${Math.round(n * 100)}%`;
+  const lines = [`  Model scoreboard · ${board.window}`, ""];
+  if (!board.byKindModel.length) return [...lines, "  Nothing recorded in this window yet."];
+  for (const [i, row] of board.byKindModel.entries()) {
+    lines.push(`  ${i + 1}. ${row.key}`.slice(0, width));
+    lines.push(`     wins ${pct(row.winRate)} · finishes ${pct(row.finishedRate)} · ${row.turns} turns`.slice(0, width));
+    lines.push(`     median ${row.medianMs === null ? "—" : `${(row.medianMs / 1000).toFixed(1)}s`} · per turn ${row.avgCostUsd === null ? "—" : `$${row.avgCostUsd.toFixed(4)}`}`.slice(0, width));
+  }
+  return lines;
 }

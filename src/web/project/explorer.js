@@ -1,7 +1,9 @@
+import { gitReviewHtml, bindGitReview } from "./git-review.js";
+import { safeGit } from '../safety.js';
 import { brandMark,wireRoleEditors } from '../agents.js';
 import { api } from '../connection.js';
 import { visibleFiles } from '../diff.js';
-import { esc,highlight,hue } from '../format.js';
+import { cdCommand,esc,highlight,hue } from '../format.js';
 import { ICONS,LOADER } from '../icons.js';
 import { openMenu,openScmMenu } from '../menus.js';
 import { copyText } from '../clipboard.js';
@@ -149,7 +151,7 @@ export function createExplorer(view) {
         items.push({ label: navigator.platform.indexOf("Mac") >= 0 ? "Reveal in Finder" : "Show in folder", icon: ICONS.folder, run: function(){ window.loomNative.reveal(abs); } });
       }
       if (state.termRun && root) {
-        items.push({ label: "Open in terminal", icon: ICONS.terminal, run: function(){ state.termRun("cd " + JSON.stringify(file ? abs.replace(/\/[^\/]*$/, "") : abs)); } });
+        items.push({ label: "Open in terminal", icon: ICONS.terminal, run: function(){ state.termRun(cdCommand(file ? abs.replace(/\/[^\/]*$/, "") : abs)); } });
       }
       // VS Code, Cursor, Zed… on the computer the project lives on (#407)
       editorItems(view.pid, rel, ICONS.code).forEach(function(it){ items.push(it); });
@@ -250,8 +252,17 @@ export function createExplorer(view) {
 
 
 
+    // The commit message being written. The rail redraws every few seconds (the
+    // working-tree poll) and used to hand back an empty box: a half-written
+    // message vanished mid-sentence. Kept per project view, with its caret.
+    var scmDraft = "", scmCaret = null;
     function drawScm(el){
       railTitle('<span class="b">Source control</span>');
+      var prevMsg = document.getElementById("gmsg");
+      if (prevMsg) {
+        scmDraft = prevMsg.value;
+        scmCaret = document.activeElement === prevMsg ? [prevMsg.selectionStart, prevMsg.selectionEnd] : null;
+      }
       var p = state.project, r = p && p.route;
       var g = state.git;
       var html = "";
@@ -306,6 +317,7 @@ export function createExplorer(view) {
         '<button class="iconbtn xs" id="gitpush" title="push to the remote" aria-label="push">' + ICONS.up + "</button>" +
         "</div>";
 
+      html += gitReviewHtml(view.pid, state.chat || "main");
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
       // Loom's own working files (.loom/: the event log, sessions, memory) are
       // not your changes. Folded into one row, with the fix: ignore them.
@@ -320,7 +332,7 @@ export function createExplorer(view) {
       // when the tree is clean, so the panel's shape doesn't jump around.
       html += '<div class="scmcommit">' +
         '<div class="scmmsgwrap">' +
-        '<textarea id="gmsg" class="scmmsg" rows="1" placeholder="Message (\u2318\u21b5 to commit)"></textarea>' +
+        '<textarea id="gmsg" class="scmmsg" rows="1" placeholder="Message (\u2318\u21b5 to commit)">' + esc(scmDraft) + "</textarea>" +
         '<button class="scmgen" id="gitgen" type="button" title="Draft a message from the staged diff">' + ICONS.spark + " Generate</button>" +
         "</div>" +
         '<div class="scmcommitrow">' +
@@ -397,6 +409,7 @@ export function createExplorer(view) {
 
     /** Every control in the Source control view. */
     function wireGitRows(el){
+      bindGitReview(view.pid, state.chat || "main");
       function act(path, body, said){
         return api("/api/projects/" + view.pid + "/git/" + path, { method: "POST", body: JSON.stringify(body) })
           .then(function(){ refreshGit(); if (said) toast(said); })
@@ -456,7 +469,11 @@ export function createExplorer(view) {
       // split button opens a small menu of the fuller actions.
       var msgbox = document.getElementById("gmsg");
       function autosizeMsg(){ if (!msgbox) return; msgbox.style.height = "auto"; msgbox.style.height = Math.min(160, msgbox.scrollHeight) + "px"; }
-      if (msgbox) { msgbox.addEventListener("input", autosizeMsg); autosizeMsg(); }
+      if (msgbox) {
+        msgbox.addEventListener("input", function(){ scmDraft = msgbox.value; autosizeMsg(); });
+        autosizeMsg();
+        if (scmCaret) { msgbox.focus(); try { msgbox.setSelectionRange(scmCaret[0], scmCaret[1]); } catch (e) {} }
+      }
       function doCommit(alsoStageAll, alsoPush){
         var msg = ((msgbox && msgbox.value) || "").trim();
         if (!msg) { toast("a commit needs a message"); if (msgbox) msgbox.focus(); return; }
@@ -469,13 +486,17 @@ export function createExplorer(view) {
           if (all.length) pre = api("/api/projects/" + view.pid + "/git/stage", { method: "POST", body: JSON.stringify({ paths: all }) });
         }
         pre.then(function(){
-          return api("/api/projects/" + view.pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) });
+          return safeGit(view.pid, "commit", { message: msg });
         }).then(function(r){
+          // the rail may have redrawn while it committed: clear the box that's there now
+          scmDraft = ""; scmCaret = null;
+          var nowBox = document.getElementById("gmsg");
+          if (nowBox && nowBox !== msgbox) nowBox.value = "";
           if (msgbox) { msgbox.value = ""; autosizeMsg(); }
           toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
           if (alsoPush) {
             toast("pushing\u2026");
-            return api("/api/projects/" + view.pid + "/git/push", { method: "POST", body: "{}" })
+            return safeGit(view.pid, "push")
               .then(function(pr){ toast("pushed " + pr.branch); });
           }
         }).then(function(){ refreshGit(); view.refreshTree(false); })
@@ -500,8 +521,8 @@ export function createExplorer(view) {
       var gen = document.getElementById("gitgen");
       if (gen) gen.onclick = function(){
         gen.disabled = true; gen.classList.add("busy");
-        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: "{}" })
-          .then(function(r){ if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
+        api("/api/projects/" + view.pid + "/git/suggest-message", { method: "POST", body: JSON.stringify({ chat: state.chat || "main" }) })
+          .then(function(r){ scmDraft = r.message; msgbox = document.getElementById("gmsg"); if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
           .catch(function(e){ toast(e.message); })
           .then(function(){ gen.disabled = false; gen.classList.remove("busy"); });
       };
@@ -510,7 +531,7 @@ export function createExplorer(view) {
       if (pushBtn) pushBtn.onclick = function(){
         pushBtn.disabled = true;
         toast("pushing\u2026");
-        api("/api/projects/" + view.pid + "/git/push", { method: "POST", body: "{}" })
+        safeGit(view.pid, "push")
           .then(function(r){ toast("pushed " + r.branch); refreshGit(); })
           .catch(function(e){ toast(e.message); })
           .then(function(){ pushBtn.disabled = false; });

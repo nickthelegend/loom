@@ -9,11 +9,12 @@ export function registerReviewRoutes(app: Express, withRuntime: WithRuntime): vo
   app.post(
     "/api/projects/:id/reviews",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { agents?: unknown; file?: unknown; text?: unknown; focus?: unknown };
+      const b = (req.body ?? {}) as { agents?: unknown; file?: unknown; text?: unknown; focus?: unknown; template?: unknown };
       const agents = Array.isArray(b.agents) ? b.agents.map(String) : typeof b.agents === "string" ? b.agents.split(",") : [];
       try {
         const review = await rt.startReview({
           agents,
+          ...(typeof b.template === "string" ? { template: b.template } : {}),
           ...(typeof b.file === "string" && b.file ? { file: b.file } : {}),
           ...(typeof b.text === "string" && b.text ? { text: b.text } : {}),
           ...(typeof b.focus === "string" && b.focus ? { focus: b.focus } : {}),

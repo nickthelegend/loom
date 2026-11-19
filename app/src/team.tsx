@@ -1,3 +1,6 @@
+import { R4Standup } from "./r4-teams";
+import { TeamSharing } from "./sharing";
+import { filterTeamActivity, mentionShareUrl } from "./sharing-model";
 /**
  * Loom Teams on the phone: which of your teammates' agents are live right now
  * and what they're about. Intent only (goal and task titles, the files each
@@ -79,6 +82,7 @@ function sentence(e: TeamFeedEvent): string {
   // hub-authored events (a member joining) carry the login in meta, not as the actor
   const actor = e.github ?? (typeof m.github === "string" ? m.github : null);
   switch (e.type) {
+    case "mention": return `${who(actor)} mentioned @${String(m.to ?? "")} · ${String(c.text ?? "")}`;
     case "member_joined":
       return `${who(actor)} joined the team`;
     case "member_left":
@@ -453,7 +457,7 @@ function TouchedFiles(props: { presence: TeamPresence[] }) {
 
 function FeedRow(props: { e: TeamFeedEvent; now: number }) {
   const { e } = props;
-  const url = e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_") || e.type.startsWith("deploy_")
+  const url = e.type === "mention" ? mentionShareUrl(e.content?.text) : e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_") || e.type.startsWith("deploy_")
     ? openable(e.meta?.url) ?? openable(e.meta?.prUrl)
     : openable(e.meta?.prUrl);
   const color = FEED_COLOR[e.type] ?? T.faint;
@@ -500,7 +504,7 @@ function FeedRow(props: { e: TeamFeedEvent; now: number }) {
       onPress={() => void Linking.openURL(url).catch(() => {})}
       activeOpacity={0.7}
       accessibilityRole="link"
-      accessibilityLabel={`${sentence(e)}. Open on GitHub`}
+      accessibilityLabel={`${sentence(e)}. ${e.type === "mention" ? "Open shared work" : "Open on GitHub"}`}
       style={{ ...style, minHeight: TAP, alignItems: "center" }}
     >
       {body}
@@ -733,7 +737,8 @@ function TeamBody(props: { creds: Creds; team: TeamView; multi: boolean; now: nu
   const groups = new Map<string, TeamPresence[]>();
   for (const p of theirs) groups.set(p.github, [...(groups.get(p.github) ?? []), p]);
   const nameOf = new Map(team.members.map((m) => [m.github, m.name] as const));
-  const feed = team.feed.slice(-FEED_MAX).reverse();
+  const [query, setQuery] = useState(""), [kind, setKind] = useState("");
+  const feed = filterTeamActivity(team.feed, kind, query).slice(-FEED_MAX).reverse();
 
   return (
     <View style={{ gap: spacing.md }}>
@@ -779,6 +784,8 @@ function TeamBody(props: { creds: Creds; team: TeamView; multi: boolean; now: nu
 
       <View style={{ gap: 6 }}>
         <SectionLabel text="Team feed" />
+        <TextInput accessibilityLabel="Filter activity by person or repo" placeholder="Person or repo" placeholderTextColor={T.faint} value={query} onChangeText={setQuery} style={{ color: T.text, padding: 10, borderColor: T.line, borderWidth: 1, borderRadius: 8 }} />
+        <View style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}>{[["", "All"], ["goal_started", "Starts"], ["pr_merged", "Merges"], ["mention", "Mentions"]].map(([value, label]) => <TouchableOpacity accessibilityRole="button" key={value} onPress={() => setKind(value!)} style={{ padding: 8 }}><Text style={{ color: T.text }}>{kind === value ? "✓ " : ""}{label}</Text></TouchableOpacity>)}</View>
         {feed.length ? (
           <Panel>
             {feed.map((e, i) => (
@@ -790,6 +797,7 @@ function TeamBody(props: { creds: Creds; team: TeamView; multi: boolean; now: nu
         )}
       </View>
 
+      <TeamSharing creds={props.creds} teamId={team.id} />
       <TeamActions creds={props.creds} team={team} multi={props.multi} onChanged={props.onChanged} />
     </View>
   );
@@ -911,6 +919,7 @@ export function TeamSection(props: { creds: Creds; refreshKey?: number }) {
   return (
     <View style={{ gap: spacing.sm }}>
       <SectionLabel text={team && teams.length === 1 ? `Team · ${team.name}` : "Team"} />
+      <R4Standup creds={props.creds} />
       {body}
       {err && status ? <Text style={{ color: T.err, fontSize: 12, textAlign: "center" }}>{err}</Text> : null}
     </View>

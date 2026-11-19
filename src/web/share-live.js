@@ -8,6 +8,7 @@
  * same agent, see the same tool calls, steer together"), Apache-2.0, © Zeabur Inc.
  */
 
+import { timeLeft } from './sharing.js';
 import { api, logout } from "./connection.js";
 import { esc, mdToHtml } from "./format.js";
 import { ICONS, LOADER } from "./icons.js";
@@ -41,7 +42,8 @@ export function openShareLive(pid, cid, title) {
     "</div>" +
     '<div class="modalfoot"><span class="spacer"></span><button class="btn" id="slmake">Create link</button></div></div>';
   document.body.appendChild(scrim);
-  function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+  var countdown = null;
+  function close(){ if (countdown) clearInterval(countdown); scrim.remove(); document.removeEventListener("keydown", onKey); }
   function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
   document.addEventListener("keydown", onKey);
   scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
@@ -59,8 +61,10 @@ export function openShareLive(pid, cid, title) {
       return api("/api/pair/new", { method: "POST", body: JSON.stringify({ ...(net && net.ip ? { host: net.ip } : {}), guest: { project: pid, chat: cid, role: role, name: name, hours: hours } }) })
         .then(function(r){ return { r: r, reachable: Boolean(net) }; });
     }).then(function(x){
+      var expires = x.r.guest ? x.r.guest.until : Date.now() + hours * 3600000;
+      countdown = setInterval(function(){ if (!scrim.isConnected) { clearInterval(countdown); return; } var e = scrim.querySelector('[data-live-countdown]'); if (e) e.textContent = timeLeft(expires); }, 1000);
       var r = x.r, viaCloud = /[#&]relay=/.test(r.link || "");
-      body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:12px">' +
+      body.innerHTML = '<p data-live-countdown>' + esc(timeLeft(expires)) + '</p><div style="display:flex;flex-direction:column;align-items:center;gap:12px">' +
         (r.qrSvg ? '<div class="phqrcard">' + r.qrSvg + "</div>" : "") + "</div>" +
         '<div class="phlinkrow"><input id="sllink" readonly spellcheck="false" aria-label="share link" value="' + esc(r.link) + '"><button class="btn ghost" id="slcopy">Copy</button></div>' +
         '<div class="phhint">' + esc(name) + " can " + (role === "view" ? "read along" : role === "reply" ? "talk to the agent" : "talk and approve") +
@@ -96,8 +100,8 @@ function draw(me) {
     '<header class="ghead"><div class="gtitle"><b>' + esc(me.chat.title) + '</b><span class="gsub">' + esc(me.project.name) + " · shared with you as " + esc(me.name) + "</span></div>" +
     '<span id="gpeople" class="gpeople"></span>' +
     '<span class="grole">' + esc(me.role === "view" ? "reading along" : me.role === "reply" ? "can talk" : "can talk and approve") + "</span>" +
-    '<button class="btn ghost" id="gleave">Leave</button></header>' +
-    '<main class="gfeed" id="gfeed" aria-live="polite"></main>' +
+    '<button class="btn ghost" id="gfollow" aria-pressed="false">Follow owner</button><button class="btn ghost" id="gleave">Leave</button></header>' +
+    '<p id="gfollow-status" role="status"></p><pre id="gfollow-file" hidden></pre><main class="gfeed" id="gfeed" aria-live="polite"></main>' +
     (canSend ? '<footer class="gcompose"><textarea id="gbox" rows="2" placeholder="Message the agent…"></textarea><div class="gacts"><button class="btn ghost" id="gstop">Stop</button><button class="btn" id="gsend">Send</button></div></footer>'
       : '<footer class="gcompose gview">You can read along. The person who shared it can let you talk too.</footer>') +
     "</div>";
@@ -107,7 +111,19 @@ function draw(me) {
   var selfId = null;
   function people(list){ var el = document.getElementById("gpeople"); if (el) el.innerHTML = presenceHtml((list || []).filter(function(p){ return !selfId ? true : p.id !== selfId; }), selfId ? "" : me.name); }
   people(me.presence && me.presence.people);
-  var tracker = null;
+  var tracker = null, following = false, ownerView = null;
+  function followView(list){
+    var owner = (list || []).find(p => p.kind !== 'guest' && p.view && p.view.chat === me.chat.id);
+    ownerView = owner && owner.view;
+    var status = document.getElementById('gfollow-status'), file = document.getElementById('gfollow-file');
+    if (!status || !file) return;
+    status.textContent = following ? ownerView ? 'Following owner in this shared chat' : 'Waiting for the owner to view this shared chat' : '';
+    file.hidden = !(following && ownerView && ownerView.file);
+    file.textContent = !file.hidden ? ownerView.file + '\n\n' + (ownerView.preview || 'Owner opened this file') : '';
+    if (following && ownerView) feed.scrollTop = ownerView.scroll * Math.max(0, feed.scrollHeight - feed.clientHeight);
+  }
+  document.getElementById('gfollow').onclick = function(){ following = !following; this.setAttribute('aria-pressed', String(following)); this.textContent = following ? 'Stop following' : 'Follow owner'; if (tracker) tracker.poke(); followView(me.presence && me.presence.people); };
+  feed.addEventListener('wheel', function(){ if (following) document.getElementById('gfollow').click(); }, { passive: true });
 
   function add(e) {
     if (seen[e.id]) return;
@@ -149,12 +165,12 @@ function draw(me) {
 
   (function connect(){
     var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?project=" + encodeURIComponent(pid), ["loom.bearer." + state.token]);
-    ws.onopen = function(){ if (tracker) tracker.stop(); tracker = trackPresence(ws, function(){ return me.chat.id; }, document.getElementById("gbox")); };
+    ws.onopen = function(){ if (tracker) tracker.stop(); tracker = trackPresence(ws, function(){ return me.chat.id; }, document.getElementById("gbox"), function(){ return { following: following }; }); };
     ws.onmessage = function(ev){ try {
       var f = JSON.parse(ev.data);
       if (f.type === "hello" && f.presenceId) selfId = f.presenceId;
       if (f.type === "event" && f.event) add(f.event);
-      else if (f.type === "presence" && f.chat === me.chat.id) people(f.people);
+      else if (f.type === "presence" && f.chat === me.chat.id) { people(f.people); me.presence = f; followView(f.people); }
     } catch (e) {} };
     ws.onclose = function(c){ if (tracker) { tracker.stop(); tracker = null; } if (c.code !== 4403 && document.getElementById("gfeed")) setTimeout(connect, 2000); };
   })();

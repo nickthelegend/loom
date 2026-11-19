@@ -423,3 +423,18 @@
   .tauto .tal.ok{color:var(--foreground)}
   .tauto .tal small{color:var(--muted-foreground)}
   .tauto .tact{margin-top:8px}
+  .sharing-body{display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .sharing-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0}
+  .sharing-row>span:first-child{flex:1;overflow-wrap:anywhere}
+  .project-presence{display:inline-flex;align-items:center;gap:4px;color:var(--muted-foreground);font-size:11px;margin-left:6px}
+  .project-presence>span{width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .tfe[hidden]{display:none}
+
+.r4-team-body{display:flex;flex-direction:column;gap:12px;padding:14px}
+.r4-team-body pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6}
+.r4-chat-actions{display:inline-flex;gap:4px;flex-wrap:wrap}
+.r4-annotation{margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);font-size:13px;white-space:normal}
+.r4-annotation p{white-space:pre-wrap;overflow-wrap:anywhere}
+.r4-annotation textarea{display:block;width:100%;min-height:70px;color:var(--foreground);background:var(--background)}
+.r4-team-body [role=alert]{color:var(--destructive)}
+@media(max-width:640px){.r4-chat-actions .btn{font-size:11px;padding:4px}.r4-team-body{padding:10px}}

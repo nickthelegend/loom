@@ -1,4 +1,5 @@
 /** Browser team module. See README.md for ownership and startup. */
+import { openTeamSharing } from './sharing.js';
 import { agentGlyph,agentLabel,labelOf } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api } from './connection.js';
@@ -48,6 +49,7 @@ import { ORCH_RUN_ST } from './transcript.js';
   function onTeamFrame(frame){
     // the one brain moved (a memory, a resolution, a canon PR): the Team view re-reads
     var ev = (frame && frame.event) || {}, fe = ev.event || {};
+    if (fe.type === "mention" && state.team && fe.meta && fe.meta.to === state.team.github) toast((fe.github || "A teammate") + " mentioned you: " + ((fe.content || {}).text || "Open Team feed"));
     if ((ev.type === "memory" || (ev.type === "feed" && (fe.type === "memory_resolved" || fe.type === "canon_proposed"))) && state.teamBrainPing) state.teamBrainPing();
     // a goal came up for adoption, was taken or landed: "Needs someone" re-reads
     if (ev.type === "feed" && TEAM_LANDING_EVENTS[fe.type] && state.pid && teamLandings[state.pid]) loadTeamLanding(state.pid, true);
@@ -364,6 +366,7 @@ import { ORCH_RUN_ST } from './transcript.js';
           html: "loom/review on " + who + "’s " + pr + (m.reviewer ? " by " + esc(labelOf(String(m.reviewer))) : "") + ": " + verdict };
       }
       // Phase 4: landing safely (D52–D64)
+      case "mention": return { icon: ICONS.team, cls: "", html: who + " mentioned <b>@" + esc(m.to) + "</b> · " + mentionShareHtml((c && c.text) || "") };
       case "goal_landed": return { icon: ICONS.check, cls: "ok", html: who + "’s " + teamFeedGoal(m.runId, c) + " landed — " + pr + " merged" + (m.costUsd ? " (" + money(m.costUsd) + ")" : "") };
       case "goal_needs_someone": return { icon: ICONS.alert, cls: "warn", html: who + "’s " + pr + " needs someone" + (m.reason ? ": " + esc(String(m.reason)) : "") };
       case "goal_adopted": return { icon: ICONS.team, cls: "live", html: "<b>" + esc(m.by || e.github || "someone") + "</b> adopted " + (m.owner ? "<b>" + esc(m.owner) + "</b>’s " : "") + pr };
@@ -438,15 +441,23 @@ import { ORCH_RUN_ST } from './transcript.js';
     return ((t && t.leases) || []).filter(function(l){ return l.mine; }).map(function(l){ return l.runId; });
   }
 
+  var teamFeedFilters = {};
+  function mentionShareHtml(text){
+    return String(text || '').split(/(https?:\/\/[^\s]+)/g).map(function(part){
+      try { var url = new URL(part); if (!url.username && !url.password && /^\/share\/[A-Za-z0-9_-]{20,64}$/.test(url.pathname)) return '<a href="' + esc(url.href) + '" target="_blank" rel="noopener noreferrer">Open shared work</a>'; } catch (e) {}
+      return esc(part);
+    }).join('');
+  }
+
   function teamFeedHtml(t, n){
-    var feed = (t.feed || []).slice(-n).reverse();
+    var feed = (t.feed || []).slice(-100).reverse();
     var head = '<div class="tsech">Team feed<span class="n">' + (t.feed || []).length + "</span></div>";
     if (!feed.length) return head + '<div class="tempty">Nothing yet. Goals started and finished, plans, PRs and checks from shared repos land here.</div>';
-    return head + feed.map(function(e){
+    return '<div class="team-feed-wrap" data-feed-team="' + esc(t.id) + '">' + head + '<label>Filter activity <input data-feed-search placeholder="Person, repo or activity"></label><select data-feed-kind aria-label="Activity kind"><option value="">All activity</option><option value="goal_started">Starts</option><option value="pr_merged">Merges</option><option value="mention">Mentions</option></select>' + feed.map(function(e){
       var f = teamFeedLine(e, t);
-      return '<div class="tfe' + (f.cls ? " " + f.cls : "") + '" data-tfeed="' + esc(e.type) + '"><span class="tfi">' + f.icon + "</span>" +
+      return '<div class="tfe' + (f.cls ? " " + f.cls : "") + '" data-tfeed="' + esc(e.type) + '" data-feed-repo="' + esc(e.repo || "") + '"><span class="tfi">' + f.icon + "</span>" +
         '<span class="tft">' + f.html + "</span>" + '<span class="tfr">' + (e.ts ? rel(e.ts) : "") + "</span></div>";
-    }).join("");
+    }).join("") + "</div>";
   }
 
   /** Member chips for a team header: initials, login, owner and you marked. */
@@ -479,6 +490,15 @@ import { ORCH_RUN_ST } from './transcript.js';
   }
 
   function wireTeamInvites(host, act){
+    host.querySelectorAll('[data-team-sharing]').forEach(function(b){ b.onclick = function(){ openTeamSharing(b.dataset.teamSharing); }; });
+    host.querySelectorAll('.team-feed-wrap').forEach(function(w){
+      var saved = teamFeedFilters[w.dataset.feedTeam] || { query: '', kind: '' };
+      w.querySelector('[data-feed-search]').value = saved.query; w.querySelector('[data-feed-kind]').value = saved.kind;
+      function filter(){ var q = w.querySelector('[data-feed-search]').value.toLowerCase(), kind = w.querySelector('[data-feed-kind]').value;
+        teamFeedFilters[w.dataset.feedTeam] = { query: q, kind: kind };
+        w.querySelectorAll('[data-tfeed]').forEach(function(r){ r.hidden = (kind && r.dataset.tfeed !== kind && !(kind === 'pr_merged' && r.dataset.tfeed === 'goal_landed')) || (r.textContent + " " + r.dataset.feedRepo).toLowerCase().indexOf(q) < 0; }); }
+      w.querySelector('[data-feed-search]').oninput = filter; w.querySelector('[data-feed-kind]').onchange = filter; filter();
+    });
     Array.prototype.forEach.call(host.querySelectorAll("[data-tinvite]"), function(b){
       b.onclick = function(){
         var id = b.getAttribute("data-tinvite");
@@ -983,6 +1003,7 @@ import { ORCH_RUN_ST } from './transcript.js';
         '<span class="trole">' + esc(t.role) + "</span>" +
         '<span class="tcm">' + (t.missing ? "not on the hub any more" : others.length ? others.length + " live" : "quiet") + (t.keyVersion != null ? " \u00b7 key v" + esc(t.keyVersion) : "") + "</span>" +
         '<span class="spacer"></span>' +
+        '<button class="btn outline xs" data-team-sharing="' + esc(t.id) + '">Fleets & invites</button>' +
         (t.role !== "viewer" ? '<button class="btn outline xs" type="button" data-tinvite="' + esc(t.id) + '">' + ICONS.plus + "Invite</button>" : "") + "</div>" +
       '<div class="tcrow"><span class="tck">Members</span>' + teamMembersHtml(t) + "</div>" +
       '<div class="tcrow"><span class="tck">Repos</span>' + ((t.repos || []).map(function(r){ return '<span class="trepo">' + ICONS.github + esc(r) + "</span>"; }).join("") ||

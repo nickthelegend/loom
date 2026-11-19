@@ -181,6 +181,11 @@ export class AuthManager {
     }));
   }
 
+  approvalDevices(projectId: string): Array<{ id: string; name: string; owner: boolean }> {
+    return this.config.clients.filter(c => !c.projects?.length || c.projects.includes(projectId))
+      .map(c => ({ id: c.id, name: c.name, owner: !c.projects?.length && !c.guest }));
+  }
+
   /**
    * The projects this token may touch: null = unrestricted (admin, or a client
    * paired without scope), otherwise the allow-list.
@@ -206,16 +211,18 @@ export class AuthManager {
   }
 
   /** Attach/detach a push token on a paired client (read-modify-write). */
-  setPushToken(clientId: string, pushToken: string | null, platform?: string, kinds?: string[]): boolean {
+  setPushToken(clientId: string, pushToken: string | null, platform?: string, kinds?: string[], groupByProject = false): boolean {
     this.reload();
     const client = this.config.clients.find((c) => c.id === clientId);
     if (!client) return false;
     if (pushToken) {
       client.pushToken = pushToken;
+      client.pushGroupByProject = groupByProject;
       if (platform) client.platform = platform;
       if (kinds) client.pushKinds = kinds;
     } else {
       delete client.pushToken;
+      delete client.pushGroupByProject;
       delete client.platform;
       delete client.pushKinds;
     }

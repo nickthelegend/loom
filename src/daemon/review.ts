@@ -1,3 +1,4 @@
+import { reviewChecklist } from "../core/git-review.js";
 /**
  * Review: the runner (#253). Each reviewer is a read-only subtask in the
  * review's own chat — none takes the baton, so nobody is asked to hand off
@@ -49,6 +50,7 @@ export interface ReviewState {
   results?: ReviewResult[];
   findings?: Array<Finding & { decision?: FindingDecision; note?: string }>;
   summary?: string;
+  checklist?: string[];
 }
 
 /** What a target looks like on a card: the diff itself stays in the brief. */
@@ -83,7 +85,8 @@ export class ReviewRunner {
     return agents;
   }
 
-  async start(input: { agents: string[]; target: ReviewTarget; focus?: string; chat?: string }): Promise<ReviewState> {
+  async start(input: { agents: string[]; target: ReviewTarget; focus?: string; chat?: string; template?: string }): Promise<ReviewState> {
+    const checklist = reviewChecklist(input.template);
     const agents = this.check(input.agents);
     if (input.target.kind === "file" && !input.target.file.trim()) throw new Error("which file?");
     const reviewId = randomUUID().slice(0, 6);
@@ -96,9 +99,9 @@ export class ReviewRunner {
     this.pending.set(reviewId, run);
     // a reviewer that has never finished a review here and was left out again and again: say so up front (#311)
     const unreliable = this.unreliable(agents);
-    this.host.append({ kind: "review", chat, payload: { phase: "started", reviewId, chat, target, agents, ...(input.focus ? { focus: input.focus } : {}),
+    this.host.append({ kind: "review", chat, payload: { phase: "started", reviewId, chat, target, agents, checklist, ...(input.focus ? { focus: input.focus } : {}),
       ...(unreliable.length ? { unreliable } : {}) } });
-    const task = reviewPrompt(input.target, input.focus);
+    const task = reviewPrompt(input.target, [input.focus, "Review checklist:\n" + checklist.map(c => "- [ ] " + c).join("\n")].filter(Boolean).join("\n\n"));
     const limit = this.host.reviewerTimeoutMs?.() ?? 15 * 60_000;
     for (const agentId of agents) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -121,7 +124,7 @@ export class ReviewRunner {
         settle({ ok: false, message: err instanceof Error ? err.message : String(err) });
       }
     }
-    return { reviewId, chat, target, agents, status: "running", ...(unreliable.length ? { unreliable } : {}) };
+    return { reviewId, chat, target, agents, checklist, status: "running", ...(unreliable.length ? { unreliable } : {}) };
   }
 
   /** Reviewers with no finished review in this project and at least two left out. */
@@ -171,7 +174,7 @@ export class ReviewRunner {
   status(reviewId: string): ReviewState | null {
     const started = this.host.list({ kinds: ["review"] }).find((e) => e.payload.phase === "started" && e.payload.reviewId === reviewId);
     if (!started) return null;
-    const base = { reviewId, chat: String(started.payload.chat), target: started.payload.target as ReviewState["target"], agents: started.payload.agents as string[] };
+    const base = { checklist: started.payload.checklist as string[] | undefined, reviewId, chat: String(started.payload.chat), target: started.payload.target as ReviewState["target"], agents: started.payload.agents as string[] };
     const done = this.doneEvent(reviewId);
     if (!done) return { ...base, status: "running" };
     const decided = new Map(this.host.list({ kinds: ["review"], chat: base.chat }).filter((e) => e.payload.phase === "decided" && e.payload.reviewId === reviewId)

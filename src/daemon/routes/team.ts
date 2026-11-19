@@ -5,6 +5,32 @@ import type { RouteContext } from './context.js';
 /** Register team routes in the order established by LoomDaemon.routes(). */
 export function registerTeamRoutes(app: Express, ctx: Pick<RouteContext, "auth" | "team" | "runtimes">): void {
 
+  // These machine-wide controls also belong to the owner's unscoped phone.
+  app.use(["/api/team/invites", "/api/team/fleets"], (req, res, next) => {
+    if (ctx.auth.allowedProjects(bearerToken(req.headers.authorization) ?? "")) return void res.status(403).json({ error: "requires an owner or unscoped device" });
+    next();
+  });
+  app.get("/api/team/invites", async (req, res) => {
+    try { res.json({ invites: await ctx.team.listInvites(String(req.query.teamId || "") || undefined) }); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  app.delete("/api/team/invites/:inviteId", async (req, res) => {
+    try { res.json({ revoked: await ctx.team.revokeInvite(String(req.query.teamId || ""), String(req.params.inviteId)) }); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  app.get("/api/team/fleets", async (req, res) => {
+    try { res.json({ fleets: await ctx.team.sharedFleets(String(req.query.teamId || "") || undefined) }); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  app.put("/api/team/fleets", async (req, res) => {
+    try { res.json({ fleet: await ctx.team.shareFleet(String(req.body?.teamId || ""), req.body?.name, req.body?.spec) }); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  app.delete("/api/team/fleets/:name", async (req, res) => {
+    try { await ctx.team.removeSharedFleet(String(req.query.teamId || ""), String(req.params.name)); res.json({ removed: true }); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+
   // ---- Loom Teams: this daemon on a Team Hub (daemon/team.ts) -------------
   app.post("/api/team/crew-requests/:action", (req, res) => {
     if (ctx.auth.allowedProjects(bearerToken(req.headers.authorization) ?? "")) return void res.status(403).json({ error: "crew requests need a full client" });
@@ -83,7 +109,7 @@ export function registerTeamRoutes(app: Express, ctx: Pick<RouteContext, "auth" 
   });
 
   app.post("/api/team/:action", (req, res) => {
-    if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+    if (!(req as Request & { isAdmin?: boolean }).isAdmin && (req.params.action !== "invite" || ctx.auth.allowedProjects(bearerToken(req.headers.authorization) ?? ""))) {
       return void res.status(403).json({ error: "admin only" });
     }
     const b = (req.body ?? {}) as Record<string, string | undefined>;

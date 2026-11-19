@@ -1,4 +1,5 @@
 /** Browser home module. See README.md for ownership and startup. */
+import { projectPresenceHtml } from './sharing.js';
 import { api,clearTimers,logout } from './connection.js';
 import { esc,money } from './format.js';
 import { ICONS,LOADER } from './icons.js';
@@ -31,7 +32,7 @@ import { THEME_BTN,bindTheme } from './theme.js';
           var working = (p.agents || []).filter(function(a){ return a.busy; }).map(function(a){ return a.id; }).concat(p.activity || []);
           return '<div class="card" data-id="' + esc(p.id) + '">' +
             '<div class="row1"><span class="dot' + (p.needsInput ? " hot" : working.length ? " work" : "") + '"' + (working.length ? ' title="working: ' + esc(working.join(", ")) + '"' : "") + '></span>' +
-            '<span class="nm">' + esc(p.name) + "</span>" +
+            '<span class="nm">' + esc(p.name) + "</span>" + projectPresenceHtml(p.presence) +
             (act ? '<span class="badge live">' + esc(r.name || "route") + " " + (r.current + 1) + "/" + r.steps.length + (r.status === "waiting_human" ? " \u00b7 paused" : "") + "</span>" : "") +
             '</div>' +
             '<div class="row2">baton: ' + esc(p.holder || "\u2014") +
