@@ -1,3 +1,4 @@
+import { guardReviewCommit } from "./review-r4/verify.js";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -15,7 +16,7 @@ export function withSecretOverride<T>(override: boolean, fn: () => T): T {
 }
 
 /** All Loom git launchers pass here, including automatic commits and team pushes. */
-export function guardGit(command: string, args: readonly string[], cwd?: string | URL, env?: NodeJS.ProcessEnv): void {
+function guardSecrets(command: string, args: readonly string[], cwd?: string | URL, env?: NodeJS.ProcessEnv): void {
   if (!/^git(?:\.exe)?$/i.test(path.basename(command)) || overrides.getStore()) return;
   let dir = typeof cwd === "string" ? cwd : process.cwd();
   const globalArgs: string[] = [];
@@ -90,4 +91,9 @@ export function guardGit(command: string, args: readonly string[], cwd?: string 
   }
   const findings = findSecrets(diff);
   if (findings.length) throw new SecretScanError(findings);
+}
+
+export function guardGit(command: string, args: readonly string[], cwd?: string | URL, env?: NodeJS.ProcessEnv): void {
+  guardSecrets(command, args, cwd, env);
+  guardReviewCommit(command, args, cwd);
 }

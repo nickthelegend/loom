@@ -121,6 +121,8 @@ export class DaemonClient {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
   }
 
+  reviewR4<T = unknown>(route: string, body?: Record<string, unknown>, method = body ? "POST" : "GET", timeoutMs = 120_000): Promise<T> { return this.request(method, route, body, timeoutMs); }
+
   get baseUrl(): string {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }

@@ -1,3 +1,4 @@
+import { mountReviewDiff } from "./review-r4.js";
 import { bindDiffQuestions } from "../diff-question.js";
 import { api } from '../connection.js';
 import { diffBody,diffToggle,isLoomInternal,renderDiffFiles,renderDiffLines,splitPatch } from '../diff.js';
@@ -236,6 +237,7 @@ export function createChanges(view) {
         if (!t) { el.innerHTML = LOADER; return; }
         if (!t.git) { el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>'; return; }
         el.innerHTML = '<div class="diffwrap">' + renderDiffFiles(t) + "</div>";
+        mountReviewDiff(el, view.pid, state.chat, { working: true });
         if (focusPath) {
           var files = splitPatch(t.patch).filter(function(f){ return !isLoomInternal(f.path); });
           var idx = -1;
@@ -290,6 +292,7 @@ export function createChanges(view) {
           });
         };
       });
+      mountReviewDiff(el, view.pid, state.chat, {});
       var sc = el; if (sc) sc.scrollTop = 0;
     }
 
@@ -303,6 +306,8 @@ export function createChanges(view) {
         el.innerHTML = '<div class="filepreview">' + lines.map(function(line, i){
           return '<div class="fl"><span class="ln">' + (i + 1) + '</span><span class="lc">' + (esc(line) || " ") + "</span></div>";
         }).join("") + (j.truncated ? '<div class="sys">\u2026 file truncated at 400KB</div>' : "") + "</div>";
+        el.querySelectorAll(".fl").forEach(function(row, i){ row.dataset.askFile = relPath; row.dataset.askLine = String(i + 1); });
+        mountReviewDiff(el, view.pid, state.chat, {});
         el.scrollTop = 0;
       }).catch(function(err){ el.innerHTML = '<div class="sys err">' + esc(err.message) + "</div>"; });
     }

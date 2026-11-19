@@ -1,3 +1,4 @@
+import { registerReviewR4Routes } from "./routes/review-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -642,6 +643,7 @@ export class LoomDaemon {
     registerConfigRoutes(app, withRuntime);
     registerSearchRoutes(app, withRuntime);
     registerGitRoutes(app, withRuntime);
+    registerReviewR4Routes(app, withRuntime, ctx);
     registerLogsRoutes(app);
     registerAgentDiscoveryRoutes(app, withRuntime);
     registerSpecsRoutes(app, ctx, withRuntime);
