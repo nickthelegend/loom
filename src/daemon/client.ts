@@ -164,8 +164,8 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
   }
 
-  remember(id: string, kind: MemoryKind, text: string, chat?: string): Promise<{ memory: Memory; created: boolean }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}) });
+  remember(id: string, kind: MemoryKind, text: string, chat?: string, paths?: string[]): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}), ...(paths ? { paths } : {}) });
   }
 
   report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
@@ -820,10 +820,10 @@ export class DaemonClient {
   searchBrain(
     id: string,
     q: string,
-    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
+    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number; tag?: string } = {},
   ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
     const params = new URLSearchParams({ q });
-    for (const key of ["agent", "author", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
+    for (const key of ["agent", "author", "kind", "since", "until", "chat", "tag"] as const) if (opts[key]) params.set(key, opts[key]!);
     if (opts.explain) params.set("explain", "1");
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);
@@ -916,16 +916,16 @@ export class DaemonClient {
   brainInjections(id: string, turn?: string): Promise<{ injections: unknown[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/injections${turn ? `?turn=${encodeURIComponent(turn)}` : ""}`);
   }
-  listBrainMemories(id: string, includeArchived = false): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
-    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}`);
+  listBrainMemories(id: string, includeArchived = false, tag?: string, sort?: string): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}${tag ? `&tag=${encodeURIComponent(tag)}` : ""}${sort ? `&sort=${encodeURIComponent(sort)}` : ""}`);
   }
 
-  exportBrainMarkdown(id: string, md: string): Promise<{ file: string }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md });
+  exportBrainMarkdown(id: string, md: string, tag?: string): Promise<{ file: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md, ...(tag ? { tag } : {}) });
   }
 
-  exportBrain(id: string): Promise<Record<string, unknown>> {
-    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
+  exportBrain(id: string, tag?: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export${tag ? `?tag=${encodeURIComponent(tag)}` : ""}`);
   }
 
   importBrain(id: string, doc: unknown): Promise<{ added: number; known: number }> {

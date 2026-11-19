@@ -10,6 +10,7 @@ import { safetyDecision } from "../core/safety.js";
 import { EmailDigest } from "./email-digest.js";
 import { registerEmailRoutes } from "./routes/email.js";
 import { DiscordRuns } from "./discord-runs.js";
+import { registerBrainR4Routes } from "./routes/brain-r4.js";
 import { rpcError } from "../core/mcp-server.js";
 import { loomToolScope } from "../core/loom-tools.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
@@ -695,6 +696,7 @@ export class LoomDaemon {
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
+    registerBrainR4Routes(app, withRuntime, this.auth);
     registerBrainRoutes(app, withRuntime, this.auth);
     registerRoutingRoutes(app, withRuntime);
     registerTerminalsRoutes(app, ctx);

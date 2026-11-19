@@ -23,7 +23,7 @@
  */
 
 import type { Brain, Memory, MemoryKind } from "./brain.js";
-import { MEMORY_KINDS } from "./brain.js";
+import { MEMORY_KINDS, memoryHash, sameMemoryScope, isExpired } from "./brain.js";
 import { retrieveFrom } from "./brain-index.js";
 
 /** One thing the extractor decided to do. Ids here are the INTEGER map keys. */
@@ -207,7 +207,7 @@ export function applyExtraction(
         res.dropped.push({ op, reason: "evidence not found in the turn" });
         continue;
       }
-      const { memory, created } = brain.add({
+      const input = {
         kind: op.kind,
         text: op.text,
         ...(op.entities ? { entities: op.entities } : {}),
@@ -216,7 +216,18 @@ export function applyExtraction(
         ...(opts.chat ? { scope: { chat: opts.chat } } : {}),
         ...(opts.untrusted ? { untrusted: true } : {}),
         provenance: prov,
-      });
+      };
+      if (brain.knowledge.settings().reviewBeforeSaving) {
+        const known = brain.all().find(m => !m.archived && !isExpired(m) && m.hash === memoryHash(op.text) && sameMemoryScope(m.scope, input.scope ?? {}));
+        if (known) {
+          brain.confirm(known.id, opts.by);
+          res.dropped.push({ op, reason: "already known (hash match)" });
+          continue;
+        }
+        brain.knowledge.propose(input);
+        continue;
+      }
+      const { memory, created } = brain.add(input);
       if (created) res.added.push(memory);
       else {
         // learned again: that's a confirmation, and it keeps the memory fresh (D16)
@@ -231,6 +242,11 @@ export function applyExtraction(
       }
       if (!evidenceInTurn(op.evidence, turn)) {
         res.dropped.push({ op, reason: "evidence not found in the turn" });
+        continue;
+      }
+      if (target.source) { res.dropped.push({ op, reason: "source chunks are read-only" }); continue; }
+      if (brain.knowledge.settings().reviewBeforeSaving) {
+        brain.knowledge.propose({ ...target, text: op.text, evidence: op.evidence, untrusted: Boolean(target.untrusted || opts.untrusted), provenance: prov }, target.id);
         continue;
       }
       try {
@@ -251,11 +267,13 @@ export function applyExtraction(
         res.dropped.push({ op, reason: err instanceof Error ? err.message : String(err) });
       }
     } else if (op.op === "FORGET") {
+      if (brain.knowledge.settings().reviewBeforeSaving) { res.dropped.push({ op, reason: "automatic forgetting disabled during review" }); continue; }
       const target = byInt.get(op.id);
       if (!target) {
         res.dropped.push({ op, reason: `no candidate with id ${op.id}` });
         continue;
       }
+      if (byInt.get(op.id)?.source) { res.dropped.push({ op, reason: "source chunks are read-only" }); continue; }
       if (brain.forget(target.id, op.reason, opts.by)) res.forgotten.push(target.id);
     }
   }

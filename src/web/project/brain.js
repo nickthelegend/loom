@@ -1,3 +1,4 @@
+import { mountBrainR4 } from "./brain-r4.js";
 import { brainFiltersHtml, memoryToolsHtml, wireMemoryTools } from './brain-tools.js';
 import { brandMark,kindOf } from '../agents.js';
 import { api } from '../connection.js';
@@ -26,7 +27,7 @@ export function createBrain(view) {
       if (!el.querySelector(".brain")) el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
       var current = ++generation;
       var params = new URLSearchParams({ limit: '500' });
-      ['q','agent','since','until'].forEach(function(key){ if (filters[key]) params.set(key === 'agent' ? 'author' : key, filters[key]); });
+      ['q','agent','since','until','tag'].forEach(function(key){ if (filters[key]) params.set(key === 'agent' ? 'author' : key, filters[key]); });
       if (view.brainKind) params.set('kind', view.brainKind);
       if (filters.archived) params.set('includeArchived', '1');
       if (filters.q) params.set('chat', view.chatId || 'main');
@@ -85,8 +86,8 @@ export function createBrain(view) {
             return '<div class="bmem' + (low ? " low" : "") + '" data-mid="' + esc(x.id) + '">' +
               '<div class="bmrow"><span class="bbadge bk-' + esc(x.kind) + '">' + esc(x.kind) + "</span>" +
               '<span class="bmtext">' + esc(x.text) + "</span>" +
-              '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
-              '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button></div>" +
+              (x.source ? '' : '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
+              '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button>") + "</div>" +
               (ents ? '<div class="bents">' + ents + "</div>" : "") +
               '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
               (when ? ' <span class="dim">\u00b7 ' + esc(when) + "</span>" : "") +
@@ -117,6 +118,7 @@ export function createBrain(view) {
         el.innerHTML = '<div class="pane-inner brain">' + head + brainFiltersHtml(filters) + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
         wireMemoryTools(el, view, memories, filters, refreshBrain);
+        mountBrainR4(el, view, refreshBrain);
         if (state.brainGraph && devMode() && shown.length) view.drawMemGraph(document.getElementById("bgraph"), shown, usage);
         Array.prototype.forEach.call(el.querySelectorAll("[data-bgv]"), function(b){
           b.onclick = function(){ state.brainGraph = b.getAttribute("data-bgv") === "graph"; refreshBrain(); };
@@ -186,7 +188,7 @@ export function createBrain(view) {
         });
         var bex = document.getElementById("bexport");
         if (bex) bex.onclick = function(){
-          api("/api/projects/" + view.pid + "/brain/export").then(function(dump){
+          api("/api/projects/" + view.pid + "/brain/export" + (filters.tag ? "?tag=" + encodeURIComponent(filters.tag) : "")).then(function(dump){
             var blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
             var a = document.createElement("a");
             a.href = URL.createObjectURL(blob);

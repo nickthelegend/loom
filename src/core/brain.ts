@@ -27,6 +27,8 @@
  */
 
 import crypto from "node:crypto";
+import { labels, paths, type KnowledgeFields } from "./brain-r4/fields.js";
+import { BrainKnowledge } from "./brain-r4/knowledge.js";
 import type { EventJournal } from "./eventlog.js";
 import type { LoomEvent } from "../types.js";
 
@@ -67,7 +69,7 @@ export interface MemoryProvenance {
   ts: number;
 }
 
-export interface Memory {
+export interface Memory extends KnowledgeFields {
   pinned?: boolean;
   priority?: number;
   archived?: boolean;
@@ -112,7 +114,7 @@ export interface Memory {
 }
 
 /** What a caller hands us. The derived fields are ours to compute. */
-export interface NewMemory {
+export interface NewMemory extends KnowledgeFields {
   pinned?: boolean;
   priority?: number;
   kind: MemoryKind;
@@ -127,7 +129,7 @@ export interface NewMemory {
   private?: boolean;
 }
 
-export interface MemoryPatch {
+export interface MemoryPatch extends Pick<KnowledgeFields, "tags" | "paths"> {
   pinned?: boolean;
   priority?: number;
   archived?: boolean;
@@ -161,7 +163,7 @@ export interface BrainExport {
   version: 1;
   project: string;
   exportedAt: number;
-  memories: Array<{
+  memories: Array<KnowledgeFields & {
     kind: MemoryKind;
     text: string;
     entities?: string[];
@@ -181,6 +183,7 @@ export interface BrainExport {
 }
 
 export interface ListOpts {
+  tag?: string;
   author?: string;
   since?: number;
   until?: number;
@@ -347,6 +350,8 @@ export function foldMemories(events: LoomEvent[]): Map<string, Memory> {
       if (typeof patch.pinned === "boolean") next.pinned = patch.pinned;
       if (typeof patch.archived === "boolean") next.archived = patch.archived;
       if (typeof patch.priority === "number") next.priority = patch.priority;
+      if (patch.tags) next.tags = labels(patch.tags);
+      if (patch.paths) next.paths = paths(patch.paths);
       if (patch.scope) next.scope = { ...patch.scope };
       byId.set(cur.id, next);
       continue;
@@ -381,7 +386,10 @@ export class Brain {
   private cache: Map<string, Memory> | null = null;
   private unsubscribe: (() => void) | null = null;
 
+  readonly knowledge: BrainKnowledge;
+
   constructor(private log: EventJournal) {
+    this.knowledge = new BrainKnowledge(this, log);
     // The cache is invalidated by the log, not by our own methods, so a write
     // from anywhere — another Brain, a replay, the CLI — is seen too.
     this.unsubscribe = this.log.onEvent((e) => {
@@ -392,6 +400,7 @@ export class Brain {
   }
 
   close(): void {
+    this.knowledge.close();
     this.unsubscribe?.();
     this.unsubscribe = null;
   }
@@ -423,6 +432,7 @@ export class Brain {
   list(opts: ListOpts = {}): Memory[] {
     const now = Date.now();
     let out = this.all();
+    if (opts.tag) out = out.filter(m => m.tags?.includes(opts.tag!.trim().toLowerCase()));
     if (!opts.includeArchived) out = out.filter(m => !m.archived);
     if (opts.author) out = out.filter(m => m.provenance.agentId === opts.author);
     if (opts.since !== undefined) out = out.filter(m => m.createdAt >= opts.since!);
@@ -446,7 +456,7 @@ export class Brain {
    * export is the live memories, not the event log — history stays where it
    * happened; what travels is what the project currently knows.
    */
-  export(projectName: string, opts: { includeExpired?: boolean } = {}): BrainExport {
+  export(projectName: string, opts: { includeExpired?: boolean; tag?: string; liveOnly?: boolean } = {}): BrainExport {
     const now = Date.now();
     return {
       format: "loom-brain",
@@ -454,7 +464,8 @@ export class Brain {
       project: projectName,
       exportedAt: now,
       // expired memories are dead to retrieval; they don't travel unless asked for
-      memories: this.all().filter((m) => opts.includeExpired || !isExpired(m, now)).map((m) => ({
+      memories: this.all().filter(m => !m.source && (!opts.liveOnly || !m.archived) && (!opts.tag || m.tags?.includes(opts.tag.trim().toLowerCase()))).filter((m) => opts.includeExpired || !isExpired(m, now)).map((m) => ({
+        tags: m.tags, paths: m.paths, pack: m.pack,
         kind: m.kind,
         text: m.text,
         entities: m.entities,
@@ -496,6 +507,7 @@ export class Brain {
       const { created } = this.add({
         pinned: m.pinned, priority: m.priority, private: m.private, untrusted: m.untrusted,
         evidence: m.evidence, expiresAt: m.expiresAt,
+        tags: m.tags, paths: m.paths, pack: m.pack,
         kind: m.kind,
         text: m.text,
         ...(m.entities?.length ? { entities: m.entities } : {}),
@@ -529,13 +541,21 @@ export class Brain {
     if (!text) throw new Error("a memory needs text");
     if (!MEMORY_KINDS_SET.has(input.kind)) throw new Error(`unknown memory kind: ${input.kind}`);
 
+    const tags = labels(input.tags), scopedPaths = paths(input.paths);
     const hash = memoryHash(text);
-    const existing = [...this.state().values()].find(m => m.hash === hash && sameMemoryScope(m.scope, input.scope ?? {}) && !m.archived);
-    if (existing) return { memory: existing, created: false };
+    const existing = [...this.state().values()].find(m => m.hash === hash && sameMemoryScope(m.scope, input.scope ?? {}) && !m.archived && m.pack === input.pack && JSON.stringify(m.paths ?? []) === JSON.stringify(scopedPaths) && JSON.stringify(m.source) === JSON.stringify(input.source));
+    if (existing) {
+      const combined = labels([...(existing.tags ?? []), ...tags]);
+      const memory = combined.length !== (existing.tags ?? []).length ? this.update(existing.id, { tags: combined }, input.provenance.agentId) : existing;
+      return { memory, created: false };
+    }
 
     const ts = Date.now();
     const memory: Memory = {
       id: newMemoryId(),
+      tags, paths: scopedPaths,
+      ...(input.pack ? { pack: input.pack } : {}),
+      ...(input.source ? { source: input.source } : {}),
       pinned: input.pinned ?? false,
       priority: input.priority ?? 0,
       kind: input.kind,
@@ -582,6 +602,9 @@ export class Brain {
   update(id: string, patch: MemoryPatch, by: string): Memory {
     const cur = this.state().get(id);
     if (!cur) throw new Error(`no such memory: ${id}`);
+    if (cur.source) throw new Error("source chunks are read-only; refresh or remove the source");
+    if (patch.tags) labels(patch.tags);
+    if (patch.paths) paths(patch.paths);
     if (patch.text !== undefined && !patch.text.trim()) {
       throw new Error("a memory needs text");
     }
@@ -617,6 +640,7 @@ export class Brain {
   forget(id: string, reason: string, by: string): boolean {
     const cur = this.state().get(id);
     if (!cur) return false;
+    if (cur.source && by !== "brain:sources") throw new Error("source chunks are read-only; remove the source instead");
     if (!reason.trim()) throw new Error("forgetting needs a reason");
     this.log.append({
       kind: "memory_forget",
@@ -680,7 +704,7 @@ export class Brain {
   revert(id: string, eventId: number, by: string): Memory {
     const revision = this.history(id).find(e => e.eventId === eventId)?.after;
     if (!revision) throw new Error("no such memory revision");
-    return this.update(id, { text: revision.text, kind: revision.kind, entities: revision.entities,
+    return this.update(id, { tags: revision.tags ?? [], paths: revision.paths ?? [], text: revision.text, kind: revision.kind, entities: revision.entities,
       scope: revision.scope, confidence: revision.confidence, evidence: revision.evidence ?? "",
       expiresAt: revision.expiresAt ?? null, private: revision.private ?? false,
       untrusted: revision.untrusted ?? false, pinned: revision.pinned ?? false,
@@ -690,11 +714,14 @@ export class Brain {
   merge(keepId: string, otherId: string, text: string, by: string): Memory {
     const keep = this.get(keepId), other = this.get(otherId);
     if (!keep || !other || keep.archived || other.archived || keepId === otherId) throw new Error("choose two live memories");
+    if (keep.source || other.source || keep.pack !== other.pack || JSON.stringify(keep.paths ?? []) !== JSON.stringify(other.paths ?? [])) throw new Error("merge requires the same pack and paths, and editable memories");
     if (!sameMemoryScope(keep.scope, other.scope) || keep.kind !== other.kind) throw new Error("merge requires the same kind and scope");
-    const result = this.update(keepId, { text, entities: [...new Set([...keep.entities, ...other.entities])],
+    const result = this.update(keepId, { text, tags: labels([...(keep.tags ?? []), ...(other.tags ?? [])]),
+      expiresAt: keep.expiresAt === undefined ? other.expiresAt : other.expiresAt === undefined ? keep.expiresAt : Math.min(keep.expiresAt, other.expiresAt), entities: [...new Set([...keep.entities, ...other.entities])],
       pinned: Boolean(keep.pinned || other.pinned), priority: Math.max(keep.priority ?? 0, other.priority ?? 0),
       private: Boolean(keep.private || other.private), untrusted: Boolean(keep.untrusted || other.untrusted) }, by);
     this.update(otherId, { archived: true }, by);
+    this.knowledge.record("merged", { id: keepId, other: otherId, text, by });
     return result;
   }
 

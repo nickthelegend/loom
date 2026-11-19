@@ -1,3 +1,6 @@
+import path from "node:path";
+import { refreshSources } from "../../core/brain-r4/sources.js";
+import { watchMergedPrs } from "../../core/brain-r4/pr-learning.js";
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../../core/brain-extract.js";
 import { compileBrief, retrieve, type Hit, type RetrieveOpts } from "../../core/brain-index.js";
 import { Brain, CONFIDENCE_FLOOR, type MemoryBriefing } from "../../core/brain.js";
@@ -41,7 +44,10 @@ export interface RuntimeBriefingsHost {
 
 /** Owns briefings state for exactly one open project. */
 export class RuntimeBriefings {
-  constructor(private readonly host: RuntimeBriefingsHost) { }
+  private readonly stopPrLearning: () => void;
+  constructor(private readonly host: RuntimeBriefingsHost) {
+    this.stopPrLearning = watchMergedPrs(() => host.brain, host.log, host.info.dir);
+  }
 
   /**
    * The dense retrieval channel, when this project opted in (brain.semantic).
@@ -59,6 +65,7 @@ export class RuntimeBriefings {
   private semanticGeneration = 0;
 
   close(): void {
+    this.stopPrLearning();
     this.extractionScope.abort();
     this.lifetime.abort();
     this.semanticGeneration++;
@@ -185,7 +192,9 @@ export class RuntimeBriefings {
    * line labelled with how sure to be (Loom Teams D42).
    */
   brainBrief(opts: RetrieveOpts): string {
-    opts = { ...opts, strictChatScope: true };
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
+    opts = { ...opts, strictChatScope: true, enforcePaths: true };
     const pool = this.host.teamBrain?.pool(this.host.brain.all());
     if (!pool) {
       const hits = retrieve(this.host.brain, opts);
@@ -219,12 +228,19 @@ export class RuntimeBriefings {
    * no search at all.
    */
   async searchBrain(opts: RetrieveOpts): Promise<Hit[]> {
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
     const dense = await this.denseFor(opts.query ?? "");
     return retrieve(this.host.brain, dense ? { ...opts, dense } : opts);
   }
 
   async turnMemoryBrief(query: string, agent: string, chat: string, turn: number, pinsOnly = false, crew?: string): Promise<MemoryBriefing> {
-    const opts: RetrieveOpts = { query, agent, chat, crew, strictChatScope: true, limit: 6, minConfidence: CONFIDENCE_FLOOR, explain: true };
+    try { refreshSources(this.host.brain, this.host.info.dir); }
+    catch (error) { logbook.warn("brain", "document refresh failed; using indexed chunks", String(error), this.host.info.id); }
+    const files = this.host.log.list({ chat, kinds: ["file_edit"], limit: 80 }).filter(e => e.id < turn)
+      .map(e => String(e.payload.path ?? "")).filter(Boolean)
+      .map(file => (path.isAbsolute(file) ? path.relative(this.host.info.dir, file) : file).split(path.sep).join("/"));
+    const opts: RetrieveOpts = { query, agent, chat, crew, files, enforcePaths: true, strictChatScope: true, limit: 6, minConfidence: CONFIDENCE_FLOOR, explain: true };
     const dense = await this.denseFor(query);
     if (dense) opts.dense = dense;
     const pool = this.host.teamBrain?.pool(this.host.brain.all());
@@ -236,7 +252,7 @@ export class RuntimeBriefings {
       this.host.log.append({ kind: "status", agentId: agent, chat, payload: { state: "memory_injection", turn,
         memories: hits.map(h => ({ id: h.memory.id, text: h.memory.text, kind: h.memory.kind, score: h.score,
           pinned: Boolean(h.memory.pinned), priority: h.memory.priority ?? 0,
-          detail: "detail" in h ? h.detail : undefined, reason: h.memory.pinned ? "pinned" : "relevance", scope: h.memory.scope })), briefing: brief } });
+          detail: "detail" in h ? h.detail : undefined, reason: h.memory.pinned ? "pinned" : "relevance", scope: h.memory.scope, paths: h.memory.paths, source: h.memory.source })), briefing: brief } });
     } };
   }
 
