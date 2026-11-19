@@ -11,6 +11,11 @@ describe('R4 analytics from recorded events', () => {
     const rows = turns([e('status', 0, { state: 'turn_started', requestId: 'r1' }), e('tool_call', 4, { id: 't', tool: 'shell' }), e('status', 6, { state: 'turn_started', session: 's' }), e('run_complete', 20, {})]);
     expect(rows).toHaveLength(1); expect(rows[0]!.firstOutputMs).toBe(4); expect(rows[0]!.durationMs).toBe(20);
   });
+  it('keeps first output when a slow adapter re-announces the start many seconds later, and only once', () => {
+    const rows = turns([e('status', 0, { state: 'turn_started', requestId: 'r1' }), e('tool_call', 4, { id: 't', tool: 'shell' }), e('status', 9000, { state: 'turn_started', session: 's' }), e('run_complete', 9100, {}),
+      e('status', 10000, { state: 'turn_started', session: 's' }), e('tool_call', 10050, { id: 'u', tool: 'shell' }), e('status', 10060, { state: 'turn_started', session: 's' }), e('run_complete', 10100, {})]);
+    expect(rows).toHaveLength(2); expect(rows[0]!.firstOutputMs).toBe(4); expect(rows[0]!.durationMs).toBe(9100); expect(rows[1]!.firstOutputMs).toBe(50);
+  });
   it('pairs tool IDs within agent and chat, counts failures and leaves unknown timings unknown', () => {
     const events = [e('tool_call', 0, { id: 'x', tool: 'shell' }), e('tool_call', 10, { id: 'x', tool: 'read' }, 'b'), e('tool_result', 50, { id: 'x', ok: false }), e('tool_result', 110, { id: 'x', ok: true }, 'b'), e('tool_call', 120, { name: 'shell', ok: true }), e('tool_call', 125, { tool: 'pending' })];
     const result = toolAnalytics(events);

@@ -17,7 +17,7 @@ export interface Turn {
 
 /** Pair boundaries before filtering windows, so a turn crossing midnight keeps its timing. */
 export function turns(events: LoomEvent[], workingUntil?: number, liveAgents?: Set<string>): Turn[] {
-  const out: Turn[] = [], active = new Map<string, { start: number; first?: number; waits: Array<[number, number]>; wait?: number; pendingWaits?: Set<string>; failed?: Turn; implicit?: boolean; agent: string; chat: string }>();
+  const out: Turn[] = [], active = new Map<string, { start: number; first?: number; waits: Array<[number, number]>; wait?: number; pendingWaits?: Set<string>; failed?: Turn; implicit?: boolean; echoed?: boolean; agent: string; chat: string }>();
   for (const e of sorted(events)) {
     if (!e.agentId) {
       if (e.kind === "message") for (const [k, a] of active) if (a.failed && a.chat === (e.chat ?? "main")) active.delete(k);
@@ -26,10 +26,11 @@ export function turns(events: LoomEvent[], workingUntil?: number, liveAgents?: S
     const p = e.payload, k = key(e);
     let a = active.get(k);
     if (e.kind === "status" && p.state === "turn_started") {
-      // Adapters re-announce the dispatcher's start (their payload carries `session`); that is the same turn even when
-      // output already arrived between the two. Any other start after output is a new turn.
-      const echo = a && !a.failed && e.ts - a.start <= 5000 && "session" in p;
-      if (!echo && (!a || a.failed || a.first !== undefined || e.ts - a.start > 5000)) active.set(k, { start: e.ts, waits: [], agent: e.agentId, chat: e.chat ?? "main" });
+      // Adapters re-announce the dispatcher's start once (their payload carries `session`); that is the same turn even when
+      // output already arrived between the two, and however slowly the adapter started. Any other start after output is a new turn.
+      const echo = a && !a.failed && !a.echoed && "session" in p;
+      if (echo) { a!.echoed = true; continue; }
+      if (!a || a.failed || a.first !== undefined || e.ts - a.start > 5000) active.set(k, { start: e.ts, waits: [], agent: e.agentId, chat: e.chat ?? "main" });
       continue;
     }
     if (a && ((e.kind === "status" && p.state === "r4_first_output") || e.kind === "tool_call" || e.kind === "message")) a.first ??= e.ts;

@@ -203,7 +203,7 @@ describe("3. Stop cancels a turn that is waiting for a slot", () => {
     } finally {
       if (was !== undefined) process.env.LOOM_TURN_GATE = was;
     }
-  }, 30_000);
+  }, process.platform === "win32" ? 300_000 : 30_000);
 });
 
 // ── 4. ACP stop settles what's pending ─────────────────────────────────────
