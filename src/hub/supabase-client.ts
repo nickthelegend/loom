@@ -469,6 +469,12 @@ export class SupabaseHubClient implements HubClient {
     return mapDevice(await this.rpc<Row>("register_device", { p_label: input.label, p_seal_pub: input.sealPub, p_sign_pub: input.signPub }));
   }
 
+  listInvites(teamId: string) { return this.rpc<Awaited<ReturnType<HubClient["listInvites"]>>>("list_team_invites", { p_team: teamId }); }
+  revokeInvite(teamId: string, id: string) { return this.rpc<boolean>("revoke_team_invite", { p_team: teamId, p_id: id }); }
+  teamFleets(teamId: string) { return this.rpc<Awaited<ReturnType<HubClient["teamFleets"]>>>("list_team_fleets", { p_team: teamId }); }
+  async putTeamFleet(teamId: string, name: string, sealed: Parameters<HubClient["putTeamFleet"]>[2]): Promise<void> {
+    await this.rpc("put_team_fleet", { p_team: teamId, p_name: name, p_sealed: sealed });
+  }
   async createInvite(teamId: string, ttlMs?: number): Promise<{ invite: string; expiresAt: number }> {
     const args: Record<string, unknown> = { p_team: teamId };
     if (typeof ttlMs === "number" && Number.isFinite(ttlMs)) args.p_ttl_seconds = Math.round(ttlMs / 1000);

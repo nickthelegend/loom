@@ -17,11 +17,13 @@
  * It never overrides the destructive-command rule. Pure.
  */
 
+import { safetyDecision, type SafetyPolicy } from "./safety.js";
 import path from "node:path";
 import os from "node:os";
 import { dangerOf } from "./shield.js";
 
 export interface AutoPolicy {
+  safety?: SafetyPolicy;
   projectDir: string;
   /** Extra folders the agent may read (absolute). */
   readPaths: string[];
@@ -117,6 +119,10 @@ function stripCd(words: string[], dir: string): { dir: string; rest: string[] } 
 }
 
 export function decideAuto(tool: string, input: Record<string, unknown>, policy: AutoPolicy): AutoDecision {
+  if (policy.safety) {
+    const decision = safetyDecision(tool, input, policy.projectDir, policy.safety);
+    if (decision.deny) return { allow: false, rule: "project safety policy", detail: decision.deny };
+  }
   const allowedByName = policy.allow.some((a) => allowMatches(a, tool));
 
   if (tool === "Bash") {

@@ -21,6 +21,8 @@ beforeAll(async () => {
 
 afterAll(async () => { await daemon.close(); });
 
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function project() {
   const dir = makeProjectDir();
   const { project: info } = await client.addProject(dir);
@@ -32,10 +34,12 @@ async function project() {
   const write = () => fs.writeFileSync(file, JSON.stringify(config));
   const reloads = () => rt.log.list({ limit: 500 }).filter(e => e.payload.state === "config_reloaded");
   const errors = () => rt.log.list({ limit: 500 }).filter(e => e.payload.state === "config_reload_failed");
+  // fs.watchFile takes its baseline stat asynchronously; an edit made before that
+  // becomes the baseline and is never reported (a busy CI runner hit exactly this)
+  await pause(600);
   return { dir, id: info.id, rt, file, config, write, reloads, errors };
 }
 
-const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("project config watcher", () => {
   it("applies agents, roles, instructions, permissions and routes without another request", async () => {

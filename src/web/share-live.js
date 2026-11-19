@@ -8,6 +8,7 @@
  * same agent, see the same tool calls, steer together"), Apache-2.0, © Zeabur Inc.
  */
 
+import { timeLeft } from './sharing.js';
 import { api, logout } from "./connection.js";
 import { esc, mdToHtml } from "./format.js";
 import { ICONS, LOADER } from "./icons.js";
@@ -41,7 +42,8 @@ export function openShareLive(pid, cid, title) {
     "</div>" +
     '<div class="modalfoot"><span class="spacer"></span><button class="btn" id="slmake">Create link</button></div></div>';
   document.body.appendChild(scrim);
-  function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+  var countdown = null;
+  function close(){ if (countdown) clearInterval(countdown); scrim.remove(); document.removeEventListener("keydown", onKey); }
   function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
   document.addEventListener("keydown", onKey);
   scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
@@ -59,8 +61,10 @@ export function openShareLive(pid, cid, title) {
       return api("/api/pair/new", { method: "POST", body: JSON.stringify({ ...(net && net.ip ? { host: net.ip } : {}), guest: { project: pid, chat: cid, role: role, name: name, hours: hours } }) })
         .then(function(r){ return { r: r, reachable: Boolean(net) }; });
     }).then(function(x){
+      var expires = x.r.guest ? x.r.guest.until : Date.now() + hours * 3600000;
+      countdown = setInterval(function(){ if (!scrim.isConnected) { clearInterval(countdown); return; } var e = scrim.querySelector('[data-live-countdown]'); if (e) e.textContent = timeLeft(expires); }, 1000);
       var r = x.r, viaCloud = /[#&]relay=/.test(r.link || "");
-      body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:12px">' +
+      body.innerHTML = '<p data-live-countdown>' + esc(timeLeft(expires)) + '</p><div style="display:flex;flex-direction:column;align-items:center;gap:12px">' +
         (r.qrSvg ? '<div class="phqrcard">' + r.qrSvg + "</div>" : "") + "</div>" +
         '<div class="phlinkrow"><input id="sllink" readonly spellcheck="false" aria-label="share link" value="' + esc(r.link) + '"><button class="btn ghost" id="slcopy">Copy</button></div>' +
         '<div class="phhint">' + esc(name) + " can " + (role === "view" ? "read along" : role === "reply" ? "talk to the agent" : "talk and approve") +

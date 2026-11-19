@@ -119,6 +119,7 @@ import { labelOf } from './agents.js';
   function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return;
     // while the daemon is down the banner says so once; polls don't each toast it
     if (state.daemonUp === false && /Can’t reach Loom|Failed to fetch|Load failed|NetworkError/i.test(String(msg))) return;
+    rememberNotification(msg);
     t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
 
@@ -267,3 +268,31 @@ import { labelOf } from './agents.js';
     } catch (e) {}
   }
 export { _baseTitle,_titleFlash,announce,askConfirm,askText,chime,devicePref,fitMenu,isUnread,modalErr,notifyDone,notifyNeedsInput,setDevicePref,stopTitleFlash,toast,updateAmbient };
+var HISTORY_KEY = "loomNotifications:v1";
+export function notificationHistory(){
+  try { var rows = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); return Array.isArray(rows) ? rows.filter(function(r){ return r && typeof r.text === 'string' && Number.isFinite(r.at); }).slice(0, 100) : []; } catch (e) { return []; }
+}
+function rememberNotification(msg){
+  var rows = notificationHistory();
+  rows.unshift({ text: String(msg).slice(0, 2000), at: Date.now(), project: state.pid || null, chat: state.chat || 'main' });
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(rows.slice(0, 100))); } catch (e) {}
+  window.dispatchEvent(new Event('loom-notification'));
+}
+export function openNotificationHistory(){
+  if (document.querySelector('.scrim')) return;
+  var scrim = document.createElement('div'); scrim.className = 'scrim';
+  scrim.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-label="Notification history"><div class="modalhead">Notification history<button class="iconbtn" data-close aria-label="Close">×</button></div><div class="modalbody" style="max-height:60vh;overflow:auto" data-history></div><div class="modalfoot"><button class="btn outline" data-clear>Clear history</button></div></div>';
+  document.body.appendChild(scrim);
+  function draw(){
+    var rows = notificationHistory();
+    scrim.querySelector('[data-history]').innerHTML = rows.length ? rows.map(function(r, i){ return '<div class="notification-entry"><time>' + esc(new Date(r.at).toLocaleString()) + '</time><div>' + esc(r.text) + '</div>' + (r.project ? '<button class="btn xs ghost" data-open-notification="' + i + '">Open chat</button>' : '') + '</div>'; }).join('') : '<p>No notifications yet. Messages shown by Loom will appear here.</p>';
+    scrim.querySelectorAll('[data-open-notification]').forEach(function(b){ b.onclick = function(){ var r = rows[Number(b.dataset.openNotification)]; close(); location.hash = '#p/' + encodeURIComponent(r.project) + '/c/' + encodeURIComponent(r.chat || 'main'); }; });
+  }
+  function close(){ scrim.remove(); document.removeEventListener('keydown', key); window.removeEventListener('loom-notification', draw); window.removeEventListener('storage', draw); }
+  function key(e){ if (e.key === 'Escape') close(); }
+  scrim.querySelector('[data-close]').onclick = close;
+  scrim.querySelector('[data-clear]').onclick = function(){ try { localStorage.removeItem(HISTORY_KEY); } catch (e) {} draw(); };
+  scrim.onclick = function(e){ if (e.target === scrim) close(); };
+  document.addEventListener('keydown', key); window.addEventListener('loom-notification', draw); window.addEventListener('storage', draw);
+  draw(); scrim.querySelector('[data-close]').focus();
+}

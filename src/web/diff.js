@@ -34,6 +34,10 @@ import { ICONS } from './icons.js';
     return "";
   }
 
+  function askAttributes(file, line, side, text){
+    return file && line ? ' tabindex="0" aria-label="Hold or press Alt+Enter to ask about this line" data-ask-file="' + esc(file) + '" data-ask-line="' + esc(line) + '" data-ask-side="' + esc(side) + '" data-ask-text="' + esc(text) + '"' : "";
+  }
+
   // Unified diff lines with an old/new line-number gutter (Orca diff view).
   function renderDiffLines(lines, commentFile){
     var oldN = 0, newN = 0, out = "";
@@ -58,8 +62,9 @@ import { ICONS } from './icons.js';
       var content = ch === "+" || ch === "-" || ch === " " ? line.slice(1) : line;
       // Reviewable rows carry their location, so a click can turn into a
       // comment that names file:line instead of "that bit somewhere".
+      var ask = askAttributes(commentFile, ln || lo, ln ? "new" : "old", content);
       var loc = commentFile && ln ? ' data-cfile="' + esc(commentFile) + '" data-cline="' + ln + '"' : "";
-      out += '<div class="dl' + (c ? " " + c : "") + (loc ? " cmt" : "") + '"' + loc + ">" +
+      out += '<div class="dl' + (c ? " " + c : "") + (loc ? " cmt" : "") + '"' + loc + ask + ">" +
         '<span class="ln">' + lo + '</span><span class="ln">' + ln + "</span>" +
         '<span class="lm">' + mark + "</span>" +
         '<span class="lc">' + (esc(content) || " ") + "</span></div>";
@@ -67,14 +72,14 @@ import { ICONS } from './icons.js';
     return out;
   }
   /** Old on the left, new on the right: removals and additions paired row by row within a hunk. */
-  function renderSplitLines(lines){
+  function renderSplitLines(lines, path){
     var oldN = 0, newN = 0, out = "", dels = [], adds = [];
-    function cell(n, text, cls){ return '<span class="ln">' + (n || "") + '</span><span class="sc' + (cls ? " " + cls : "") + '">' + (text === null ? "" : (esc(text) || " ")) + "</span>"; }
+    function cell(n, text, cls, side){ return '<span class="ln">' + (n || "") + '</span><span class="sc' + (cls ? " " + cls : "") + '"' + askAttributes(path, n, side, text) + '>' + (text === null ? "" : (esc(text) || " ")) + "</span>"; }
     function flush(){
       var n = Math.max(dels.length, adds.length);
       for (var i = 0; i < n; i++) {
         var d = dels[i], a = adds[i];
-        out += '<div class="sl">' + (d ? cell(d[0], d[1], "del") : cell("", null, "empty")) + (a ? cell(a[0], a[1], "add") : cell("", null, "empty")) + "</div>";
+        out += '<div class="sl">' + (d ? cell(d[0], d[1], "del", "old") : cell("", null, "empty")) + (a ? cell(a[0], a[1], "add", "new") : cell("", null, "empty")) + "</div>";
       }
       dels = []; adds = [];
     }
@@ -87,13 +92,13 @@ import { ICONS } from './icons.js';
       if (c === "del") { dels.push([oldN++, body]); return; }
       if (c === "add") { adds.push([newN++, body]); return; }
       flush();
-      out += '<div class="sl">' + cell(oldN++, body, "") + cell(newN++, body, "") + "</div>";
+      out += '<div class="sl">' + cell(oldN++, body, "", "old") + cell(newN++, body, "", "new") + "</div>";
     });
     flush();
     return out;
   }
   function diffView(){ try { return localStorage.getItem("loomDiffView") === "split" ? "split" : "unified"; } catch (e) { return "unified"; } }
-  function diffBody(lines, path){ return diffView() === "split" ? '<div class="dsplit">' + renderSplitLines(lines) + "</div>" : renderDiffLines(lines, path); }
+  function diffBody(lines, path){ return diffView() === "split" ? '<div class="dsplit">' + renderSplitLines(lines, path) + "</div>" : renderDiffLines(lines, path); }
   function diffToggle(){
     var v = diffView();
     return '<div class="dvtoggle" role="group" aria-label="diff layout"><button type="button" data-dv="unified" class="' + (v === "unified" ? "on" : "") + '">Unified</button>' +

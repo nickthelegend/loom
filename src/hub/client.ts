@@ -101,6 +101,10 @@ export class HttpHubClient implements HubClient {
   registerDevice(input: { label: string; sealPub: string; signPub: string }) {
     return this.call<Awaited<ReturnType<HubClient["registerDevice"]>>>("registerDevice", input);
   }
+  listInvites(teamId: string) { return this.call<Awaited<ReturnType<HubClient["listInvites"]>>>("listInvites", teamId); }
+  revokeInvite(teamId: string, id: string) { return this.call<boolean>("revokeInvite", teamId, id); }
+  teamFleets(teamId: string) { return this.call<Awaited<ReturnType<HubClient["teamFleets"]>>>("teamFleets", teamId); }
+  putTeamFleet(teamId: string, name: string, sealed: Parameters<HubClient["putTeamFleet"]>[2]) { return this.call<void>("putTeamFleet", teamId, name, sealed); }
   createInvite(teamId: string, ttlMs?: number) {
     // An omitted ttl must stay omitted: JSON turns undefined into null, and
     // null clamped to the 1-minute floor made every invite die in a minute.

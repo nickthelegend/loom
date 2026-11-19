@@ -248,7 +248,7 @@ export function FleetScreen(props: {
         ) : !data ? (
           <ActivityIndicator color={T.dim} style={{ marginTop: 30 }} />
         ) : !projects.length ? (
-          <Empty text="No project is open on the daemon right now. Open one from the board and its agents show up here." />
+          <Empty text="No project is open on the daemon right now. Open one from the board and its agents show up here." action="Open projects" onAction={props.onBack} />
         ) : (
           projects.map((p) => (
             <View key={p.project.id} style={{ gap: spacing.sm }}>

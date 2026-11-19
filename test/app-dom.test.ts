@@ -1083,7 +1083,7 @@ describe("web app · the composer", () => {
     await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
     const box = $(m, "#box");
     expect(box?.tagName).toBe("TEXTAREA"); // not a bare <input> any more
-    expect((box as HTMLTextAreaElement).placeholder).toMatch(/@ for files, \/ for actions/);
+    expect((box as HTMLTextAreaElement).placeholder).toMatch(/@ for (teammates or )?files, \/ for actions/);
     expect($(m, "#attach"), "the attach button").toBeTruthy();
     expect($(m, "#modelpick"), "the model picker button").toBeTruthy();
     expect($(m, "#cfile"), "a hidden file input backs the paperclip").toBeTruthy();

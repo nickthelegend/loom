@@ -1,3 +1,6 @@
+import { resolveModel, validateAgentOptions, enforceModelCap, modelUsage, readModelRouting } from "../core/model-routing.js";
+import { RedactedStream } from "../core/redact.js";
+import { readSafety, writeSafety, parseSafety, presetMode, hasSafetyRules, SAFETY_PRESETS, type SafetyPolicy } from "../core/safety.js";
 import { writeLoomMcpSession } from "../core/loom-tools.js";
 import { createHash } from "node:crypto";
 import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
@@ -12,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
-import { ModelAdapter } from "../adapters/model.js";
+import { ModelAdapter, splitQualifiedModel } from "../adapters/model.js";
 import { ADES, detectAdes } from "../core/ades.js";
 import { BatonManager } from "../core/baton.js";
 import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
@@ -43,7 +46,7 @@ const SIGNED_OUT = /\b(?:not signed in|not logged in|please (?:run )?\S*\s*\/?lo
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { NightShift } from "./shift.js";
-import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
+import { isPermissionMode, permissionFor, permissionIndicator, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
   PromptQueue,
@@ -55,6 +58,8 @@ import {
   type QueueTarget
 } from "../core/prompt-queue.js";
 import {
+  AVATAR_MAX,
+  isAvatarDataUrl,
   newId,
   projectLoomDir,
   readProjectConfig,
@@ -84,7 +89,7 @@ import {
 } from "../core/skills.js";
 import { type TurnFacts } from "../core/step-conditions.js";
 import { suggestHandoff } from "../core/suggestions.js";
-import { cappedPermission, type TeamPolicy } from "../core/team-policy.js";
+import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { capCrewPermission, DEFAULT_CREW_POLICY } from "../core/crew-policy.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 import {
@@ -232,7 +237,7 @@ export class ProjectRuntime {
   private streamListeners = new Set<(f: LiveText) => void>();
   private liveListeners = new Set<(d: LiveFrame) => void>();
   /** Streamed text and tool progress from provider agents, coalesced for clients. Not persisted. */
-  private readonly live = new LiveDeltaThrottle((d) => { for (const cb of this.liveListeners) cb(d); });
+  private readonly live = new LiveDeltaThrottle((d) => { for (const cb of this.liveListeners) cb(d); }, 50, true);
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -327,6 +332,7 @@ export class ProjectRuntime {
         this.afterAgentEvent(event);
         this.kickQueue();
       },
+      turnMemoryBrief: (...args) => this.briefings.turnMemoryBrief(...args),
       consumePendingBriefing: (...args) => this.consumePendingBriefing(...args),
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       agentInstructions: (id) => this.agentInstructions(id),
@@ -418,15 +424,19 @@ export class ProjectRuntime {
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
-      briefingFor: async (query, agentId, files) =>
+      assertChatWritable: (id) => this.assertChatWritable(id),
+      memoryForTurn: (query, agent, chat, turn) => this.briefings.turnMemoryBrief(query, agent, chat, turn),
+      briefingFor: async (_query, _agentId, files) =>
         [
           this.activeSkillsBlock(),
-          await this.brainBriefFor({ query, agent: agentId, limit: 6 }),
           this.teamBrain?.context(files ?? []) ?? "",
         ]
           .filter(Boolean)
           .join("\n\n"),
-      gate: (agentId) => {
+      gate: (agentId, kind) => {
+        if (this.teamPolicy && kind && !agentAllowed(this.teamPolicy, kind)) {
+          throw new Error(`team policy doesn't allow ${kind} on this repo (loom.team.json)`);
+        }
         if (this.continuity) throw new ContinuityError("unsupported", "parallel orchestra execution is outside sequential native continuity");
         this.enforceQuarantine(agentId);
         this.enforceBudget(agentId);
@@ -593,8 +603,9 @@ export class ProjectRuntime {
         this.brain.add({ kind: m.kind, text: m.text, scope: { crew: m.crewId }, confidence: 0.85, evidence: m.text,
           provenance: { agentId: m.agentId, eventId: m.eventId, ts: Date.now() } });
       },
-      briefingFor: async (query, agentId, crewId) =>
-        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, crew: crewId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+      memoryForTurn: (query, agent, chat, turn, crew) => this.briefings.turnMemoryBrief(query, agent, chat, turn, Boolean(this.continuity), crew),
+      briefingFor: async () =>
+        [this.activeSkillsBlock(), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       gate: (agentId) => {
@@ -762,6 +773,7 @@ export class ProjectRuntime {
         if (wanted.has(cfg.id)) throw new Error(`duplicate agent id "${cfg.id}"`);
         if (!knownAgentKinds().includes(cfg.kind)) throw new Error(`unknown agent kind "${cfg.kind}"`);
         if (cfg.instructions !== undefined && typeof cfg.instructions !== "string") throw new Error(`instructions for "${cfg.id}" must be text`);
+        if (cfg.options !== undefined) validateAgentOptions(cfg.kind, cfg.options);
         if (cfg.options !== undefined && (!cfg.options || typeof cfg.options !== "object" || Array.isArray(cfg.options)))
           throw new Error(`options for "${cfg.id}" must be an object`);
         wanted.set(cfg.id, cfg);
@@ -791,7 +803,8 @@ export class ProjectRuntime {
         // adapter option cannot leave half of an edit applied.
         // pooled like at startup, so a reloaded agent still honours each chat's own model (#370)
         if (after && after.enabled !== false) prepared.set(id, createAgent(
-          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id), true,
+          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } },
+          next.git?.worktreePerAgent && tierForKind(after.kind) === "adapter" ? worktreePath(this.info.dir, `agent-${id}`) : this.agentDir(id), true,
         ));
       }
       const was = this.configOnDisk ?? this.config;
@@ -852,7 +865,7 @@ export class ProjectRuntime {
     if (dataUrl === null || dataUrl === "") delete cfg.avatar;
     else {
       if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error("a picture is a PNG, JPEG or WebP image");
-      if (dataUrl.length > 120_000) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
+      if (!isAvatarDataUrl(dataUrl)) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
       cfg.avatar = dataUrl;
     }
     this.saveConfig();
@@ -933,12 +946,15 @@ export class ProjectRuntime {
    * with no restart. Only the known keys are honoured; unknown ones are ignored.
    */
   patchConfig(patch: {
+    defaultEffort?: string;
     loomTools?: boolean;
     brain?: { extractor?: "auto" | "off"; model?: string; semantic?: boolean; continuity?: boolean };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
     git?: {
       commitPerTurn?: boolean;
+      branchPerChat?: boolean;
+      messageModel?: string;
       branchPerTask?: boolean;
       worktreePerAgent?: boolean;
       mergeOnHandoff?: boolean;
@@ -957,7 +973,9 @@ export class ProjectRuntime {
     }
     if (patch.git?.delivery !== undefined && !GIT_DELIVERIES.includes(patch.git.delivery as GitDelivery))
       throw new Error(`git.delivery must be one of ${GIT_DELIVERIES.join(", ")}`);
+    if (patch.defaultEffort !== undefined && !["", "low", "medium", "high"].includes(patch.defaultEffort)) throw new Error("defaultEffort must be low, medium, high or empty");
     const previousConfig = { ...this.config }, previousContinuity = this.continuity;
+    if (patch.defaultEffort !== undefined) this.config.defaultEffort = (patch.defaultEffort || undefined) as ProjectConfig["defaultEffort"];
     const changingContinuity = typeof patch.brain?.continuity === "boolean" && patch.brain.continuity !== Boolean(this.config.brain?.continuity);
     try {
       if (patch.loomTools !== undefined) this.config.loomTools = patch.loomTools;
@@ -996,6 +1014,7 @@ export class ProjectRuntime {
         for (const k of [
           "commitPerTurn",
           "branchPerTask",
+          "branchPerChat",
           "worktreePerAgent",
           "mergeOnHandoff",
         ] as const) {
@@ -1004,6 +1023,7 @@ export class ProjectRuntime {
             else delete g[k];
           }
         }
+        if (typeof patch.git.messageModel === "string") g.messageModel = patch.git.messageModel.trim().slice(0, 100) || undefined;
         if (patch.git.delivery !== undefined) {
           if (patch.git.delivery === "none") delete g.delivery;
           else g.delivery = patch.git.delivery as GitDelivery;
@@ -1047,12 +1067,15 @@ export class ProjectRuntime {
    * a blank that hides what's actually running.
    */
   settings(): {
+    defaultEffort: string;
     loomTools: boolean;
     brain: { extractor: "auto" | "off"; model: string; semantic: boolean; continuity: boolean };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
     git: {
       commitPerTurn: boolean;
+      branchPerChat: boolean;
+      messageModel?: string;
       branchPerTask: boolean;
       worktreePerAgent: boolean;
       mergeOnHandoff: boolean;
@@ -1062,6 +1085,7 @@ export class ProjectRuntime {
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
     return {
+      defaultEffort: this.config.defaultEffort ?? "",
       loomTools: Boolean(this.config.loomTools),
       brain: {
         continuity: Boolean(this.config.brain?.continuity),
@@ -1075,6 +1099,8 @@ export class ProjectRuntime {
       },
       git: {
         commitPerTurn: Boolean(this.config.git?.commitPerTurn),
+        branchPerChat: Boolean(this.config.git?.branchPerChat),
+        messageModel: this.config.git?.messageModel,
         branchPerTask: Boolean(this.config.git?.branchPerTask),
         worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
         mergeOnHandoff: Boolean(this.config.git?.mergeOnHandoff),
@@ -1129,6 +1155,7 @@ export class ProjectRuntime {
     }
     const id = explicit && !opts.series ? explicit : this.nextInstanceId(explicit || kind);
     if (!id) throw new Error("an agent needs an id");
+    if (opts.options !== undefined) validateAgentOptions(kind, opts.options);
     // A `model` agent with no model is an agent that refuses every turn, so
     // the options that make it work are settable as it's added rather than in
     // a second step nobody is told about.
@@ -1195,7 +1222,7 @@ export class ProjectRuntime {
     const existing = this.agentDirs.get(agentId);
     if (existing) return existing;
     const wt = worktreePath(this.info.dir, `agent-${agentId}`);
-    if (!fs.existsSync(wt)) {
+    if (!fs.existsSync(path.join(wt, ".git"))) {
       try {
         await gitAddWorktree(this.info.dir, {
           slug: `agent-${agentId}`,
@@ -1206,14 +1233,7 @@ export class ProjectRuntime {
         try {
           await gitAddWorktree(this.info.dir, { slug: `agent-${agentId}`, branch: `agent/${agentId}` });
         } catch {
-          logbook.warn(
-            "git",
-            `worktree for ${agentId} could not be created — falling back to the shared tree`,
-            String(err),
-            this.info.id,
-          );
-          this.agentDirs.set(agentId, this.info.dir);
-          return this.info.dir;
+          throw new Error(`worktree for ${agentId} could not be created: ${String(err)}`);
         }
       }
     }
@@ -1231,11 +1251,20 @@ export class ProjectRuntime {
   private spawnAgent(cfg: AgentConfig, prepared?: AnyAgent): AnyAgent {
     // The project id rides along so an adapter can file approvals ("always
     // ask") against the right project — see core/approvals.ts.
+    const isolated = this.config.git?.worktreePerAgent && tierForKind(cfg.kind) === "adapter";
+    const dir = isolated ? worktreePath(this.info.dir, `agent-${cfg.id}`) : this.agentDir(cfg.id);
     const agent = prepared ?? createAgent(
       { ...cfg, options: { ...this.policyOptions(cfg), loomProject: this.info.id } },
-      this.agentDir(cfg.id),
+      dir,
       true,
     );
+    if (isolated) {
+      const start = agent.start.bind(agent);
+      agent.start = async () => {
+        await this.ensureAgentWorktree(cfg.id);
+        await start();
+      };
+    }
     // What this turn has typed since its last finished message. A turn that
     // is stopped (or dies) mid-reply never sends that message, and the words
     // you watched arrive would vanish — so they're kept, marked partial.
@@ -1296,6 +1325,7 @@ export class ProjectRuntime {
         this.turns.busySince.delete(agent.id);
       }
       if (turnOver) this.openQuestions.delete(agent.id);
+      if (e.kind === "message" || turnOver) this.finishLiveText(agent.id);
       if (keepsPartial) {
         if (e.kind === "message" && !p.reasoning) typed = "";
         if (turnOver && typed.trim()) {
@@ -1363,6 +1393,27 @@ export class ProjectRuntime {
       void this.agentLifecycle.retire(agentId);
     }
     return { removed: agentId };
+  }
+
+  /** Validate the complete merged options before replacing a live adapter. */
+  setAgentOptions(agentId: string, patch: unknown): { id: string; saved: boolean } {
+    const cfg = this.config.agents.find(a => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("options must be an object");
+    for (const key of Object.keys(patch)) if (!["extraArgs", "fallbacks", "effort"].includes(key)) throw new Error(`option ${key} is not editable here`);
+    const options = { ...cfg.options, ...patch };
+    if (cfg.kind !== "model" && Array.isArray(options.fallbacks) && !options.fallbacks.length) delete options.fallbacks;
+    validateAgentOptions(cfg.kind, options);
+    if (options.effort && !["echo", "claude-code", "codex", "antigravity-cli"].includes(cfg.kind)) throw new Error(`${cfg.kind} does not support reasoning effort`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && (live.busy() || this.turns.busySince.has(agentId))) throw new Error("agent is mid-turn; wait before saving options");
+    const previous = cfg.options;
+    cfg.options = options;
+    try { writeProjectConfig(this.info.dir, this.config); }
+    catch (error) { cfg.options = previous; throw error; }
+    if (live) void this.agentLifecycle.retire(agentId);
+    if (cfg.enabled !== false) this.spawnAgent(cfg);
+    return { id: agentId, saved: true };
   }
 
   /**
@@ -1459,6 +1510,45 @@ export class ProjectRuntime {
     if (cfg.enabled !== false) this.spawnAgent(cfg);
     this.saveConfig();
     return cfg;
+  }
+
+  private permissionState(cfg: AgentConfig): { permissions: PermissionMode; permissionIndicator: string } {
+    try {
+      const options = this.policyOptions(cfg);
+      return { permissions: permissionFor(cfg.kind, options), permissionIndicator: permissionIndicator(cfg.kind, options) };
+    } catch {
+      return { permissions: permissionFor(cfg.kind, cfg.options), permissionIndicator: "Blocked by project safety" };
+    }
+  }
+
+  safetyPolicy(): SafetyPolicy {
+    return readSafety(this.info.id) ?? { ...structuredClone(SAFETY_PRESETS.normal), allow: [...(this.config.permissions?.allow ?? [])].filter(p => typeof p === "string") };
+  }
+
+  setSafetyPolicy(value: unknown): SafetyPolicy {
+    const policy = parseSafety(value);
+    const mode = presetMode[policy.preset];
+    if (this.orchestra.active() || this.crews.list().some(c => c.state.goal && !["completed", "failed", "stopped"].includes(c.state.goal.status))) throw new Error("Wait for active orchestra and crew goals to finish before changing safety policy.");
+    for (const cfg of this.config.agents.filter(a => a.enabled !== false)) {
+      const live = this.agents.get(cfg.id);
+      if (live && isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id))) throw new Error("Wait for active turns to finish before changing safety policy.");
+      const effective = this.teamPolicy ? capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, cappedPermission(this.teamPolicy, mode, false)) : mode;
+      const why = unsupportedReason(cfg.kind, effective);
+      if (why) throw new Error(why);
+      if (hasSafetyRules(policy) && !["model", "claude-code", "echo"].includes(cfg.kind)) throw new Error(`${cfg.kind} cannot enforce hard safety rules; disable it before enabling this policy.`);
+    }
+    if (this.teamPolicy && cappedPermission(this.teamPolicy, mode, true) !== mode) throw new Error("This preset exceeds the team permission ceiling.");
+    writeSafety(this.info.id, policy);
+    for (const cfg of this.config.agents) {
+      const { permissionMode: _nativeMode, sandbox: _sandbox, ...options } = cfg.options ?? {};
+      cfg.options = { ...options, permissions: mode };
+      const live = this.agents.get(cfg.id);
+      if (live) void this.agentLifecycle.retire(cfg.id);
+      if (cfg.enabled !== false) this.spawnAgent(cfg);
+    }
+    this.saveConfig();
+    this.log.append({ kind: "status", payload: { state: "safety_updated", preset: policy.preset } });
+    return policy;
   }
 
   /** Keep deferred file edits when an unrelated setting is saved through the UI. */
@@ -1783,6 +1873,9 @@ export class ProjectRuntime {
     // Queued prompts have not entered history; silently leaving them behind would lose work.
     if (this.queue.snapshot().items.some(item => (item.chat ?? MAIN_CHAT) === id))
       throw new ChatMoveError("busy: send or remove queued prompts before moving this chat");
+    if (this.orchestra.chatBusy(id)) {
+      throw new ChatMoveError("busy: finish or abort the Orchestra run before moving this chat");
+    }
     const busy = () => this.turns.sendingChats.has(id) || [...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id);
     if (!wait && busy()) throw new ChatMoveError("busy");
     this.movingChats.add(id);
@@ -2148,6 +2241,7 @@ export class ProjectRuntime {
       return next || undefined;
     };
     model = selection(model, "model", 200);
+    if (model) model = resolveModel(model);
     effort = selection(effort, "effort", 40);
     if (effort && !["claude-code", "codex", "antigravity-cli", "echo"].includes(agent.kind))
       throw new Error(`"${agentId}" doesn't support reasoning effort`);
@@ -2183,11 +2277,15 @@ export class ProjectRuntime {
     picks: Array<{ model: string; provider?: string }>,
     opts: { title?: string; briefing?: boolean } = {},
   ): Promise<Array<{ chat: string; model: string; provider: string; agentId: string }>> {
+    picks = picks.map(pick => splitQualifiedModel({ ...pick, model: resolveModel(pick.model) }));
+    for (const pick of picks) {
+      await enforceModelCap(pick.model);
+      await enforceModelCap(`${pick.provider ?? "openrouter"}/${pick.model}`);
+    }
     if (!picks.length) throw new Error("name at least one model");
     if (picks.length > MAX_FANOUT) {
       throw new Error(`that's ${picks.length} models — ${MAX_FANOUT} at a time is the limit`);
     }
-    const brief = opts.briefing === false ? "" : await this.brainBriefFor({ query: text, limit: 6 });
     const started: Array<{ chat: string; model: string; provider: string; agentId: string }> = [];
 
     for (const pick of picks) {
@@ -2197,7 +2295,7 @@ export class ProjectRuntime {
       const short = pick.model.split("/").pop() ?? pick.model;
       const chat = this.createChat(`${opts.title ?? "ask"} · ${short}`.slice(0, 60));
       const agentId = `ask:${pick.model}`;
-      this.log.append({
+      const prompt = this.log.append({
         kind: "message",
         chat: chat.id,
         payload: { text, author: "user", ask: { model: pick.model, provider } },
@@ -2214,8 +2312,10 @@ export class ProjectRuntime {
         offLive();
         offLog();
       };
+      const memory = opts.briefing === false ? undefined : await this.briefings.turnMemoryBrief(text, agentId, chat.id, prompt.id);
+      memory?.record();
       void agent
-        .send({ text, ...(brief ? { briefing: brief } : {}) })
+        .send({ text, ...(memory?.briefing ? { briefing: memory.briefing } : {}) })
         .catch((err) => {
           this.appendIfOpen({
             kind: "error",
@@ -2521,6 +2621,8 @@ export class ProjectRuntime {
 
   /** Put one file back as a checkpoint had it (see checkpoints.restoreFile). */
   async rewindFile(id: string, file: string): Promise<Awaited<ReturnType<typeof checkpoints.restoreFile>>> {
+    await this.turns.settleBranches();
+    if (this.continuity?.store.activeReceipts().length) throw new Error("finish or reconcile native writers before reverting files");
     const busy = [...this.turns.busySince.keys()];
     if (busy.length) {
       throw new Error(`${busy.join(", ")} ${busy.length === 1 ? "is" : "are"} mid-turn — stop the turn first, or the file changes underneath it`);
@@ -2540,7 +2642,8 @@ export class ProjectRuntime {
   private async commitTurn(agentId: string, files: string[]): Promise<void> { return this.turns.commitTurn(agentId, files); }
 
   private extractMemory(agentId: string, files: string[]): void {
-    if (!this.continuity && this.agent(agentId)?.kind !== "demo") this.briefings.extractMemory(agentId, files);
+    const agent = this.agents.get(agentId);
+    if (!this.continuity && agent && agent.kind !== "demo") this.briefings.extractMemory(agentId, files);
   }
 
   workingTree(): Promise<WorkingTree> {
@@ -2566,6 +2669,14 @@ export class ProjectRuntime {
         this.memoryUse = JSON.parse(fs.readFileSync(this.memoryUseFile(), "utf8")) as Record<string, { n: number; at: number }>;
       } catch {
         this.memoryUse = {};
+      }
+      // Dispatch records survive a crash before the usage sidecar's next flush.
+      for (const event of this.log.list({ kinds: ["status"] })) {
+        if (event.payload.state !== "memory_injection") continue;
+        for (const memory of (event.payload.memories as Array<{ id: string }> | undefined) ?? []) {
+          const prior = this.memoryUse[memory.id];
+          this.memoryUse[memory.id] = { n: Math.max(1, prior?.n ?? 0), at: Math.max(event.ts, prior?.at ?? 0) };
+        }
       }
     }
     return this.memoryUse;
@@ -2593,9 +2704,31 @@ export class ProjectRuntime {
 
   importMemories(): { imported: number; sources: string[] } { return this.briefings.importMemories(); }
 
+  private readonly modelCapNotices = new Set<string>();
+
+  private async warnModelCap(event: LoomEvent): Promise<void> {
+    if (event.kind !== "run_complete" && event.kind !== "error") return;
+    const p = event.payload;
+    if (typeof p.model !== "string") return;
+    const caps = readModelRouting().caps;
+    for (const model of [p.model, ...(typeof p.provider === "string" ? [`${p.provider}/${p.model}`] : [])]) {
+      if (!caps[resolveModel(model)]) continue;
+      const usage = await modelUsage(model);
+      if (!usage.warning) continue;
+      const key = `${usage.model}:${usage.resetsAt}:${usage.stopped ? 100 : 80}`;
+      if (this.modelCapNotices.has(key) || this.closed) continue;
+      this.modelCapNotices.add(key);
+      this.log.append({ kind: "status", agentId: event.agentId, chat: event.chat,
+        payload: { state: "model_cap_warning", model: usage.model, stopped: usage.stopped,
+          text: `${usage.model}: ${usage.stopped ? "daily cap reached; new turns are stopped" : "80% of daily cap used"}. Resets at ${new Date(usage.resetsAt).toISOString()}.` } });
+    }
+  }
+
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
+    if (event.kind === "file_edit" && event.agentId) this.turns.branchOnEdit(event.agentId);
     this.trackCost(event);
+    void this.warnModelCap(event).catch(() => {});
     this.shield(event);
     this.noteSignIn(event);
     const loop = this.loops.observe(event);
@@ -2876,24 +3009,39 @@ export class ProjectRuntime {
     const out: { agentId: string; chat: string; text: string; think: string }[] = [];
     for (const [agentId, s] of this.liveSoFar) {
       if (chat !== undefined && s.chat !== chat) continue;
-      if (s.text || s.think) out.push({ agentId, ...s });
+      if (s.text || s.think) out.push({ agentId, chat: s.chat, text: s.text, think: s.think });
     }
     return out;
   }
 
-  private liveSoFar = new Map<string, { chat: string; text: string; think: string }>();
+  private liveSoFar = new Map<string, { chat: string; text: string; think: string; textStream: RedactedStream; thinkStream: RedactedStream }>();
+
+  private finishLiveText(agentId: string): void {
+    const s = this.liveSoFar.get(agentId);
+    if (!s) return;
+    this.live.finish(agentId, s.chat);
+    for (const reasoning of [false, true]) {
+      const text = (reasoning ? s.thinkStream : s.textStream).finish();
+      if (!text) continue;
+      const off = reasoning ? s.think.length : s.text.length;
+      if (reasoning) s.think += text; else s.text += text;
+      for (const cb of this.streamListeners) { try { cb({ agentId, chat: s.chat, text, reasoning, off }); } catch { /* a viewer cannot break a turn */ } }
+    }
+  }
 
   private liveText(f: LiveText): void {
     if (this.closed) return;
     let s = this.liveSoFar.get(f.agentId);
-    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "" }));
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "", textStream: new RedactedStream(), thinkStream: new RedactedStream() }));
+    const text = (f.reasoning ? s.thinkStream : s.textStream).push(f.text);
+    if (!text) return;
     const off = f.reasoning ? s.think.length : s.text.length;
-    if (f.reasoning) s.think += f.text;
-    else s.text += f.text;
+    if (f.reasoning) s.think += text;
+    else s.text += text;
     // a runaway reply can't grow the buffer without bound
     if (s.text.length > 400_000) s.text = "";
     if (s.think.length > 400_000) s.think = "";
-    const framed: LiveText = { ...f, off };
+    const framed: LiveText = { ...f, text, off };
     for (const cb of this.streamListeners) {
       try {
         cb(framed);
@@ -3511,7 +3659,7 @@ export class ProjectRuntime {
       task,
       startedAt: Date.now(),
     });
-    this.log.append({
+    const prompt = this.log.append({
       kind: "subtask_started",
       agentId: opts.agentId,
       chat,
@@ -3520,7 +3668,8 @@ export class ProjectRuntime {
 
     await this.ensureStarted(opts.agentId);
     const mcp = child.capabilities.mcp ? writeLoomMcpSession(this.healthyMcps(), this.config.loomTools ? { project: this.info.id, api: this.apiUrl } : undefined) : null;
-    const brief = this.subtaskBriefing(parentAgentId, opts.agentId, task);
+    const memory = await this.briefings.turnMemoryBrief(task, opts.agentId, chat, prompt.id);
+    const brief = [this.subtaskBriefing(parentAgentId, opts.agentId, task), memory.briefing].filter(Boolean).join("\n\n");
     const input: SendInput = {
       text: task,
       chat,
@@ -3534,7 +3683,7 @@ export class ProjectRuntime {
     this.turns.turnChat.set(opts.agentId, chat);
     // an agent that's mid-turn finishes it first: a review sent to a busy reviewer used to fail at once (#310)
     void this.whenIdle(opts.agentId)
-      .then(() => { this.turns.turnChat.set(opts.agentId, chat); return child.send(input); })
+      .then(() => { this.turns.turnChat.set(opts.agentId, chat); memory.record(); return child.send(input); })
       .then(() => {
         this.subtasks.delete(id);
         // an adapter can report a failed turn as an error event and still resolve: that subtask
@@ -3579,10 +3728,10 @@ export class ProjectRuntime {
    * the baton (daemon/review.ts). The target is a file, free text, or —
    * by default — the uncommitted changes.
    */
-  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string; chat?: string }) {
+  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string; chat?: string; template?: string }) {
     this.reviews.check(input.agents); // who, before reading any diff
     const target = this.reviewTarget(input);
-    return this.reviews.start({ agents: input.agents, target, ...(input.focus ? { focus: input.focus } : {}), ...(input.chat ? { chat: input.chat } : {}) });
+    return this.reviews.start({ agents: input.agents, target, template: input.template, ...(input.focus ? { focus: input.focus } : {}), ...(input.chat ? { chat: input.chat } : {}) });
   }
 
   /** What a review reads: a file, free text, or the uncommitted changes. Throws when there's nothing to read. */
@@ -3665,6 +3814,8 @@ export class ProjectRuntime {
     // agent that will refuse every prompt it gets.
     this.enforceQuarantine(to);
     this.enforceBudget(to);
+    // Handoff writes memory before startup; prepare the checkout before either can touch it.
+    if (this.config.git?.worktreePerAgent) await this.ensureAgentWorktree(to);
     if ((opts.source ?? "user") === "user") this.routes.onManualHandoff();
 
     // Audit trail: snapshot the outgoing holder's working-tree state into the
@@ -3700,7 +3851,7 @@ export class ProjectRuntime {
       await this.ensureStarted(to);
       return { from, ...(merge ? { merge } : {}) };
     }
-    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds);
+    const prepared = await this.briefings.prepareHandoff(to, holder, mergeNote, bridgeIds, opts.chat);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
     await target.injectMemory(prepared.memory);
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
@@ -3851,10 +4002,10 @@ export class ProjectRuntime {
             holdsBaton: false,
             model,
             ...account,
-            permissions: permissionFor(cfg.kind, cfg.options),
+            ...this.permissionState(cfg),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             ...sampling(cfg),
-            ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
+            ...(isAvatarDataUrl(cfg.avatar) ? { avatar: cfg.avatar } : {}),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3880,11 +4031,11 @@ export class ProjectRuntime {
           ...(cfg.kind === "model" && !cfg.options?.write ? { readOnly: true } : {}),
           model,
           ...account,
-          permissions: permissionFor(cfg.kind, cfg.options),
+          ...this.permissionState(cfg),
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
           ...sampling(cfg),
-          ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
+          ...(isAvatarDataUrl(cfg.avatar) ? { avatar: cfg.avatar } : {}),
           ...(isNativeKind(cfg.kind) ? { context: this.nativeUsage.context(cfg.id), limits: this.nativeUsage.limitsFor(cfg.kind, cfg.id) } : {}),
           ...((f) => (f ? { forecast: f } : {}))(this.accounting.forecast(cfg.id)),
         };
@@ -3970,7 +4121,7 @@ export class ProjectRuntime {
         role: cfg.role,
         busy: Boolean(live && isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id))),
         since: this.turns.busySince.get(cfg.id) ?? null,
-        permissions: permissionFor(cfg.kind, cfg.options),
+        ...this.permissionState(cfg),
         holdsBaton: this.validHolder() === cfg.id,
         chat: chat ?? last?.chat ?? null,
         chatTitle: chats.get(chat ?? last?.chat ?? "") ?? null,
@@ -4045,14 +4196,20 @@ export class ProjectRuntime {
     const test = this.config.proof?.testCommand ?? detectTestCommand(dir);
     return {
       projectDir: dir,
+      safety: this.safetyPolicy(),
       readPaths: (this.config.readPaths ?? []).filter((p) => typeof p === "string" && p.trim()).map((p) => path.resolve(dir, p)),
       // the project's own test command always runs: an agent has to be able to check its work
-      allow: [...(this.config.permissions?.allow ?? []).filter((a) => typeof a === "string"), ...(test ? [test] : [])],
+      allow: [...this.safetyPolicy().allow, ...(test ? [test] : [])],
     };
   }
 
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
     const opts: Record<string, unknown> = { ...(resolveAgentAccount(cfg).options ?? {}) };
+    const safety = readSafety(this.info.id);
+    if (safety) {
+      if (hasSafetyRules(safety) && !["model", "claude-code", "echo"].includes(cfg.kind)) throw new Error(`${cfg.kind} cannot enforce this project's safety rules.`);
+      if (!opts.permissions) opts.permissions = presetMode[safety.preset];
+    }
     if (this.runnerMode) {
       // A runner is its own trust tier (D70): agents bypass inside the sandbox,
       // capped by the team's runners.permissions rather than the laptop ceiling.

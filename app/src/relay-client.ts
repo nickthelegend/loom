@@ -40,6 +40,16 @@ export interface StreamHandlers {
 
 const RETRY_MS = [1000, 3000, 8000, 16000];
 
+/** What an outstanding request settles with when the client is closed under it. */
+const closedResult = (): RelayResult => ({ status: 503, body: { error: "the Loom Cloud connection was closed" } });
+
+/** One reader of the live feed. The daemon gives a client one stream; several screens share it. */
+interface StreamReader {
+  auth: string;
+  project?: string;
+  handlers: StreamHandlers;
+}
+
 function randomId(): string {
   const b = new Uint8Array(12);
   globalThis.crypto.getRandomValues(b);
@@ -52,7 +62,8 @@ export class RelayClient {
   private decoder: RelayDecoder;
   private pending = new Map<string, { resolve: (r: RelayResult) => void; timer: ReturnType<typeof setTimeout> }>();
   private pongs = new Map<number, (ms: number) => void>();
-  private stream: { auth: string; project?: string; handlers: StreamHandlers; attempt: number } | null = null;
+  private stream: { auth: string; project?: string; attempt: number } | null = null;
+  private readers: StreamReader[] = [];
   private streamOpen = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -89,10 +100,11 @@ export class RelayClient {
       this.pongs.delete(msg.ts);
       cb?.(Date.now() - msg.ts);
     } else if (msg.t === "evs" && msg.to === this.id) {
-      for (const f of msg.frames) this.stream?.handlers.onFrame(f);
+      const readers = this.served();
+      for (const f of msg.frames) for (const r of readers) r.handlers.onFrame(f);
     } else if (msg.t === "stream" && msg.to === this.id) {
       this.streamOpen = msg.open;
-      this.stream?.handlers.onState?.(msg.open, msg.code);
+      for (const r of this.served()) r.handlers.onState?.(msg.open, msg.code);
       if (msg.open && this.stream) this.stream.attempt = 0;
       // 4401 = the token was refused: retrying would only be refused again.
       if (!msg.open && this.stream && msg.code !== 4401 && !this.closed) this.scheduleResubscribe();
@@ -102,6 +114,7 @@ export class RelayClient {
   /** An HTTP call to the daemon, through the relay. */
   request(method: string, path: string, opts: { auth?: string; body?: unknown; timeoutMs?: number } = {}): Promise<RelayResult> {
     const id = randomId();
+    if (this.closed) return Promise.resolve(closedResult());
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -141,10 +154,45 @@ export class RelayClient {
     });
   }
 
-  /** Open the live event feed (the /ws frames). Replaces any previous one. */
-  openStream(auth: string, handlers: StreamHandlers, project?: string): void {
-    this.stream = { auth, handlers, attempt: 0, ...(project ? { project } : {}) };
+  /**
+   * Open the live event feed (the /ws frames) and return its closer. Readers of the same feed
+   * share the one subscription — the chat and the Terminal both read the project's — and closing
+   * one leaves the others reading: it used to replace the chat's handler, then unsubscribe it.
+   * A reader of another feed takes the subscription over; when it closes, the last one left
+   * gets its feed back.
+   */
+  openStream(auth: string, handlers: StreamHandlers, project?: string): () => void {
+    const reader: StreamReader = { auth, handlers, ...(project ? { project } : {}) };
+    this.readers.push(reader);
+    if (this.stream && this.stream.auth === auth && this.stream.project === project) {
+      if (this.streamOpen) handlers.onState?.(true);
+    } else {
+      this.follow(reader);
+    }
+    return () => this.closeReader(reader);
+  }
+
+  /** The readers the current subscription feeds. */
+  private served(): StreamReader[] {
+    const s = this.stream;
+    return s ? this.readers.filter((r) => r.auth === s.auth && r.project === s.project) : [];
+  }
+
+  /** Subscribe to this reader's feed. */
+  private follow(r: StreamReader): void {
+    this.stream = { auth: r.auth, attempt: 0, ...(r.project ? { project: r.project } : {}) };
+    this.streamOpen = false;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     void this.resubscribe();
+  }
+
+  private closeReader(r: StreamReader): void {
+    const at = this.readers.indexOf(r);
+    if (at < 0) return;
+    this.readers.splice(at, 1);
+    if (!this.readers.length) return this.closeStream();
+    if (!this.served().length) this.follow(this.readers[this.readers.length - 1]!);
   }
 
   /** Force a fresh stream — call when the app returns to the foreground. */
@@ -156,10 +204,13 @@ export class RelayClient {
     return this.streamOpen;
   }
 
+  /** Close the feed for every reader. */
   closeStream(): void {
+    this.readers = [];
     this.stream = null;
     this.streamOpen = false;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     void this.send({ t: "unsub", from: this.id }).catch(() => {});
   }
 
@@ -186,8 +237,13 @@ export class RelayClient {
   async close(): Promise<void> {
     this.closed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    for (const p of this.pending.values()) clearTimeout(p.timer);
+    // Settle what's outstanding: a caller's catch/finally (and its busy spinner) waits on it.
+    const pending = [...this.pending.values()];
     this.pending.clear();
+    for (const p of pending) {
+      clearTimeout(p.timer);
+      p.resolve(closedResult());
+    }
     await this.transport.close();
   }
 }

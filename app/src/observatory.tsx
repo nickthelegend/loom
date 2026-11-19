@@ -1,3 +1,4 @@
+import { diffSummary } from "./git-review-model";
 /**
  * The Observatory, natively.
  *
@@ -535,6 +536,7 @@ function MetricsView(props: {
                     <Text style={{ color: T.text, fontSize: 13, flex: 1 }} numberOfLines={1}>{a.agentId}</Text>
                     <Text style={{ color: T.dim, fontSize: 11.5, fontFamily: T.mono }}>{a.turns} · {Math.round(a.successRate * 100)}%</Text>
                     <Text style={{ color: tint, fontSize: 13, fontWeight: "700", minWidth: 44, textAlign: "right" }}>{checked ? `${t!.verified}/${checked}` : "—"}</Text>
+                    {a.diff ? <Text style={{ color: T.dim, fontSize: 11 }}>{diffSummary(a.diff)}</Text> : null}
                     {extra ? <Text style={{ color: T.faint, fontSize: 11 }}>{extra}</Text> : null}
                   </View>
                 );

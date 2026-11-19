@@ -1,3 +1,4 @@
+import { registerWalkthroughEngine } from "./help/tours.js";
 /** Browser navigation module. See README.md for ownership and startup. */
 import { signInGate } from './signin.js';
 import { applyMode,setDevMode } from './mode.js';
@@ -9,7 +10,8 @@ import { isDesktop,renderShell } from './shell.js';
 import { root,state } from './state.js';
 import { applyTheme } from './theme.js';
 import { ICONS } from './icons.js';
-import { KMOD } from './permissions.js';
+import { COMMANDS } from './commands.js';
+import { shortcutLabel,shortcutFor } from './shortcuts.js';
 import { esc } from './format.js';
 import { toast } from './notifications.js';
 import { isGuest,renderGuest } from './share-live.js';
@@ -67,34 +69,12 @@ import { isGuest,renderGuest } from './share-live.js';
   /** Every key Loom listens for, on one sheet (press ?). */
   function openShortcuts(){
     if (document.querySelector(".scrim")) return;
-    var K = KMOD;
     var rows = [
-      ["Anywhere", [
-        [K + "K", "Search everything — files, chats, commands"],
-        [K + "F", "Find in this chat"],
-        [K + ".", "Focus mode: hide the sidebar and panel"],
-        [K + "D / " + K + "⇧D", "Split: another view beside / below (drag a chat onto a pane's edge)"],
-        [K + "⇧V", "Prompts you’ve saved"],
-        ["Ctrl+\u0060", "Show or hide the terminal"],
-        ["N", "New task"], ["P", "New project"], ["[ / ]", "Your previous / next prompt in this chat"],
-        ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"],
-      ]],
-      ["In the composer", [
-        ["Enter", "Send"], ["⇧Enter", "New line"],
-        ["↑ / ↓", "Walk through what you sent here (empty box)"],
-        ["@", "Mention a file"], ["/", "Actions"],
-      ]],
+      ["Commands · this device", COMMANDS.filter(function(c){ return !!shortcutFor(c); }).map(function(c){ return [shortcutLabel(c), c.label]; })],
+      ["In the composer", [["Enter", "Send"], ["⇧Enter", "New line"], ["↑ / ↓", "Walk through what you sent here (empty box)"], ["@", "Mention a file"], ["/", "Actions"]]],
+      ["Navigation", [["N / P", "New task / New project (outside text fields)"], ["[ / ]", "Previous / next prompt"], ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"]]],
       ["Find", [["Enter / ⇧Enter", "Previous / next match"]]],
     ];
-    // The desktop app's menu bar adds its own; the browser keeps those keys for itself.
-    if (window.loomNative) rows.splice(1, 0, ["Desktop app", [
-      [K + "N", "New chat"], [K + "⇧N", "New task"], [K + "O", "Add a project"],
-      [K + "1 … " + K + "7", "Chat · Orchestra · Crew · Agents · Board · Memory · Insights"],
-      [K + "B", "Show or hide the sidebar"], ["⌥" + K + "B", "Show or hide the right panel"],
-      [K + "⇧A", "Choose the agent"], [K + "⇧M", "Plan mode"], [K + "⇧.", "Interrupt"],
-      [K + "⇧E", "Export this chat"], ["⌥" + K + "↑ / ↓", "Previous / next project"], [K + "⇧[ / ]", "Previous / next chat"],
-      [K + "⇧U", "Invite a teammate"], [K + "/", "This sheet"],
-    ]]);
     rows.push(["Right-click", [["Messages", "Copy, retry, quote, branch, save as a prompt"], ["Code blocks", "Copy code, put it in the composer"],
       ["Files", "Open, mention in chat, copy path" + (window.loomNative ? ", reveal" : "")], ["Projects & chats", "Settings, rename, pin, archive, export"]]]);
     var scrim = document.createElement("div");
@@ -187,18 +167,20 @@ import { isGuest,renderGuest } from './share-live.js';
       return sessionStorage.getItem("loomDemoTour") === "1";
     } catch (e) { return false; }
   }
-  function startDemoTour(waited){
+  function startDemoTour(waited, options){
+    options = options || {};
+    var steps = options.steps || DEMO_TOUR, offset = options.offset || 0;
     // Something modal is up (a first-run dialog, a confirm): wait for it rather than lose the tour.
-    if ((document.querySelector(".scrim") || document.getElementById("tourcard")) && (waited || 0) < 20) {
-      return void setTimeout(function(){ startDemoTour((waited || 0) + 1); }, 500);
+    if (((!options.steps && document.querySelector(".scrim")) || document.getElementById("tourcard")) && (waited || 0) < 20) {
+      return void setTimeout(function(){ startDemoTour((waited || 0) + 1, options); }, 500);
     }
-    try {
+    if (!options.steps) try {
       sessionStorage.removeItem("loomDemoTour");
       // drop ?tour=1 so a reload doesn't start it again
       if (/[?&]tour=1/.test(location.search)) history.replaceState(null, "", location.pathname + location.hash);
       localStorage.setItem("loomTourDone", "1");
     } catch (e) {}
-    if (document.querySelector(".scrim") || document.getElementById("tourcard")) return;
+    if ((!options.steps && document.querySelector(".scrim")) || document.getElementById("tourcard")) return;
     var i = 0;
     var shade = document.createElement("div"); shade.className = "tourshade"; shade.id = "tourshade";
     var card = document.createElement("div"); card.className = "tourcard demotour"; card.id = "tourcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-live", "polite");
@@ -211,14 +193,14 @@ import { isGuest,renderGuest } from './share-live.js';
       for (var n = el; n && n.nodeType === 1; n = n.parentNode) if (getComputedStyle(n).display === "none") return false;
       return true;
     }
-    function target(){ var el = document.querySelector(DEMO_TOUR[i].sel); return shown(el) ? el : null; }
+    function target(){ var el = document.querySelector(steps[i].sel); return shown(el) ? el : null; }
     // the page keeps moving under the card (replies stream in, the composer grows): follow it
     var follow = setInterval(function(){ if (!card.isConnected) return clearInterval(follow); place(); }, 400);
     function done(){ clearInterval(follow); shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place); }
     function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
     function next(){
-      do { i++; } while (i < DEMO_TOUR.length && !target());
-      if (i >= DEMO_TOUR.length) done(); else show();
+      do { i++; } while (i < steps.length && !target());
+      if (i >= steps.length) done(); else show();
     }
     function place(){
       var el = target(); if (!el) return;
@@ -264,9 +246,9 @@ import { isGuest,renderGuest } from './share-live.js';
       next();
     }
     function show(){
-      var s = DEMO_TOUR[i];
+      var s = steps[i];
       if (s.prefill && !s.act) type(s.prefill);
-      card.innerHTML = '<div class="tourstep">Try Loom \u00b7 ' + (i + 1) + " of " + DEMO_TOUR.length + "</div>" +
+      card.innerHTML = '<div class="tourstep">' + esc(options.label || "Try Loom") + ' \u00b7 ' + (offset + i + 1) + " of " + (offset + steps.length) + "</div>" +
         '<div class="tourt">' + esc(s.title) + '</div><div class="tourb">' + esc(s.body) + "</div>" +
         (s.prefill ? '<div class="tourpre"><span>\u201c' + esc(s.prefill) + '\u201d</span></div>' : "") +
         '<div class="toura"><button type="button" class="btn xs ghost" id="tourskip">' + (s.last ? "Finish" : "End tour") + "</button>" +
@@ -288,6 +270,7 @@ import { isGuest,renderGuest } from './share-live.js';
   state.startDemoTour = startDemoTour;
   state.demoTourWanted = demoTourWanted;
   state.startTour = startTour;
+  registerWalkthroughEngine(function(options) { startDemoTour(0, options); });
   state.openShortcuts = openShortcuts;
   function setFocusMode(on){
     document.documentElement.classList.toggle("focusmode", on);
