@@ -94,6 +94,7 @@ import { registerIntegrationsProjectRoutes } from './routes/integrations-project
 import { registerIntegrationsRoutes } from './routes/integrations.js';
 import { registerLogsRoutes } from './routes/logs.js';
 import { registerMessagesRoutes } from './routes/messages.js';
+import { registerInsightsR4 } from './routes/insights-r4.js';
 import { registerObservabilityRoutes } from './routes/observability.js';
 import { registerScoreboardRoutes } from "./routes/scoreboard.js";
 import { registerOrchestraRoutes } from './routes/orchestra.js';
@@ -619,6 +620,7 @@ export class LoomDaemon {
     registerClientsRoutes(app, ctx);
     this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
+    registerInsightsR4(app, withRuntime, ctx, () => this.server);
     registerModelRoutingRoutes(app, withRuntime);
     registerHelpRoutes(app, ctx, withRuntime);
     void mondayScoreboard().catch(() => {});
