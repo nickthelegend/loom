@@ -151,19 +151,23 @@ export async function sendExpoPush(tokens: string[], message: PushMessage, group
     const category = String(message.data?.category ?? "updates");
     const project = typeof message.data?.projectId === "string" ? message.data.projectId : undefined;
     const chat = String(message.data?.chat ?? "main");
-    const eligible = matches.find(c => {
+    const eligibleAll = matches.filter(c => {
       if (c.guest && (!project || c.guest.project !== project || c.guest.chat !== chat || c.guest.expiresAt <= Date.now())) return false;
       if (project && c.projects?.length && !c.projects.includes(project)) return false;
       if (message.data?.category && c.pushKinds && !c.pushKinds.includes(category)) return false;
       return true;
     });
-    const chosen = eligible && permitsPush(preferences(eligible.id), category, project, chat) ? eligible : undefined;
+    // One phone can sit behind several pairings (re-paired, old one not revoked). Quiet hours and mutes on any of
+    // them hold the push: picking "the newest" is ambiguous when two were paired in the same millisecond.
+    const eligible = eligibleAll[0];
+    const permitted = () => eligibleAll.every(c => permitsPush(preferences(c.id), category, project, chat));
+    const chosen = eligible && permitted() ? eligible : undefined;
     const approvalId = message.data?.approvalId;
     if (eligible && !chosen && category === "approvals" && project && typeof approvalId === "string") {
       recordHeldApproval(project, approvalId);
       heldApprovals.hold(`${project}:${approvalId}:${token}`, {
         pending: () => approvalPending(project, approvalId) && (readDaemonConfig()?.clients ?? []).some(c => c.id === eligible.id && c.pushToken === token),
-        permitted: () => permitsPush(preferences(eligible.id), category, project, chat),
+        permitted,
         send: () => sendExpoPush([token], message, groupedAndroid),
       });
     }

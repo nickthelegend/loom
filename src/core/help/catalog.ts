@@ -4,6 +4,7 @@ import { VERSION } from "../../version.js";
 const guides = new URL("../../../docs/help/", import.meta.url);
 export function helpGuides(query = "") {
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!fs.existsSync(guides)) return []; // an install without docs/ has no guides, not a broken Help
   return fs.readdirSync(guides).filter(f => /^[a-z0-9-]+\.md$/.test(f)).sort().map(file => {
     const body = fs.readFileSync(new URL(file, guides), "utf8");
     return { id: file.slice(0, -3), title: body.match(/^# (.+)/)?.[1] ?? file, body };
@@ -31,7 +32,8 @@ export const featureTours = [
 
 /** Match the running release, never advertise Unreleased work as a shipped update. */
 export function whatsNew(version = VERSION) {
-  const changelog = fs.readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf8");
+  const file = new URL("../../../CHANGELOG.md", import.meta.url);
+  const changelog = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""; // no changelog shipped: nothing to show
   const section = changelog.split(/^## /m).find(s => s.startsWith(`[${version}]`));
   const highlights = (section ?? "").split("\n").filter(l => l.startsWith("- ")).slice(0, 8).map(line => {
     const text = line.slice(2).replace(/\*\*/g, "");

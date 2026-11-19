@@ -25,7 +25,10 @@ for (const [name, description] of [
   ["static", "An accessible static site with a content check"],
   ["python", "A dependency-free Python module and unit tests"],
 ]) {
+  // These ship as files beside dist/; an install without them (a bare dist/, the runner image) just offers fewer
+  // starters instead of failing to load
   const dir = fileURLToPath(new URL(`../../templates/${name}/`, import.meta.url));
+  if (!fs.existsSync(dir)) continue;
   starters.push({ name: name!, description: description!, files: Object.fromEntries(fs.readdirSync(dir).map(f => [f, fs.readFileSync(path.join(dir, f), "utf8")])) });
 }
 
