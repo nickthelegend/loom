@@ -1,5 +1,6 @@
 import { registerProjectHelp } from "./help/settings.js";
 import { renderAgenticTools } from "./agentic-r4.js";
+import { mountAppearance } from "./workspace-r4/appearance.js";
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -434,6 +435,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
         };
       });
       bindSeg("theme", function(v){ setThemePref(v); });
+      mountAppearance(pane);
       var pp = document.getElementById("projprefs");
       if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
       pp.innerHTML = LOADER;

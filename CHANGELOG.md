@@ -94,6 +94,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI Orchestra and Approvals tabs and palette entries show runs, live tasks and pending decisions, with task retry and allow/deny commands (#457).
 - `loom wait <chat|run>` waits for a chat to become idle or a run to settle, with outcome exit codes, timeout and one-object JSON output (#457).
 
+- **Desktop tray (#459).** Running-turn count, needs-you and running-chat menus, chat navigation and a quick-send window; Preferences offers “Keep Loom running in the tray when the window closes” (opt-in on Windows/Linux); a missing tray host falls back to quitting. Tray refreshes run every 10 seconds.
+- **Mission control (#459).** A live cross-project chat grid with last line, elapsed time, reported cost and inline Stop/Steer, available from Home, the palette, `GET /api/mission` and `loom mission`. Orchestra/Crew controls target their own instances and label when Stop ends the run or crew. Event-driven projections avoid per-chat history scans; windows and panes share 10-second polls.
+- **Needs-you inbox (#459).** Pending approvals, agent questions, failed turns and paused runs in one panel with j/k and a/d triage, sidebar count, `GET /api/inbox` and `loom inbox`; scoped devices see only their projects. Loaded logs use bounded, incremental projections, dormant paused metadata is cached without opening event logs, and later turns clear resolved failures.
+- **Named layouts (#459).** Split persistence already existed; named arrangements now retain each pane's project/chat and reopen from the palette or desktop Window menu, with owner-device persistence and per-window active arrangements.
+- **Chat pop-outs (#459).** Browser and desktop windows open a chat with minimal chrome, independent navigation and the existing live event stream shared with the main window.
+- **Project notes (#459).** Daemon-stored Markdown notes in a right-side pad, selection-to-chat sending, `GET/PUT /api/projects/:id/notes`, `loom notes`, and phone read/edit views; revision checks prevent overwriting edits from another device.
+- **Custom colour themes (#459).** Extends existing light/dark and accent presets with four bundled themes, validated JSON import/export and live previews with Apply/Cancel in Preferences → Appearance.
+- **Project organisation (#459).** Chat pinning/folders already existed; projects now support pins, named collapsible sections and drag ordering, saved for the owner and refreshed across windows.
+- **Recent-chat switcher (#459).** Ctrl+Tab / Ctrl+Shift+Tab preview recently used chats across projects and open the selection on release, preserving independent split-pane selections.
+- **Files from this chat (#459).** A panel and `loom chat-files` index received attachments and produced images/screenshots, with authenticated open/download, copy-path and jump-to-message actions, confined to existing files inside the source project, with code-reference fragments and line numbers normalized.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

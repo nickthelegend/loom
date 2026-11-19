@@ -18,7 +18,7 @@ import type { ProjectRuntime } from "./runtime.js";
 
 type Reader = Pick<EventLog, "list">;
 
-async function withLog<T>(info: { id: string; dir: string }, live: Map<string, ProjectRuntime>, fn: (log: Reader, chats: (id: string) => string) => T): Promise<T | null> {
+export async function withLog<T>(info: { id: string; dir: string }, live: Map<string, ProjectRuntime>, fn: (log: Reader, chats: (id: string) => string) => T): Promise<T | null> {
   const rt = live.get(info.id);
   if (rt) return fn(rt.log, (id) => rt.chats().find((c) => c.id === id)?.title ?? id);
   let log: EventLog | null = null;

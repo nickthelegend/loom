@@ -2,6 +2,7 @@ import { R4ProjectTools } from "./r4-onboard";
 import { R4CostMenu } from "./r4-cost";
 import { R4Inbox } from "./r4-review";
 import { R4ChatAnnotations } from "./r4-teams";
+import { ProjectNotesButton } from "./r4-workspace";
 import { ModelEstimateLine, ModelRoutingSheet } from "./model-routing";
 import { ProjectTools } from "./cli-tools";
 import { GitReviewPanel } from "./git-review";
@@ -1529,6 +1530,7 @@ export function ProjectScreen(props: {
         </TouchableOpacity>
         <R4CostMenu creds={creds} projectId={project.id} chat={chatId} />
         <ProjectTools creds={creds} projectId={project.id} chat={chatId} />
+        <ProjectNotesButton creds={creds} projectId={project.id} />
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (

@@ -1,3 +1,4 @@
+import { workspaceCommands,loadLayoutCommands } from "./workspace-r4/index.js";
 /** Browser palette module. See README.md for ownership and startup. */
 import { shortcutLabel } from './shortcuts.js';
 import { agentLabel,brandMark } from './agents.js';
@@ -60,7 +61,8 @@ import { openScoreboard } from './project/scoreboard.js';
     }
     function shq(s){ return "'" + String(s).replace(/'/g, "'\\''") + "'"; } // POSIX single-quote
 
-    var CMDS = buildCommands();
+    var CMDS = buildCommands().concat(workspaceCommands());
+    loadLayoutCommands(function(items){ if (scrim.isConnected) { CMDS = CMDS.concat(items); draw(); } });
     /**
      * Every command the menu bar has, by the same names (commands.js), with
      * its shortcut — plus the project-scoped panels and a jump to any project.

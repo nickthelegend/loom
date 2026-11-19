@@ -1,5 +1,6 @@
 import { OnboardClient } from "../core/help/client.js";
 import { daemonApi } from "../core/agentic-r4/client.js";
+import { workspaceClient } from "../core/workspace-r4/client.js";
 /**
  * Thin daemon client used by every surface (CLI now, app later).
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
@@ -102,6 +103,7 @@ export class DaemonClient {
   readonly onboard = new OnboardClient((method, route, body) => this.request(method, route, body));
   r4Orchestra<T>(id: string, route: string, body?: Record<string, unknown>): Promise<T> { return this.request(body === undefined ? "GET" : "POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${route}`, body); }
   teamsR4(id: string, route: string, body?: Record<string, unknown>): Promise<Record<string, any>> { return this.request(body ? "POST" : "GET", `/api/projects/${encodeURIComponent(id)}/teams-r4${route}`, body); }
+  readonly workspace = workspaceClient(this.request.bind(this));
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

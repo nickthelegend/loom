@@ -1,3 +1,5 @@
+import { recordChat } from "./workspace-r4/workspace.js";
+import { mountWorkspaceShell,mountHomeWorkspace } from "./workspace-r4/index.js";
 /** Browser shell module. See README.md for ownership and startup. */
 import { publishSelection,saveTab } from './session.js';
 import { devMode } from './mode.js';
@@ -177,10 +179,12 @@ import { openTriggers } from './triggers-ui.js';
     };
     var dmain = document.getElementById("dmain");
     var homeView = null;
+    mountWorkspaceShell();
     function drawEmpty(){
       // Home (#403): Get started, the demo, Loom for agents, your projects, who's winning
       if (homeView && dmain.querySelector(".home")) { homeView.refreshProjects(); return; }
       homeView = renderHome(dmain, { openProject: function(id){ select(id); } });
+      mountHomeWorkspace(dmain);
     }
     /**
      * Search the open project's conversations.
@@ -1078,6 +1082,7 @@ import { openTriggers } from './triggers-ui.js';
     }
     function setChat(pidC, cid){
       liveChats[pidC] = cid;
+      recordChat(pidC, cid);
       saveTab(pidC, "thread");
       publishSelection(pidC, cid);
       try { localStorage.setItem("loomChat:" + pidC, cid); } catch (e) {}
