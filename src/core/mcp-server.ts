@@ -3,9 +3,10 @@
  * (https://github.com/pingdotgg/t3code, MIT). No T3 implementation is copied.
  * Both transports use the caller's DaemonClient, preserving the REST auth wall.
  */
+import { listResources, readResource, listPrompts, getPrompt } from "./agentic-r4/mcp-content.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { DaemonClient } from "../daemon/client.js";
+import { type DaemonClient, DaemonError } from "../daemon/client.js";
 import { VERSION } from "../version.js";
 import { turnOutcome } from "./turn-wait.js";
 
@@ -95,6 +96,19 @@ const tools: Tool[] = [
   }, "add", (c, a) => c.report(a.project, a.run, a.task, { kind: a.kind, text: a.text })),
   tool("board", "List board tasks, or add a task (requires title).", { ...project, action: z.enum(["list", "add"]), title: text.optional(), agent: id.optional(), column: z.enum(["working", "needs-you", "in-review", "ready"]).optional() }, "add",
     (c, a) => { if (a.action === "list") return c.listTasks(a.project); if (!a.title) throw new Error("title is required to add a task"); return c.createTask(a.project, a.title, { agent: a.agent, column: a.column }); }),
+  tool("queue", "Read the project prompt queue, or enqueue a prompt.", { ...project, text: text.optional(), chat: id.optional(), agent: id.optional() }, "add",
+    (c, a) => a.text ? c.queueAdd(a.project, { text: a.text, chat: a.chat, target: a.agent }) : c.queue(a.project)),
+  tool("approvals", "List pending project approvals.", project, "read", (c, a) => c.api("GET", `/api/projects/${encodeURIComponent(a.project)}/approvals`)),
+  tool("orchestra_retry", "Retry a failed, blocked or stalled Orchestra task on an agent/model.", { ...project, run: id, task: id, agent: id }, "act",
+    (c, a) => c.api("POST", `/api/projects/${encodeURIComponent(a.project)}/r4/retry`, { run: a.run, task: a.task, agent: a.agent })),
+  tool("review", "Start a read-only review, or list reviews when agents is omitted.", { ...project, agents: z.array(id).min(1).optional(), text: text.optional(), file: id.optional(), focus: text.optional() }, "add",
+    (c, a) => a.agents ? c.startReview(a.project, { agents: a.agents, text: a.text, file: a.file, focus: a.focus }) : c.reviews(a.project)),
+  tool("costs", "Read project cost and token accounting.", project, "read", (c, a) => c.costs(a.project)),
+  tool("triggers", "List project triggers and their recent runs.", project, "read", (c, a) => c.triggers(a.project)),
+  tool("consult", "Ask another agent/model a read-only question during an active turn. No nested consults; usage belongs to the asking turn.",
+    { ...project, chat: id.optional(), agent: id.optional(), model: id.optional(), question: text }, "read",
+    (c, a) => c.api("POST", `/api/projects/${encodeURIComponent(a.project)}/r4/consult`, a, 125_000)),
+
 ];
 
 export function mcpTools() {
@@ -115,21 +129,59 @@ export async function mcpRequest(client: DaemonClient, input: unknown, instructi
   const id = input.id as string | number, params = input.params ?? {};
   const result = (value: unknown) => ({ jsonrpc: "2.0", id, result: value });
   switch (input.method) {
-    case "initialize": return result({ protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "loom", version: VERSION }, ...(instructions ? { instructions } : {}) });
+    case "initialize": return result({ protocolVersion: MCP_PROTOCOL, capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: "loom", version: VERSION }, ...(instructions ? { instructions } : {}) });
     case "ping": return result({});
-    case "tools/list": return result({ tools: mcpTools() });
+    case "resources/list":
+    case "resources/read":
+    case "prompts/list":
+    case "prompts/get": {
+      try {
+        const p = params as Record<string, unknown>;
+        return result(input.method === "resources/list" ? await listResources(client)
+          : input.method === "resources/read" ? await readResource(client, p.uri)
+          : input.method === "prompts/list" ? await listPrompts(client) : await getPrompt(client, p.name, p.arguments));
+      } catch (error) {
+        if (input.method === "prompts/list" && error instanceof DaemonError && error.status === 403) return result({ prompts: [] });
+        return rpcError(id, -32602, error instanceof Error ? error.message : String(error));
+      }
+    }
+    case "tools/list": {
+      try {
+        const { projects } = await client.listProjects();
+        const settings = await Promise.all(projects.map(p => client.api<{ disabledTools: string[] }>("GET", `/api/projects/${encodeURIComponent(p.id)}/r4/tools`)));
+        return result({ tools: mcpTools().filter(t => !settings.length || settings.some(s => !s.disabledTools.includes(t.name))) });
+      } catch (error) { return rpcError(id, -32603, String(error)); }
+    }
     case "tools/call": {
       const p = params as Record<string, unknown>;
       const t = tools.find(t => t.name === p.name);
       if (!t) return rpcError(id, -32602, "Unknown tool");
       const parsed = t.schema.safeParse(p.arguments ?? {});
       if (!parsed.success) return rpcError(id, -32602, parsed.error.message);
+      const args = parsed.data as Record<string, unknown>;
+      let target = typeof args.project === "string" ? args.project : undefined;
+      const started = Date.now();
+      let failure: string | undefined;
       try {
+        if (!target) {
+          const { projects } = await client.listProjects();
+          if (projects.length) {
+            const policies = await Promise.all(projects.map(async p => ({ id: p.id, settings: await client.api<{ disabledTools: string[] }>("GET", `/api/projects/${encodeURIComponent(p.id)}/r4/tools`) })));
+            target = (policies.find(p => !p.settings.disabledTools.includes(t.name)) ?? policies[0])!.id;
+          }
+        }
+        if (target) {
+          const settings = await client.api<{ disabledTools: string[] }>("GET", `/api/projects/${encodeURIComponent(target)}/r4/tools`);
+          if (settings.disabledTools.includes(t.name)) throw new Error(`${t.name} is disabled for this project`);
+        }
         const data = await t.call(client, parsed.data);
         return result({ content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        failure = message;
         return result({ isError: true, content: [{ type: "text", text: message }], structuredContent: { error: message } });
+      } finally {
+        if (target) await client.api("POST", `/api/projects/${encodeURIComponent(target)}/r4/log`, { tool: t.name, durationMs: Date.now() - started, ok: !failure, ...(failure ? { error: failure.slice(0, 4000) } : {}) }).catch(() => {});
       }
     }
     default: return rpcError(id, -32601, "Method not found");

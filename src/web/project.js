@@ -1,3 +1,4 @@
+import { saveChatSkillItem } from "./agentic-r4.js";
 /** Browser project module. See README.md for ownership and startup. */
 import { savedTab,saveTab } from './session.js';
 import { createChatComposer } from "./project/chat-composer.js";
@@ -1566,6 +1567,7 @@ import { openMenu } from './menus.js';
         copyText(mine ? decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl) : bubbleText(msgEl)); toast("copied");
       } });
       items = items.concat(chatComposer.messageItems(id));
+      items.push(saveChatSkillItem(pid, chatId));
       if (mine) {
         var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
         items.push({ label: "Edit as a new version", icon: ICONS.pencil, hint: "\u2039 \u203a to switch", run: function(){ if (!branches.editAsBranch(msgEl, raw)) composeFor(raw, null, false); } });

@@ -1,3 +1,4 @@
+import { loadAgenticView, agenticAction } from "./tui-r4.js";
 /**
  * The Loom TUI — the default face of `loom`. A tabbed, full-screen workspace
  * over every agent in the project:
@@ -83,6 +84,7 @@ export function App({ client, initial }: AppProps) {
   const [brain, setBrain] = useState<{ memories: Memory[]; stats: { total: number; byKind: Record<string, number> } } | null>(null);
   const [scoreboard, setScoreboard] = useState<import("../core/scoreboard.js").Scoreboard | null>(null);
   const [diff, setDiff] = useState<TreeShape | null>(null);
+  const [agenticLines, setAgenticLines] = useState<string[]>([]);
   const [viewErr, setViewErr] = useState<string | null>(null);
   const [scroll, setScroll] = useState(0);
 
@@ -152,11 +154,13 @@ export function App({ client, initial }: AppProps) {
   // Load the active view's data (and keep it fresh) — the thread streams itself.
   useEffect(() => {
     if (view === "thread") return;
+    setAgenticLines([]);
     let alive = true;
     const load = () => {
       const done = () => alive && setViewErr(null);
       const fail = (e: unknown) => alive && setViewErr(e instanceof Error ? e.message : String(e));
-      if (view === "board") client.board(project.id).then((b) => { if (alive) { setBoard(b); done(); } }).catch(fail);
+      if (view === "orchestra" || view === "approvals") loadAgenticView(client, project.id, view).then(lines => { if (alive) { setAgenticLines(lines); done(); } }).catch(fail);
+      else if (view === "board") client.board(project.id).then((b) => { if (alive) { setBoard(b); done(); } }).catch(fail);
       else if (view === "brain") client.brain(project.id, { limit: 200 }).then((r) => { if (alive) { setBrain(r); done(); } }).catch(fail);
       else if (view === "scoreboard") client.scoreboard(project.id).then((r) => { if (alive) { setScoreboard(r); done(); } }).catch(fail);
       else client.tree(project.id).then((r) => { if (alive) { setDiff(r.tree); done(); } }).catch(fail);
@@ -203,6 +207,13 @@ export function App({ client, initial }: AppProps) {
       setView("thread");
       try {
         switch (cmd) {
+          case "retry-task":
+          case "allow":
+          case "deny": {
+            setNotice(await agenticAction(client, project.id, cmd, args));
+            setView(cmd === "retry-task" ? "orchestra" : "approvals");
+            break;
+          }
           case "help":
             push("", ...HELP_LINES, "");
             break;
@@ -385,11 +396,12 @@ export function App({ client, initial }: AppProps) {
   const viewLines: string[] = useMemo(() => {
     if (view === "thread") return thread;
     if (viewErr) return ["", pc.red(`  ${viewErr}`)];
+    if (view === "orchestra" || view === "approvals") return agenticLines.length ? agenticLines : ["  Loading…"];
     if (view === "board") return board ? formatBoard(board, cols) : [pc.dim("  loading board…")];
     if (view === "brain") return brain ? formatBrain(brain.memories, brain.stats, cols) : [pc.dim("  loading brain…")];
     if (view === "scoreboard") return scoreboard ? formatScoreboard(scoreboard, cols) : [pc.dim("  loading scoreboard…")];
     return diff ? formatDiff(diff, cols) : [pc.dim("  loading diff…")];
-  }, [view, thread, board, brain, diff, scoreboard, viewErr, cols]);
+  }, [view, thread, board, brain, diff, scoreboard, agenticLines, viewErr, cols]);
 
   const total = viewLines.length;
   const maxScroll = Math.max(0, total - vh);

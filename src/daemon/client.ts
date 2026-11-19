@@ -1,3 +1,4 @@
+import { daemonApi } from "../core/agentic-r4/client.js";
 /**
  * Thin daemon client used by every surface (CLI now, app later).
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
@@ -102,6 +103,8 @@ export class DaemonClient {
   constructor(cfg: DaemonConfig) {
     this.cfg = cfg;
   }
+
+  api<T = unknown>(method: string, route: string, body?: unknown, timeoutMs?: number): Promise<T> { return daemonApi<T>(this.baseUrl, this.cfg.adminToken, method, route, body, timeoutMs); }
 
   static fromDisk(): DaemonClient | null {
     const cfg = readDaemonConfig();

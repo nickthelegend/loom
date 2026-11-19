@@ -629,7 +629,7 @@ export class RuntimeTurns {
       // adapter hands to its CLI. Null when nothing is configured — or when this
       // adapter's CLI has no flag for it, because an "MCP attached" note on a
       // turn that dropped the config would be the same lie in a new place.
-      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl() } : undefined) : null;
+      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl(), agent: target, chat } : undefined) : null;
       // The thread's model, only ever to an adapter that can act on it — see
       // bindable(), which is where a model that couldn't be honoured is refused.
       const input: SendInput = {
@@ -766,7 +766,7 @@ export class RuntimeTurns {
       };
       if (prepared.packet.budget.overflow === "mandatory") return finishOverflow();
       if (!this.host.isCurrentAgent(agent)) throw new Error("native target was replaced before submission");
-      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl() } : undefined) : null;
+      mcp = agent.capabilities.mcp ? writeLoomMcpSession(this.host.healthyMcps(), this.host.config.loomTools ? { project: this.host.info.id, api: this.host.apiUrl(), agent: target, chat } : undefined) : null;
       let continuity: NonNullable<SendInput["continuity"]>;
       // Reassembly is safe only before submission intent exists. Never retry a
       // submitted action automatically, even when its acknowledgement is lost.
