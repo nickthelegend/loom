@@ -191,7 +191,8 @@ describe("3. Stop cancels a turn that is waiting for a slot", () => {
         ((await api(`/api/projects/${pid}/events?limit=200`)).events ?? []) as Array<{ kind: string; payload: Record<string, unknown> }>;
 
       await api(`/api/projects/${pa}/messages`, { text: "sleep:1500 one", agentId: "a" });
-      await new Promise((r) => setTimeout(r, 150));
+      // a's turn must hold the only slot before b asks for one; wait for it rather than guessing how long it takes
+      await waitUntil(async () => (await events(pa)).some((e) => e.kind === "status" && e.payload.state === "turn_started"));
       await api(`/api/projects/${pb}/messages`, { text: "two", agentId: "b" });
       await waitUntil(async () => (await events(pb)).some((e) => e.kind === "status" && e.payload.state === "queued_for_slot"));
 
