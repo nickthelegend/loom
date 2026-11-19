@@ -20,9 +20,9 @@ export function writeLoomMcpSession(mcps: McpServerConfig[] | undefined, scope?:
   try {
     const session = writeMcpSession([
       { name: "loom", url: "", command: process.execPath,
-        args: import.meta.url.endsWith(".ts")
-          ? ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../cli/index.ts", import.meta.url)), "mcp-server"]
-          : [fileURLToPath(new URL("../cli/index.js", import.meta.url)), "mcp-server"],
+        // A turn's child must not load the general CLI (and its adapter graph)
+        // before making its first request. Keep this entry point transport-only.
+        args: [fileURLToPath(new URL("../cli/mcp-turn.js", import.meta.url))],
         env: { LOOM_MCP_API: scope.api, LOOM_MCP_TOKEN: token, LOOM_PROJECT_ID: scope.project,
           ...(scope.run ? { LOOM_RUN_ID: scope.run } : {}), ...(scope.task ? { LOOM_TASK_ID: scope.task } : {}) } },
       ...(mcps ?? []),

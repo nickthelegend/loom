@@ -168,6 +168,8 @@ describe("MCP tools", () => {
     const sent = await call("send", { project, agent: "plannerbot", text: "sleep:5000", wait: true, timeoutMs: 1 });
     expect(sent.result.structuredContent.timedOut).toBe(true);
     expect((await call("steer", { project, agent: "plannerbot", text: "new information" })).result.structuredContent.steered).toBe(true);
+    // the long turn has served its purpose: stop it so the next test starts with an idle agent
+    await client.interrupt(project);
     await waitUntil(async () => !(await client.project(project)).project.agents.find(a => a.id === "plannerbot")?.busy);
   });
 
