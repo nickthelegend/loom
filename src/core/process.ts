@@ -3,6 +3,7 @@
  * Resolve those to their JavaScript entry point and keep every argument literal.
  */
 import fs from "node:fs";
+import { guardGit } from "./git-safety.js";
 import path from "node:path";
 import { spawn as nodeSpawn, execFile as nodeExecFile, execFileSync as nodeExecFileSync, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
@@ -66,12 +67,14 @@ export function commandInvocation(command: string, args: readonly string[], opti
 
 export const spawn: typeof nodeSpawn = ((command: string, args: string[] | object = [], options: object = {}) => {
   if (!Array.isArray(args)) return nodeSpawn(command, { windowsHide: true, ...args });
+  guardGit(command, args, (options as { cwd?: string | URL }).cwd, (options as { env?: NodeJS.ProcessEnv }).env);
   const spec = commandInvocation(command, args, options);
   return nodeSpawn(spec.command, spec.args, { windowsHide: true, ...options });
 }) as typeof nodeSpawn;
 
 /** Native harnesses run inside an owned containment boundary on every OS. */
 export const spawnContained: typeof nodeSpawn = ((command: string, args: string[], options: object = {}) => {
+  guardGit(command, args, (options as { cwd?: string | URL }).cwd, (options as { env?: NodeJS.ProcessEnv }).env);
   const spec = commandInvocation(command, args, options);
   return process.platform === "win32" ? spawnWindowsJob(spec.command, spec.args, options)
     : nodeSpawn(spec.command, spec.args, { ...options, detached: true });
@@ -79,15 +82,23 @@ export const spawnContained: typeof nodeSpawn = ((command: string, args: string[
 
 export const execFile: typeof nodeExecFile = ((command: string, args: string[], ...rest: unknown[]) => {
   const options = (typeof rest[0] === "object" && rest[0] ? rest[0] : {}) as { env?: NodeJS.ProcessEnv; cwd?: string | URL };
+  try { guardGit(command, args, options.cwd, options.env); } catch (error) {
+    const cb = rest.find(v => typeof v === "function") as Function | undefined;
+    if (!cb) throw error;
+    queueMicrotask(() => cb(error, "", (error as Error).message));
+    return undefined;
+  }
   const spec = commandInvocation(command, args, options);
   return (nodeExecFile as Function)(spec.command, spec.args, { windowsHide: true, ...options }, ...rest.filter((v) => typeof v === "function"));
 }) as typeof nodeExecFile;
-Object.defineProperty(execFile, promisify.custom, { value: (command: string, args: string[], options = {}) => {
+Object.defineProperty(execFile, promisify.custom, { value: async (command: string, args: string[], options = {}) => {
+  guardGit(command, args, (options as { cwd?: string | URL }).cwd, (options as { env?: NodeJS.ProcessEnv }).env);
   const spec = commandInvocation(command, args, options);
   return promisify(nodeExecFile)(spec.command, spec.args, { windowsHide: true, ...options });
 } });
 
 export const execFileSync: typeof nodeExecFileSync = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string | URL; [key: string]: unknown } = {}) => {
+  guardGit(command, args, (options as { cwd?: string | URL }).cwd, (options as { env?: NodeJS.ProcessEnv }).env);
   const spec = commandInvocation(command, args, options);
   return nodeExecFileSync(spec.command, spec.args, { windowsHide: true, ...options });
 }) as typeof nodeExecFileSync;

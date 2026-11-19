@@ -1,0 +1,33 @@
+# Integrations batch #425
+
+Implementation notes for review: no PR was created and no commit was made.
+
+| Feature | Existing behavior checked | Change |
+| --- | --- | --- |
+| GitHub `/loom` | Generic signed webhook triggers existed | Optional trusted issue-comment command mode, new chat per comment |
+| Linear Done | Intake and PR backlinks existed | Complete the team's issue after a linked PR merges; retry failed transitions |
+| Slack goal | Socket Mode chat and approval bridge existed | `/loom <goal>` command envelopes start Orchestra |
+| Payload templates | `{{body}}`, field interpolation and event variables already existed | Presets and preview using the same renderer |
+| Jira | GitHub/Linear intake existed | Jira source through the same intake ledger, queue and UI |
+| GitLab | GitHub CI and trusted review feedback existed | GitLab pipeline and discussion adapter using the same poller |
+| Discord threads | Channel chat and approval bridge existed | Configurable Orchestra channel, durable per-run thread mapping and progress retries |
+| Calendar | Schedule execution existed | iCalendar forecast and revocable subscription URLs |
+| Email | Event-based in-app digest existed | SMTP settings, scheduling, preview and send using the same digest |
+
+## Setup
+
+Web: Settings → Integrations & email holds Jira, Linear, GitLab and SMTP credentials. Settings → Slack & Discord holds bridge tokens, allow-lists and the Discord Orchestra channel. Phone: the Triggers tab contains integration settings, template preview and calendar export; My issues includes Jira. Existing computer-only trigger creation and PR attachment permissions remain unchanged. The owner's unscoped phone can edit machine integration settings; scoped tokens and Share-live guests cannot.
+
+- GitHub: create a webhook trigger in the project menu, select **GitHub /loom comments**, and configure its URL and secret as an `issue_comment` webhook. Only newly created issue comments from OWNER, MEMBER or COLLABORATOR authors run; bots, PR comments and edits are ignored. The trigger selects the linked project. Example CLI: `loom triggers:add '{{body.comment.body}}' --webhook --github-command`. Configure one command trigger per repository/project mapping to avoid intentionally independent triggers starting the same command twice.
+- Linear: save a `linear` provider key or set `LINEAR_API_KEY`. Start assigned Linear issues through My issues/intake, and open or attach their PR in the resulting chat. The existing PR poller updates the issue to the team's completed state named Done (or its first completed state). Closed, unmerged PRs do not complete issues.
+- Slack: enable Socket Mode, install the app with `commands` and `chat:write`, and create a `/loom` slash command. Configure the existing bridge's app token, bot token, allowed users/channels and project. `/loom <goal>` acknowledges immediately and queues a goal; its discussion is in a Slack thread. No public HTTP callback is needed.
+- Templates: the project Triggers form offers GitHub issue, CI and custom payload presets. Preview does not create a chat or run an agent. CLI: `loom triggers:preview '<template>' --payload sample.json --event issues`.
+- Jira Cloud: provider `jira`, base URL `https://your-site.atlassian.net`, key `email:API-token`. REST search restricts results to `assignee = currentUser()` and non-Done issues, paginating until complete. CLI: `loom intake --jira`, optionally `--start --orchestra`; scheduled intake accepts `{source:"jira",mode:"chat"}`. Jira descriptions are converted from Atlassian document format, and linked PRs receive issue backlinks.
+- GitLab: provider `gitlab`, the GitLab instance base URL and a `read_api` token. On the computer, the chat's PR feedback menu attaches a full HTTPS MR URL; the existing CLI PR watch command also accepts it. CI-only is the default; CI + reviews includes discussion and inline notes from Developer or higher project members. Feedback Off pauses agent feedback; merged/closed state still updates. Self-managed instance hosts must match the configured provider. GitLab creation/merging remains outside this feedback adapter.
+- Discord: configure a numeric Orchestra progress channel ID and project in the existing bridge (`loom bridge discord --orchestra-channel <id>`). The bot needs View Channel, Send Messages, Create Public Threads and Send Messages in Threads. Each run posts its progress in a public thread within that channel; mention expansion is disabled. Thread/message IDs and failed updates persist across restarts; failures retry every 30 seconds while enabled.
+- Calendar: Triggers → Export schedules, or `loom triggers:calendar > schedules.ics`. **Copy calendar feed URL** or `loom triggers:calendar --subscribe` supplies a private subscription URL; use your daemon's reachable HTTPS origin. Revoke it in the UI or rotate with `--rotate`. Holding this URL grants read-only access to schedule names and forecast times, never prompts or webhook secrets. The feed contains the next 100 occurrences per enabled schedule, at most a year ahead; calendar clients refresh to extend the forecast. Times follow the daemon's local cron semantics and export as UTC. Paused schedules and intake/webhook triggers are excluded.
+- SMTP: set host, port, TLS (typically 465) or STARTTLS (typically 587), username/password, sender, recipient and interval (1–168 hours). Credentials are stored with mode 0600; reads return only password presence. Preview shows the existing event digest across projects. Send now and scheduled sends share one delivery lane and advance the cursor only after SMTP accepts the message. CLI: `loom email --settings settings.json`, `loom email --preview`, `loom email --send`. Blank UI passwords preserve saved credentials; an explicit empty password through the API clears it. SMTP requires TLS certificate validation; plaintext transport and OAuth SMTP are not offered.
+
+The schedule feed is a forecast, not a guarantee of execution: a stopped daemon cannot run a scheduled turn. SMTP delivery has the usual crash window between remote acceptance and saving the local cursor. Providers and mail servers were tested locally; no live user services or agent CLIs were invoked.
+
+Protocol references: [Slack Socket Mode commands](https://docs.slack.dev/apis/events-api/using-socket-mode/), [Jira enhanced search](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/), [GitLab merge requests](https://docs.gitlab.com/api/merge_requests/), [GitLab discussions](https://docs.gitlab.com/api/discussions/), [Discord channel/thread API](https://github.com/discord/discord-api-docs/blob/main/developers/resources/channel.mdx).

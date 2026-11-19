@@ -5,7 +5,7 @@ description: Share Loom chats, inspect presence, move conversations, manage chat
 
 # Collaborate through Loom
 
-Require Loom ≥ 2.0.0.
+Require Loom ≥ 2.1.0.
 
 Choose the smallest access the user requested: a read-only chat link, a live guest
 in one chat, or team membership/project sharing. Run from the intended project.
@@ -50,6 +50,8 @@ Protect uncommitted work and active turns before changing history or files.
 ## Read-only chat links
 
 ```sh
+loom share main --expiry 1d --json
+loom share --run RUN_ID --expiry 1h --json
 loom share main --hours 8 --json
 loom share --list --json
 loom share --revoke SHARE_ID
@@ -59,7 +61,9 @@ Without `--live`, share exposes prompts, replies, tool activity, and changes rea
 The chat argument accepts an ID or title and defaults to main.
 Creation JSON contains the returned URL, ID, title, and expiry; listing is an array.
 Use the returned ID to revoke. Revocation prints text even if JSON was requested.
-Default duration is 24 hours; `--hours` accepts 1–720.
+Default duration is 24 hours; `--hours` accepts 1–720. `--expiry` offers 1h, 1d or 7d.
+`--run` shares one Orchestra goal, task statuses and results read-only, excluding
+local paths and worker credentials. It does not grant live chat access.
 Anyone with the link who can reach the daemon can read that chat.
 Do not assume a localhost link works for a remote teammate; use established access.
 Review chat contents for credentials before sharing.
@@ -127,11 +131,56 @@ Use orchestrate `--solo` for an individual goal that must stay on this machine.
 `loom team leave --team TEAM_ID` leaves a team. Use these only for requested removals.
 Team commands here print text; do not add an invented `--json` flag.
 
+## Team fleets, invites and approval roles
+
+```sh
+loom fleets:team TEAM_ID
+loom fleets:share TEAM_ID parser
+loom fleets:team TEAM_ID --import parser
+loom team:invites TEAM_ID
+loom team:invites TEAM_ID --revoke INVITE_ID
+loom approval-roles
+loom approval-roles --mode selected --approvers DEVICE_ID,OTHER_DEVICE_ID
+```
+
+Use actual team, invite and paired-device IDs. Publish an existing saved fleet;
+team storage is encrypted and only its author or a team owner can replace/remove it.
+Import saves it locally for `@parser` and can replace a same-name local fleet.
+Invite listing/revocation covers members' own invites or any invite for team owners;
+revocation invalidates copied links too. These commands print JSON without `--json`.
+
+Approval roles affect this project: everyone keeps existing access; selected limits
+approvals to listed paired devices, while owners always retain access. Use
+`--mode everyone` only when that policy change is requested. Decisions record the
+device that answered. Chat `@github-login` mentions notify matching teammates through
+the encrypted team feed; mention only intended recipients.
+
+## Git and review
+
+```sh
+loom pr:describe --chat main --template release
+loom review codex --diff --template security --json
+loom git:stats
+loom changelog:suggest MERGED_BRANCH --base HEAD
+```
+
+Checklists are standard, security or release. PR descriptions and changelog bullets
+are drafts to review; these commands do not publish them. Review starts agent work.
+Git stats reports per-agent lines added/removed and unique file counts.
+
+For an authorized commit or push, `loom git:commit "Reviewed message"` scans staged
+changes and `loom git:push` scans outgoing commit diffs. Both expose
+`--override-secrets` for an explicit, operation-scoped owner/device override;
+do not use it as an automatic retry for a secret finding. Inspect and remove the
+credential first, without printing it.
+
 ## Search and audit
 
 ```sh
 loom find --all --json "rate limit"
 loom audit --since 7d --json
+loom audit --risky --since 7d --json
+loom audit --since 30d --csv > audit.csv
 ```
 
 Search returns `{hits,truncated}` across permitted projects/chats, newest first.
@@ -139,6 +188,9 @@ Read each hit's project and chat before acting; narrow the query if truncated.
 Audit returns an array covering approvals and who answered, shared-chat/bridge
 messages, trigger firings/skips, and baton handoffs. It is owner-only.
 `--since` accepts durations such as 24h, 7d, or 30d, not arbitrary date strings.
+`--risky` filters tool calls, approvals, safety denials and secret overrides.
+`--csv` exports the complete selected period with formula-safe quoting; it does not
+apply `--risky`, so use JSON for a risky-only report. Keep exports private.
 An empty result is not proof that another scoped account has no activity.
 
 If access fails, inspect the role, expiry, network reachability, and team selection.

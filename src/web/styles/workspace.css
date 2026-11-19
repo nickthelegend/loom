@@ -764,3 +764,10 @@
   .hsn{display:flex;align-items:center;gap:6px;color:var(--foreground)}
   .hsn svg,.hsn .brand{width:14px;height:14px}
   .hsv{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+
+  #gitreview{border-top:1px solid var(--border);font-size:12px}
+  #gitreview summary{cursor:pointer;color:var(--foreground);padding:4px 0}
+  #gitreview label{display:flex;flex-direction:column;gap:4px;color:var(--muted-foreground);margin:8px 0}
+  #gitreview input,#gitreview select{width:100%;box-sizing:border-box;background:var(--background);color:var(--foreground);border:1px solid var(--border);border-radius:6px;padding:6px;font:inherit}
+  #gitreview .btn{margin-bottom:6px}
+  #gitreview textarea{max-height:none;min-height:180px;resize:vertical}

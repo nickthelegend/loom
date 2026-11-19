@@ -37,7 +37,7 @@ import {
   type DaemonConfig,
 } from "../core/registry.js";
 import type { SideView } from "../core/side-chats.js";
-import type { Memory } from "../core/brain.js";
+import type { Memory, MemoryKind, MemoryPatch, MemoryHistoryEntry } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 import { VERSION } from "../version.js";
@@ -58,6 +58,7 @@ export class DaemonError extends Error {
 
 /** What the daemon says about whether this copy of Loom is current. */
 export interface UpdateStatus {
+  changelog?: import("../core/updater.js").UpdateChangelog;
   version: string;
   rev: string;
   root: string | null;
@@ -96,6 +97,7 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  r4Orchestra<T>(id: string, route: string, body?: Record<string, unknown>): Promise<T> { return this.request(body === undefined ? "GET" : "POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${route}`, body); }
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {
@@ -123,6 +125,12 @@ export class DaemonClient {
   get baseUrl(): string {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }
+
+  modelHealth() { return this.request<{ health: import("../core/model-routing.js").ModelHealth[] }>("POST", "/api/model-routing/health", undefined, 120_000); }
+  setProjectEffort(id: string, defaultEffort: string) { return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/config`, { defaultEffort }); }
+  agentOptions(id: string, agentId: string, options?: Record<string, unknown>) { return this.request(options ? "PUT" : "GET", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/options`, options); }
+  modelRouting() { return this.request<import("../core/model-routing.js").ModelRouting>("GET", "/api/model-routing"); }
+  setModelRouting(settings: import("../core/model-routing.js").ModelRouting) { return this.request<import("../core/model-routing.js").ModelRouting>("PUT", "/api/model-routing", { ...settings }); }
 
   private async request<T>(
     method: string,
@@ -155,8 +163,8 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/messages?limit=${limit}`);
   }
 
-  remember(id: string, kind: "decision" | "constraint" | "convention", text: string): Promise<{ memory: Memory; created: boolean }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text });
+  remember(id: string, kind: MemoryKind, text: string, chat?: string): Promise<{ memory: Memory; created: boolean }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain`, { kind, text, ...(chat ? { chat } : {}) });
   }
 
   report(id: string, run: string, task: string, body: { kind: string; text?: string }): Promise<Record<string, unknown>> {
@@ -274,6 +282,28 @@ export class DaemonClient {
     return this.request("GET", "/api/providers");
   }
 
+  ops(): Promise<{ backup: import("../core/backup-schedule.js").BackupSchedule | null }> {
+    return this.request("GET", "/api/ops");
+  }
+
+  scheduleBackup(every: string, keep: number): Promise<unknown> {
+    return this.request("PUT", "/api/ops/backups", { every, keep });
+  }
+
+  disableBackup(): Promise<unknown> { return this.request("DELETE", "/api/ops/backups"); }
+
+  diskUsage(): Promise<{ projects: Array<ReturnType<typeof import("../core/ops.js").projectDiskUsage>> }> {
+    return this.request("GET", "/api/ops/du");
+  }
+
+  worktreePolicy(id: string, policy: import("../core/ops.js").PrunePolicy): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/worktrees/policy`, { ...policy });
+  }
+
+  pruneWorktrees(id: string, dryRun: boolean, policy?: import("../core/ops.js").PrunePolicy): Promise<{ candidates: string[]; removed: string[]; skipped: Array<{ id: string; reason: string }> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/worktrees/prune`, { dryRun, policy }, 120_000);
+  }
+
   /** `loom doctor` as the daemon sees it: its checks, plus its PATH and key names to compare with the shell's. */
   doctor(project?: string): Promise<{ checks: import("../cli/doctor.js").Check[]; facts?: import("../cli/doctor.js").EnvFacts }> {
     return this.request("GET", `/api/doctor${project ? `?project=${encodeURIComponent(project)}` : ""}`, undefined, 45_000);
@@ -287,9 +317,15 @@ export class DaemonClient {
     return this.request("GET", "/api/projects");
   }
 
-  addProject(dir: string, name?: string): Promise<{ project: { id: string } }> {
-    return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
+  addProject(dir: string, name?: string, template?: string): Promise<{ project: { id: string } }> {
+    return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}), ...(template ? { template } : {}) });
   }
+
+  initTemplates(): Promise<{ templates: Array<{ name: string; description: string }> }> { return this.request("GET", "/api/init-templates"); }
+  validateConfig(id: string): Promise<import("../core/config-validation.js").ConfigValidation> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/config/validate`); }
+  aliases(): Promise<{ aliases: import("../core/aliases.js").CommandAliases }> { return this.request("GET", "/api/aliases"); }
+  saveAlias(name: string, args: string[]): Promise<unknown> { return this.request("PUT", "/api/aliases", { name, args }); }
+  removeAlias(name: string): Promise<unknown> { return this.request("DELETE", "/api/aliases", { name }); }
 
   onboarding(): Promise<OnboardingReport> { return this.request("GET", "/api/onboarding"); }
 
@@ -415,15 +451,28 @@ export class DaemonClient {
   /** Start with agent[@model][:effort][xN] worker specs; run.workerDetails describes the expanded fleet. */
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean; team?: boolean },
+    body: import("../core/orchestra.js").OrchestraStartOptions,
   ): Promise<{ run: OrchestraRun }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, { ...body });
+  }
+
+  orchestraGraph(id: string, run: string): Promise<{ mermaid: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/graph`);
+  }
+  orchestraRecipes(): Promise<{ recipes: import("../core/orchestra-options.js").OrchestraRecipe[] }> {
+    return this.request("GET", "/api/orchestra-recipes");
+  }
+  runOrchestraRecipe(id: string, name: string): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra-recipes/${encodeURIComponent(name)}/run`, {});
+  }
+  retryOrchestraTask(id: string, run: string, task: string, agent: string): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(run)}/tasks/${encodeURIComponent(task)}/retry`, { agent });
   }
 
   orchestraAction(
     id: string,
     runId: string,
-    action: "abort" | "reply" | "apply" | "cleanup" | "resume",
+    action: "abort" | "reply" | "apply" | "cleanup" | "resume" | "approve-plan" | "budget" | "recipe",
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return this.request(
@@ -504,8 +553,27 @@ export class DaemonClient {
   searchAll(q: string): Promise<{ hits: Array<{ project: string; projectName: string; chat: string; chatTitle: string; eventId: number; at: number; agent?: string; snippet: string }>; truncated: boolean }> {
     return this.request("GET", `/api/search?q=${encodeURIComponent(q)}`);
   }
-  audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
-    return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
+  auditCsv(since = 0): Promise<{ csv: string }> { return this.request("GET", `/api/audit.csv?format=json&since=${since}`); }
+  shareRun(id: string, runId: string, expiry: string | number = "1d"): Promise<{ id: string; url: string; expiresAt: number; title: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}/share`, typeof expiry === "number" ? { hours: expiry } : { preset: expiry });
+  }
+  teamInvites(teamId: string): Promise<{ invites: import("../core/team-hub.js").TeamInvite[] }> { return this.request("GET", `/api/team/invites?teamId=${encodeURIComponent(teamId)}`); }
+  revokeTeamInvite(teamId: string, id: string): Promise<{ revoked: boolean }> { return this.request("DELETE", `/api/team/invites/${encodeURIComponent(id)}?teamId=${encodeURIComponent(teamId)}`); }
+  teamFleets(teamId: string): Promise<{ fleets: SavedFleet[] }> { return this.request("GET", `/api/team/fleets?teamId=${encodeURIComponent(teamId)}`); }
+  shareFleet(teamId: string, name: string, spec: string): Promise<{ fleet: SavedFleet }> { return this.request("PUT", "/api/team/fleets", { teamId, name, spec }); }
+  approvalRoles(id: string): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/approval-roles`); }
+  setApprovalRoles(id: string, mode: string, approvers: string[]): Promise<import("../core/team-sharing.js").ApprovalRoles> { return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/approval-roles`, { mode, approvers }); }
+
+  safety(id: string, policy?: unknown): Promise<{ policy: import("../core/safety.js").SafetyPolicy }> {
+    return this.request(policy ? "PUT" : "GET", `/api/projects/${encodeURIComponent(id)}/safety`, policy as Record<string, unknown> | undefined);
+  }
+
+  safeGit(id: string, operation: "commit" | "push", body: { message?: string; overrideSecrets?: boolean }): Promise<unknown> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/${operation}`, body);
+  }
+
+  audit(since?: number, risky = false): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
+    return this.request("GET", `/api/audit?since=${since ?? 0}&risky=${risky}`);
   }
   resources(): Promise<import("../core/resources.js").Resources> { return this.request("GET", "/api/resources"); }
   chatInstructions(id: string, chat: string): Promise<{ chat: string; instructions: string }> {
@@ -514,6 +582,11 @@ export class DaemonClient {
   setChatInstructions(id: string, chat: string, instructions: string): Promise<{ chat: string; instructions: string }> {
     return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`, { instructions });
   }
+  integrationEmail(body?: Record<string, unknown>): Promise<Record<string, unknown>> { return this.request(body ? "PUT" : "GET", "/api/integrations/email", body); }
+  emailDigest(send = false): Promise<{ text?: string; sent?: boolean }> { return this.request(send ? "POST" : "GET", `/api/integrations/email/${send ? "send" : "preview"}`); }
+  calendarLink(id: string, rotate = false): Promise<{ path: string }> { return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/calendar-link`, { rotate }); }
+  triggerCalendar(id: string): Promise<{ calendar: string }> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/triggers/calendar?format=json`); }
+  previewTrigger(id: string, body: Record<string, unknown>): Promise<{ prompt: string }> { return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/preview`, body); }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }
@@ -746,10 +819,10 @@ export class DaemonClient {
   searchBrain(
     id: string,
     q: string,
-    opts: { agent?: string; explain?: boolean; limit?: number } = {},
+    opts: { agent?: string; author?: string; kind?: string; since?: string; until?: string; chat?: string; explain?: boolean; limit?: number } = {},
   ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
     const params = new URLSearchParams({ q });
-    if (opts.agent) params.set("agent", opts.agent);
+    for (const key of ["agent", "author", "kind", "since", "until", "chat"] as const) if (opts[key]) params.set(key, opts[key]!);
     if (opts.explain) params.set("explain", "1");
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);
@@ -824,6 +897,32 @@ export class DaemonClient {
   }
 
   /** The brain as a portable document — see Brain.export. */
+  updateBrainMemory(id: string, memoryId: string, patch: MemoryPatch): Promise<{ memory: Memory }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}`, patch as Record<string, unknown>);
+  }
+  brainHistory(id: string, memoryId: string): Promise<{ history: MemoryHistoryEntry[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}/history`);
+  }
+  revertBrainMemory(id: string, memoryId: string, eventId: number): Promise<{ memory: Memory }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}/revert`, { eventId });
+  }
+  brainDuplicates(id: string): Promise<{ duplicates: Array<{ a: Memory; b: Memory; similarity: number; suggestedText: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/duplicates`);
+  }
+  mergeBrainMemories(id: string, keep: string, other: string, text: string): Promise<{ memory: Memory }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/merge`, { keep, other, text });
+  }
+  brainInjections(id: string, turn?: string): Promise<{ injections: unknown[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/injections${turn ? `?turn=${encodeURIComponent(turn)}` : ""}`);
+  }
+  listBrainMemories(id: string, includeArchived = false): Promise<{ memories: Array<Memory & { stale: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain?includeArchived=${includeArchived ? 1 : 0}`);
+  }
+
+  exportBrainMarkdown(id: string, md: string): Promise<{ file: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/export`, { md });
+  }
+
   exportBrain(id: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
   }
@@ -957,7 +1056,16 @@ export class DaemonClient {
   }
 
   /** Read-only reviews by several agents at once (daemon/review.ts). No file and no text: the uncommitted changes. */
-  startReview(id: string, body: { agents: string[]; file?: string; text?: string; focus?: string }): Promise<{ review: import("./review.js").ReviewState }> {
+  describePr(id: string, chat = "main", template = "standard"): Promise<{ description: string; checklist: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/pr-description`, { chat, template });
+  }
+  suggestChangelog(id: string, branch: string, base = "HEAD"): Promise<{ entry: string; commits: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/git/changelog`, { branch, base });
+  }
+  diffStats(id: string): Promise<{ agents: Array<{ agentId: string; added: number; removed: number; files: number; turns: number }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/diffs`);
+  }
+  startReview(id: string, body: { agents: string[]; file?: string; text?: string; focus?: string; template?: string }): Promise<{ review: import("./review.js").ReviewState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/reviews`, body);
   }
 
@@ -1168,6 +1276,24 @@ export class DaemonClient {
 
   revokeClient(clientId: string): Promise<{ revoked: boolean }> {
     return this.request("DELETE", `/api/pair/clients/${encodeURIComponent(clientId)}`);
+  }
+
+  /** Wait for subscription acknowledgement before sending work that may finish immediately. */
+  async subscribeFrames(project: string, onFrame: (frame: Record<string, any>) => void): Promise<() => void> {
+    const params = new URLSearchParams({ project });
+    const ws = new WebSocket(`ws://${this.cfg.host}:${this.cfg.port}/ws?${params}`, [`loom.bearer.${this.cfg.adminToken}`]);
+    return new Promise((resolve, reject) => {
+      let ready = false;
+      const timer = setTimeout(() => { ws.terminate(); reject(new Error("event subscription timed out")); }, 5000);
+      ws.on("message", data => {
+        let frame: Record<string, any>;
+        try { frame = JSON.parse(String(data)); } catch { return; }
+        if (frame.type === "hello" && !ready) { ready = true; clearTimeout(timer); resolve(() => ws.close()); }
+        else if (frame.projectId === project) onFrame(frame);
+      });
+      ws.on("error", error => { if (!ready) { clearTimeout(timer); reject(error); } });
+      ws.on("close", () => { if (!ready) { clearTimeout(timer); reject(new Error("event subscription closed")); } });
+    });
   }
 
   /** Live event stream; returns a close function. */

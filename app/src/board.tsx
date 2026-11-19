@@ -4,7 +4,7 @@
  * Ready to merge. Add a task, hand one to an agent, move it along, delete it.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { AgentIcon, agentLabel } from "./agents";
 import { createBoardTask, deleteBoardTask, dispatchBoardTask, getBoard, moveBoardTask, type BoardCard, type Creds, type Project } from "./api";
@@ -23,6 +23,7 @@ export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: 
   const [cards, setCards] = useState<BoardCard[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const draftInput = useRef<TextInput>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -81,7 +82,7 @@ export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: 
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <TextInput value={draft} onChangeText={setDraft} placeholder="New task…" placeholderTextColor={T.faint} returnKeyType="done" onSubmitEditing={() => void add()}
+        <TextInput ref={draftInput} value={draft} onChangeText={setDraft} placeholder="New task…" placeholderTextColor={T.faint} returnKeyType="done" onSubmitEditing={() => void add()}
           style={{ flex: 1, color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14 }} />
         <TouchableOpacity onPress={() => void add()} disabled={!draft.trim() || busy} activeOpacity={0.75} accessibilityRole="button"
           style={{ paddingHorizontal: 14, borderRadius: radii.key, backgroundColor: T.bright, justifyContent: "center", opacity: !draft.trim() ? 0.4 : 1 }}>
@@ -93,7 +94,7 @@ export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: 
       {!cards ? (
         <ActivityIndicator color={T.dim} style={{ marginTop: 20 }} />
       ) : !cards.length ? (
-        <Empty text="No tasks yet. Add one above, or start a crew goal — its cards land here." />
+        <Empty text="No tasks yet. Add one to plan your next step." action="Add a task" onAction={() => draftInput.current?.focus()} />
       ) : (
         BOARD_COLS.map((col) => {
           const here = cards.filter((c) => c.column === col.key);

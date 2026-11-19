@@ -9,6 +9,8 @@
  * setup panel needs, not an empty team list that reads like "you have no teams".
  */
 
+import { resolveProvider } from "../core/providers.js";
+
 const ENDPOINT = "https://api.linear.app/graphql";
 
 export type LinearUnavailable = {
@@ -43,7 +45,7 @@ export type LinearCreated = {
 /** The key, from the daemon's environment — or null when it isn't set. */
 export function linearKey(): string | null {
   const k = process.env.LINEAR_API_KEY?.trim();
-  return k || null;
+  return k || resolveProvider("linear")?.key || null;
 }
 
 export function linearConfigured(): boolean {

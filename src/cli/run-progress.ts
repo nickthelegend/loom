@@ -18,7 +18,7 @@ export type ProgressEvent =
 export function runEvents(prev: OrchestraRun | null, next: OrchestraRun): ProgressEvent[] {
   const out: ProgressEvent[] = [];
   const run = next.id;
-  if (!prev || prev.status !== next.status) out.push({ kind: "run", run, status: next.status, round: next.round });
+  if (!prev || prev.status !== next.status || prev.held !== next.held) out.push({ kind: "run", run, status: next.held && !["completed", "failed", "aborted", "moved"].includes(next.status) ? "held" : next.status, round: next.round });
   else if (prev.round !== next.round) out.push({ kind: "round", run, round: next.round });
   const before = new Map((prev?.tasks ?? []).map((t) => [t.id, t]));
   for (const t of next.tasks) {

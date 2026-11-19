@@ -1,3 +1,7 @@
+import { R4Orchestra } from "./r4-orch";
+import { taskOptions, heldActive } from "./r4-orch-model";
+import { OrchestraOptionFields, OrchestraRecipes, OrchestraRunExtras } from "./orchestra-extras";
+import { parseRunOptions } from "./orchestra-options";
 /**
  * Orchestra on the phone: one orchestrator agent plans a goal into tasks, many
  * worker agents run them in parallel on their own branches, and the results
@@ -83,8 +87,8 @@ const TASK_LOOK: Record<OrchestraTaskStatus, { label: string; color: string; gly
 // "moved" (Phase 5): the goal carries on elsewhere; this copy is read-only.
 const terminal = (s: OrchestraStatus) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
 
-function StatusPill(props: { status: OrchestraStatus }) {
-  const look = RUN_LOOK[props.status] ?? RUN_LOOK.starting;
+function StatusPill(props: { status: OrchestraStatus; held?: boolean }) {
+  const look = heldActive(props) ? { label: "Held", color: T.warn } : RUN_LOOK[props.status] ?? RUN_LOOK.starting;
   return (
     <View
       style={{
@@ -401,6 +405,12 @@ function StartForm(props: {
   const [fleet, setFleet] = useState<FleetRow[]>([]);
   const [plan, setPlan] = useState(false);
   // a race: every checked agent gets the same prompt in its own worktree, and you keep one
+  const [check, setCheck] = useState(""), [checkRounds, setCheckRounds] = useState("2"), [taskMinutes, setTaskMinutes] = useState("");
+  const [budget, setBudget] = useState("");
+  const [stall, setStall] = useState("10");
+  const [limits, setLimits] = useState("");
+  const [webhook, setWebhook] = useState("");
+  const [planOnly, setPlanOnly] = useState(false);
   const [race, setRace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -424,6 +434,8 @@ function StartForm(props: {
             ...(orch ? { orchestrator: orch } : {}),
             ...(all.length ? { workers: all } : {}),
             maxParallel: parallel,
+            ...parseRunOptions(budget, stall, limits, webhook, planOnly),
+            ...taskOptions(check, checkRounds, taskMinutes),
             ...(plan ? { plan: true } : {}),
           });
       props.onStarted(run);
@@ -466,6 +478,8 @@ function StartForm(props: {
         />
       </View>
 
+      <OrchestraRecipes creds={props.creds} projectId={props.project.id} onRun={props.onStarted} />
+      {!race ? <OrchestraOptionFields {...{ budget, setBudget, stall, setStall, limits, setLimits, webhook, setWebhook, planOnly, setPlanOnly, check, setCheck, checkRounds, setCheckRounds, taskMinutes, setTaskMinutes }} /> : null}
       {race ? null : <View style={{ gap: 6 }}>
         <SectionLabel text="Orchestrator — plans, reviews, merges" />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -710,7 +724,7 @@ function RunView(props: {
     <View style={{ gap: spacing.md }}>
       <Panel>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <StatusPill status={run.status} />
+          <StatusPill status={run.status} held={(run as OrchestraRun & { held?: boolean }).held} />
           <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono, flex: 1 }} numberOfLines={1}>
             {run.race ? `race · ${run.tasks.length} entrants` : `round ${run.round}/${run.maxRounds} · ×${run.maxParallel}`}
           </Text>
@@ -871,6 +885,8 @@ function RunView(props: {
         </View>
       )}
 
+      <R4Orchestra creds={props.creds} projectId={props.projectId} run={run} onRun={props.onRun} />
+      <OrchestraRunExtras creds={props.creds} projectId={props.projectId} run={run} onRun={props.onRun} />
       <Sheet title={diff?.title ?? ""} visible={!!diff} onClose={() => setDiff(null)}>
         {diff?.patch == null ? <ActivityIndicator color={T.dim} /> : diff.patch ? <DiffView patch={diff.patch} maxHeight={520} /> : <Text style={{ color: T.faint }}>No changes on this branch.</Text>}
       </Sheet>
@@ -1239,7 +1255,7 @@ export function OrchestraView(props: {
                 <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }}>
                   {ago(new Date(r.createdAt).toISOString())}
                 </Text>
-                <StatusPill status={r.status} />
+                <StatusPill status={r.status} held={(r as OrchestraRun & { held?: boolean }).held} />
               </TouchableOpacity>
             ))}
         </View>

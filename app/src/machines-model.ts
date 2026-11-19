@@ -71,3 +71,21 @@ export function machineForPush(list: Machine[], daemonName: unknown, activeId: s
 }
 
 export const credsOf = (m: Machine): MachineCreds => ({ url: m.url, token: m.token, ...(m.relay ? { relay: m.relay } : {}) });
+
+/**
+ * A 401 answered a request made with `revoked`: forget that computer — that pairing, that
+ * token — and nothing else. The answer can land after you switched computers (or after an
+ * earlier 401 already moved on): it used to remove whichever one was active by then, so a
+ * slow reply from A deleted B. A token that matches nothing is already gone: no change.
+ */
+export function forgetRevoked(
+  list: Machine[],
+  activeId: string | null,
+  revoked: MachineCreds,
+): { list: Machine[]; activeId: string | null; removed: Machine | null; wasActive: boolean } {
+  const gone = list.find((m) => m.url === revoked.url && m.token === revoked.token) ?? null;
+  if (!gone) return { list, activeId, removed: null, wasActive: false };
+  const wasActive = activeMachine(list, activeId)?.id === gone.id;
+  const next = wasActive ? nextAfter(list, gone.id)?.id ?? null : activeMachine(list, activeId)?.id ?? null;
+  return { list: removeMachine(list, gone.id), activeId: next, removed: gone, wasActive };
+}

@@ -29,6 +29,8 @@ export interface BridgeConfig {
   botToken: string;
   /** Slack only: the app-level token (xapp-…) Socket Mode connects with. */
   appToken?: string;
+  /** Discord text channel receiving one thread per Orchestra run. */
+  orchestraChannel?: string;
   /** Who is heard (Slack user ids U…, Discord user ids). Empty hears nobody. */
   users: string[];
   /** Who may answer approvals. Omitted: users; empty: nobody. */
@@ -88,6 +90,7 @@ interface Incoming {
   text: string;
   /** Mentioned the bot (or a DM) — a fresh thread needs that; a bridged one doesn't. */
   mentioned: boolean;
+  goal?: boolean;
 }
 
 interface ApprovalClick {
@@ -133,7 +136,10 @@ export class ChatBridges {
     const cfg = readBridges()[p];
     if (!cfg?.enabled) { delete this.status[p]; return; }
     const st: { connected: boolean; error?: string; heard: number; ignored: number } = (this.status[p] = { connected: false, heard: 0, ignored: 0 });
-    const on = (m: Incoming) => void this.incoming(cfg, m).catch((e) => logbook.warn("bridge", `${p} message failed`, String(e)));
+    const on = (m: Incoming) => void this.incoming(cfg, m).catch((e) => {
+      logbook.warn("bridge", `${p} message failed`, String(e));
+      if (m.goal) void this.clients.get(p)?.post(m.channel, m.thread, "Loom could not start this goal. Check the project, agent and queue in Loom, then retry.").catch(() => {});
+    });
     const client = p === "slack"
       ? new SlackClient(this.api.slack, cfg, on, (click) => this.approve(click), (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; })
       : new DiscordClient(this.api.discord, cfg, on, (click) => this.approve(click), (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; });
@@ -176,7 +182,7 @@ export class ChatBridges {
     const rt = await this.runtime(ref.projectId);
     const agentId = cfg.agent ?? rt.baton.holder() ?? rt.config.agents.find((a) => a.enabled !== false)?.id;
     if (!agentId) { await this.clients.get(m.platform)?.post(m.channel, m.thread, "This Loom project has no agents."); return; }
-    rt.enqueue({ text: `${m.text.trim()}\n\n(from ${m.userName ?? m.user} on ${m.platform === "slack" ? "Slack" : "Discord"})`, chat: ref.chat, source: "user", target: { kind: "agent", agentId } });
+    rt.enqueue({ text: `${m.text.trim()}\n\n(from ${m.userName ?? m.user} on ${m.platform === "slack" ? "Slack" : "Discord"})`, chat: ref.chat, source: "user", target: m.goal ? { kind: "orchestra", orchestrator: agentId } : { kind: "agent", agentId } });
   }
 
   private approve(click: ApprovalClick): string {
@@ -302,6 +308,7 @@ class SlackClient implements PlatformClient {
   private ws: WebSocket | null = null;
   private stopped = false;
   private botUser = "";
+  private commands = new Set<string>();
   private retry = 1_000;
 
   constructor(private api: string, private cfg: BridgeConfig, private on: (m: Incoming) => void, private approval: (click: ApprovalClick) => string, private state: (ok: boolean, err?: string) => void) {}
@@ -325,8 +332,22 @@ class SlackClient implements PlatformClient {
     this.ws = ws;
     ws.on("open", () => { this.retry = 1_000; this.state(true); });
     ws.on("message", (data) => {
-      let env: { envelope_id?: string; type?: string; payload?: { event?: Record<string, unknown> } & SlackInteraction };
+      let env: { envelope_id?: string; type?: string; payload?: { event?: Record<string, unknown>; command?: string; text?: string; user_id?: string; channel_id?: string } & SlackInteraction };
       try { env = JSON.parse(String(data)); } catch { return; }
+      if (env.type === "slash_commands") {
+        const p = env.payload;
+        const allowed = p?.command === "/loom" && p.user_id && p.channel_id && this.cfg.users.includes(p.user_id) && (!this.cfg.channels.length || this.cfg.channels.includes(p.channel_id));
+        const goal = p?.text?.trim();
+        const text = !allowed ? "You are not allowed to start Loom goals here." : !goal ? "Usage: /loom <goal>" : "Loom received your goal.";
+        if (env.envelope_id) ws.send(JSON.stringify({ envelope_id: env.envelope_id, payload: { response_type: "ephemeral", text } }));
+        if (!allowed || !goal || !env.envelope_id || this.commands.has(env.envelope_id)) return;
+        this.commands.add(env.envelope_id);
+        if (this.commands.size > 500) this.commands.delete(this.commands.values().next().value!);
+        void this.post(p!.channel_id!, "", `Orchestra goal: ${goal.slice(0, 3000)}`).then(thread => {
+          this.on({ platform: "slack", channel: p!.channel_id!, thread, user: p!.user_id!, text: goal, mentioned: true, goal: true });
+        }).catch(() => this.state(false, "Could not start Slack goal"));
+        return;
+      }
       if (env.envelope_id) ws.send(JSON.stringify({ envelope_id: env.envelope_id }));
       if (env.type === "disconnect") { ws.close(); return; }
       if (env.type === "interactive") {
