@@ -26,8 +26,10 @@ export function turns(events: LoomEvent[], workingUntil?: number, liveAgents?: S
     const p = e.payload, k = key(e);
     let a = active.get(k);
     if (e.kind === "status" && p.state === "turn_started") {
-      // Some adapters announce the same start as the dispatcher.
-      if (!a || a.failed || a.first !== undefined || e.ts - a.start > 5000) active.set(k, { start: e.ts, waits: [], agent: e.agentId, chat: e.chat ?? "main" });
+      // Adapters re-announce the dispatcher's start (their payload carries `session`); that is the same turn even when
+      // output already arrived between the two. Any other start after output is a new turn.
+      const echo = a && !a.failed && e.ts - a.start <= 5000 && "session" in p;
+      if (!echo && (!a || a.failed || a.first !== undefined || e.ts - a.start > 5000)) active.set(k, { start: e.ts, waits: [], agent: e.agentId, chat: e.chat ?? "main" });
       continue;
     }
     if (a && ((e.kind === "status" && p.state === "r4_first_output") || e.kind === "tool_call" || e.kind === "message")) a.first ??= e.ts;
