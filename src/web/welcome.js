@@ -1,3 +1,4 @@
+import { mountExamples, openHelp } from "./help/panel.js";
 /** Browser Home (#403). See README.md for ownership and startup. */
 import { agentLabel, brandMark } from './agents.js';
 import { api } from './connection.js';
@@ -141,6 +142,8 @@ import { tryDemo } from './try-demo.js';
       });
     }
     drawProjects();
+    mountExamples(el.querySelector(".homegrid"), opts.openProject);
+    var help = document.createElement("button"); help.className = "btn sm"; help.textContent = "Help"; help.onclick = function() { openHelp(); }; el.querySelector(".homehead").appendChild(help);
 
     api("/api/scoreboard?project=all&window=30d").then(function(r){
       var rows = (r.byKindModel || []).filter(function(x){ return x.turns > 0; }).slice(0, 5);

@@ -1,3 +1,4 @@
+import { runHelpCommand } from "./help/panel.js";
 /** Browser commands module: one name per command, for the menu bar and the palette. See README.md for ownership and startup. */
 import { openImportChats } from './import-chats.js';
 import { openConnectPhone } from './connect-phone.js';
@@ -22,6 +23,7 @@ import { devMode, SIMPLE_TABS } from './mode.js';
    * disagree about what a command does.
    */
   function runCommand(item){
+    if (runHelpCommand(item)) return;
     var scrim = document.querySelector(".scrim");
     var click = function(id, why){
       var b = document.getElementById(id);

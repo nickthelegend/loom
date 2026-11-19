@@ -1,3 +1,4 @@
+import { OnboardClient } from "../core/help/client.js";
 /**
  * Thin daemon client used by every surface (CLI now, app later).
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
@@ -97,6 +98,7 @@ export interface OnboardJobView {
 }
 
 export class DaemonClient {
+  readonly onboard = new OnboardClient((method, route, body) => this.request(method, route, body));
   private cfg: DaemonConfig;
 
   constructor(cfg: DaemonConfig) {

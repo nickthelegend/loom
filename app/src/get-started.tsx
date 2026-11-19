@@ -1,3 +1,4 @@
+import { HelpEntry, ExamplesCard } from "./r4-onboard";
 /**
  * Get started on the phone (#403): the same checklist as the computer's Home, from
  * GET /api/onboarding. What the phone can do it does here — try the demo, start a project, open one
@@ -45,7 +46,7 @@ export function GetStartedCard(props: {
     return () => { gone = true; };
   }, [props.creds.url, props.refreshKey]);
 
-  if (hidden || !steps || steps.every((s) => s.done)) return null;
+  if (hidden || !steps || steps.every((s) => s.done)) return <View style={{ gap: 12 }}><HelpEntry creds={props.creds} onProjectCreated={props.onProjectCreated} /><ExamplesCard creds={props.creds} /></View>;
   const done = steps.filter((s) => s.done).length;
   const next = steps.find((s) => !s.done)!;
 
@@ -95,6 +96,8 @@ export function GetStartedCard(props: {
           )}
         </View>
       ))}
+      <HelpEntry creds={props.creds} onProjectCreated={props.onProjectCreated} />
+      <ExamplesCard creds={props.creds} />
       {err && <Text style={{ color: T.err, fontSize: 12.5 }}>{err}</Text>}
     </View>
   );

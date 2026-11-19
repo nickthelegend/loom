@@ -1,3 +1,4 @@
+import { registerProjectHelp } from "./help/settings.js";
 import { renderOps } from "./ops.js";
 /** Browser settings module. See README.md for ownership and startup. */
 import { renderModelRouting } from './model-routing.js';
@@ -1162,6 +1163,7 @@ import { TRY_BTN, bindTryDemo } from './try-demo.js';
     var scrim = document.createElement("div"); scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal psetmodal"><div class="modalhead">Project settings<button class="iconbtn" id="psx" aria-label="close">' + ICONS.x + '</button></div><div class="modalbody" id="psbody"><div class="loader"><i></i><i></i><i></i><i></i></div></div></div>';
     document.body.appendChild(scrim);
+    registerProjectHelp(scrim, pid);
     function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); delete teamHooks().pset; }
     function onKey(e){ if (e.key === "Escape") close(); }
     document.addEventListener("keydown", onKey);

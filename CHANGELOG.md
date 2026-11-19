@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Help centre (#449): bundled searchable guides, a palette command and status-bar Help button, `loom guide`, `/api/help`, and phone Help.
+- What's new (#449): installed-version highlights appear once per device after an update, with Show me links, `loom whatsnew`, and replay from Help.
+- Feature tours (#449): replayable Orchestra, Brain, Triggers and Review walkthroughs extend the existing demo engine and remember device progress.
+- Terminal tutorial (#449): four interactive offline Demo lessons for send, steer, fleet and memory, with saved progress and `--resume`.
+- Project readiness (#449): scored API, `loom ready --fix`, web Settings and phone Project tools, with previews and additive instruction/ignore fixes.
+- Starter prompts (#449): existing generic empty-chat suggestions now use detected stack and Git state through a shared API on web and phone.
+- Starter templates (#449): extend the existing template API and pickers with API, CLI, static-site and Python starters; `loom init --template` also accepts directories and Git URLs.
+- Demo scenarios (#449): extend `loom try` with offline fleet, multi-agent review and learned/reused memory scenarios, plus web and phone buttons.
+- Provider setup guide (#449): extend existing provider controls with four tested steps in Settings ▸ Setup and `loom providers:guide`, from a key to a default model agent.
+- Examples library (#449): install bundled recipes, fleets, disabled project triggers and prompt templates from Home, phone or `loom examples install` without replacing existing examples.
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,
