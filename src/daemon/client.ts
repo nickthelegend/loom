@@ -125,6 +125,8 @@ export class DaemonClient {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }
 
+  automation<T = Record<string, unknown>>(route: string, method = "GET", body?: Record<string, unknown>): Promise<T> { return this.request(method, route, body); }
+
   modelHealth() { return this.request<{ health: import("../core/model-routing.js").ModelHealth[] }>("POST", "/api/model-routing/health", undefined, 120_000); }
   setProjectEffort(id: string, defaultEffort: string) { return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/config`, { defaultEffort }); }
   agentOptions(id: string, agentId: string, options?: Record<string, unknown>) { return this.request(options ? "PUT" : "GET", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/options`, options); }

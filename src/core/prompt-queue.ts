@@ -16,11 +16,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { OrchestraStartOptions } from "./orchestra.js";
+import { forgetQueuedAutomation } from "./auto-r4/state.js";
 
 export type QueueTarget =
   | { kind: "agent"; agentId: string }
-  | { kind: "orchestra"; orchestrator?: string; workers?: string[]; maxParallel?: number; maxUsd?: number }
-  | { kind: "auto" };
+  | { kind: "orchestra"; orchestrator?: string; workers?: string[]; maxParallel?: number; maxUsd?: number; recipeOptions?: OrchestraStartOptions }
+  | { kind: "auto"; routeName?: string };
 
 /**
  * When a queued prompt may go, beyond "when nothing is in the way".
@@ -41,6 +43,7 @@ export type QueueCondition =
   | { kind: "quiet"; ms: number };
 
 export interface QueueItem {
+  automation?: string;
   id: string;
   text: string;
   target: QueueTarget;
@@ -104,6 +107,7 @@ export interface QueueState {
 }
 
 export interface QueueInput {
+  automation?: string;
   text: string;
   target?: QueueTarget;
   chat?: string;
@@ -127,7 +131,7 @@ export function parseTarget(raw: unknown): QueueTarget {
   if (typeof raw === "string" && raw.trim()) return { kind: "agent", agentId: raw.trim() };
   if (typeof raw !== "object") throw new Error("target must be an agent id, \"orchestra\" or \"auto\"");
   const t = raw as Record<string, unknown>;
-  if (t.kind === "auto") return { kind: "auto" };
+  if (t.kind === "auto") return { kind: "auto", ...(typeof t.routeName === "string" && t.routeName ? { routeName: t.routeName } : {}) };
   if (t.kind === "agent") {
     if (typeof t.agentId !== "string" || !t.agentId.trim()) throw new Error("an agent target needs an agentId");
     return { kind: "agent", agentId: t.agentId.trim() };
@@ -137,6 +141,7 @@ export function parseTarget(raw: unknown): QueueTarget {
     const maxParallel = Number(t.maxParallel);
     return {
       kind: "orchestra",
+      ...(t.recipeOptions && typeof t.recipeOptions === "object" ? { recipeOptions: t.recipeOptions as OrchestraStartOptions } : {}),
       ...(typeof t.orchestrator === "string" && t.orchestrator ? { orchestrator: t.orchestrator } : {}),
       ...(workers?.length ? { workers } : {}),
       ...(Number.isFinite(maxParallel) && maxParallel > 0 ? { maxParallel: Math.floor(maxParallel) } : {}),
@@ -198,6 +203,7 @@ export class PromptQueue {
     const item: QueueItem = {
       id: `q${Date.now().toString(36)}${(this.seq++).toString(36)}`,
       text,
+      ...(input.automation ? { automation: input.automation } : {}),
       target: input.target ?? { kind: "auto" },
       chat: input.chat ?? "main",
       ...(input.plan ? { plan: true } : {}),
@@ -245,6 +251,7 @@ export class PromptQueue {
 
   remove(id: string): void {
     const i = this.index(id);
+    forgetQueuedAutomation(this.file, [this.state.items[i]!]);
     this.state.items.splice(i, 1);
     if (!this.state.items.length) this.state = { items: [], paused: false };
     this.changed();
@@ -261,6 +268,7 @@ export class PromptQueue {
 
   clear(): number {
     if (this.reserved.size) throw new Error("a queued prompt is being steered; try again when it finishes");
+    forgetQueuedAutomation(this.file, this.state.items);
     const n = this.state.items.length;
     this.state = { items: [], paused: false };
     this.changed();

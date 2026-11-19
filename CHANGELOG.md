@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Debounced file-change triggers with `--on-change`, `{{files}}`, admin-only configuration, bounded 15-second checks in open projects, and exclusion of `.git`, `.loom`, and worktrees (#455).
+- Project event triggers for failed turns, merged PRs, failed CI, completed Orchestra runs, and expired approvals, with event fields and protection against self-triggering and automation chains (#455).
+- Branch triggers watch local and fetched remote-tracking commits and supply `{{commits}}` and `{{range}}` (#455).
+- Plain-language schedules preview their cron expression and next five runs in CLI, web, and phone; creation and editing retain the existing admin-only gate, with run/pause/resume available to the owner’s phone (#455).
+- Trigger conditions for clean/dirty trees, file globs, local hours, and owner-only bounded commands record skipped firings in run history (#455).
+- Owner-managed automation quiet hours hold triggers and timed queue prompts durably and release them afterwards, with web and phone held counts (#455).
+- Extended existing signed Orchestra completion webhooks into project event subscriptions with the same secret and headers, durable delivery logs, retries, and Send again controls (#455).
+- Schedules, incoming webhooks, and event triggers can queue Orchestra recipes, Orchestra goals, or saved routes (#455).
+- Public URL watches detect page or selected JSON-value changes with old/new prompt values, bounded responses and timeouts, and DNS-pinned public-address checks (#455).
+- Pause all automation indefinitely or for a duration; triggers pause after configurable consecutive failures and notify the owner through the existing needs-input channel (#455).
+
 ## [2.1.0] — 2026-11-19
 
 **Loom 2.1: plan, steer, and share the work.** Preview Orchestra plans, retry individual tasks,

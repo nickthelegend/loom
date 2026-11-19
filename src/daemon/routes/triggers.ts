@@ -43,7 +43,7 @@ function patchFrom(b: Record<string, unknown>, kind: Trigger["kind"]): Partial<T
     out.prompt = p.slice(0, 20_000);
   }
   if (b.agent !== undefined) out.agent = b.agent ? String(b.agent) : undefined;
-  if (b.enabled !== undefined) out.enabled = Boolean(b.enabled);
+  if (b.enabled !== undefined) { out.enabled = Boolean(b.enabled); if (out.enabled) out.failures = 0; }
   if (kind === "intake" && b.intake !== undefined) {
     if (!b.intake || typeof b.intake !== "object" || Array.isArray(b.intake)) throw new Error("intake needs source and mode");
     const input = b.intake as Record<string, unknown>;

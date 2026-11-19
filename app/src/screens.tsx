@@ -68,6 +68,7 @@ import { SideSheet } from "./side";
 import { NewProjectSheet } from "./new-project";
 import { GetStartedCard } from "./get-started";
 import { TriggersView } from "./triggers";
+import { AutomationPanel } from "./r4-auto";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
 import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } from "./link-model";
@@ -1617,6 +1618,7 @@ export function ProjectScreen(props: {
 
       {err && <Sys color={T.err} text={err} />}
 
+      {tab === "triggers" && <AutomationPanel creds={creds} projectId={project.id} />}
       {tab === "thread" ? (
         <>
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
