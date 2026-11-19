@@ -8,6 +8,7 @@
  * live activity, shuttle magenta marks the baton. See docs/design-system.md.
  */
 
+import { ACCENTS, accentOf, type Accent } from "./shell-model";
 import { Platform } from "react-native";
 
 /** Dark: the design these tokens were drawn for. */
@@ -91,7 +92,7 @@ const LIGHT: typeof DARK = {
 
 /**
  * The tokens every screen reads. Mutable on purpose: setScheme swaps the
- * palette in place and the app remounts its tree, so the hundreds of inline
+ * palette in place and the app re-renders its tree, so the hundreds of inline
  * styles that read T.x pick the new values up without each one subscribing.
  */
 export const T: typeof DARK = { ...DARK };
@@ -115,10 +116,31 @@ export function pickTheme(p: ThemePref): void {
   for (const fn of [...prefListeners]) fn(p);
 }
 
+export const ACCENT_KEY = "loom.accent";
+export let accent: Accent = "cyan";
+let appliedAccent: Accent = "cyan";
+const accentListeners = new Set<(a: Accent) => void>();
+export function onAccent(fn: (a: Accent) => void): () => void { accentListeners.add(fn); return () => { accentListeners.delete(fn); }; }
+export function pickAccent(a: Accent): void { for (const fn of accentListeners) fn(a); }
+export function setAccent(value: unknown): void { accent = accentOf(value); }
+
+let highContrast = false;
+let appliedContrast = false;
+export function setHighContrast(value: boolean): void { highContrast = value; }
 export function setScheme(next: "dark" | "light"): boolean {
-  if (next === scheme) return false;
+  if (next === scheme && accent === appliedAccent && highContrast === appliedContrast) return false;
   Object.assign(T, next === "light" ? LIGHT : DARK);
+  appliedContrast = highContrast;
+  if (highContrast) {
+    const light = next === "light";
+    Object.assign(T, { text: light ? "#000000" : "#ffffff", dim: light ? "#292929" : "#eeeeee", faint: light ? "#333333" : "#dddddd", line: light ? "#555555" : "#999999", line2: light ? "#444444" : "#aaaaaa", gitAdd: light ? "#145522" : "#9effae", gitDel: light ? "#8c1420" : "#ff9ba7" });
+  }
   scheme = next;
+  appliedAccent = accent;
+  const color = ACCENTS[accent][next === "light" ? 1 : 0];
+  T.thread = color; T.accent = color;
+  if (accent !== "cyan") T.threadDim = color + (next === "light" ? "1a" : "26");
+  if (accent !== "cyan") T.accentBlue = color;
   for (const fn of schemeListeners) fn();
   return true;
 }

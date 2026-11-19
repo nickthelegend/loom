@@ -1,4 +1,5 @@
 /** Named fleets belong to the user, so the same selection works in every project. */
+import { resolveModel } from "./model-routing.js";
 import fs from "node:fs";
 import path from "node:path";
 import { ensureLoomHome, loomHome } from "./registry.js";
@@ -15,7 +16,7 @@ export function parseAgentSpec(value: string, rosterIds: string[] = []): { agent
   if (!match) throw new Error(`invalid agent spec "${value}" — use agent[@model][:effort][xN]`);
   const agent = `${match[1] ?? ""}${match[2]!.trim()}`;
   if (!agent || agent === "team:") throw new Error(`invalid agent spec "${value}"`);
-  return { agent, count, ...(match[3] ? { model: match[3] } : {}), ...(match[4] ? { effort: match[4] } : {}) };
+  return { agent, count, ...(match[3] ? { model: resolveModel(match[3]) } : {}), ...(match[4] ? { effort: match[4] } : {}) };
 }
 
 export interface SavedFleet { name: string; spec: string }
@@ -39,13 +40,17 @@ function writeFleets(fleets: SavedFleet[]): void {
   fs.renameSync(file + ".tmp", file);
 }
 
-export function saveFleet(name: unknown, spec: unknown): SavedFleet {
+export function validateFleet(name: unknown, spec: unknown): SavedFleet {
   const key = fleetName(name);
   if (typeof spec !== "string" || !spec.trim()) throw new Error("fleet spec is required");
   const rows = spec.split(",").map(s => s.trim());
   // Store concrete specs: aliases cannot become recursive or change underneath another fleet.
   for (const row of rows) parseAgentSpec(row);
-  const fleet = { name: key, spec: rows.join(",") };
+  return { name: key, spec: rows.join(",") };
+}
+
+export function saveFleet(name: unknown, spec: unknown): SavedFleet {
+  const fleet = validateFleet(name, spec), key = fleet.name;
   writeFleets([...listFleets().filter(f => f.name !== key), fleet]);
   return fleet;
 }

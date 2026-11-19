@@ -5,7 +5,7 @@ description: Use Loom's native MCP tools to inspect projects, delegate turns, co
 
 # Drive Loom through MCP
 
-Require Loom ≥ 2.0.0 and an attached Loom MCP server. Prefer its native tools
+Require Loom ≥ 2.1.0 and an attached Loom MCP server. Prefer its native tools
 when available. Read the client's tool schemas; inputs are strict objects and
 unknown fields are rejected. Do not translate CLI flags into invented tool fields.
 Use [loom](../loom/SKILL.md) to register a server or enable project `loomTools`.
@@ -14,13 +14,18 @@ Use [loom](../loom/SKILL.md) to register a server or enable project `loomTools`.
 
 Call `loom_projects` with `{}` and use a returned project ID or name. A per-turn
 credential sees only its own project. `loom_status` can inspect one project or all
-accessible projects; every other project tool requires `project`. Use actual chat,
-agent, run, and task IDs. Chat inputs default to `main`; resolve other chats with
+accessible projects; scoreboard also accepts an optional project. Fleet listing and
+demo creation are machine-wide owner operations; the other project tools require
+`project`. Use actual chat, agent, run, and task IDs. Chat inputs default to `main`; resolve other chats with
 `loom_chats` rather than assuming a title is an ID.
 
 | Need | Tool and inputs beyond `project` |
 | --- | --- |
 | Check active work | `loom_status`; `project` is optional. |
+| Inspect model standings | `loom_scoreboard`: optional `project`, `window` = `7d`, `30d`, or `all`; omitted project covers accessible projects. |
+| List saved fleets | `loom_fleets`: `{}`; owner/unscoped device only, no `project` argument. |
+| Try an offline demo | `loom_try`: optional absolute `dir`, `agents` (1–8); owner/unscoped device only. Creates or reopens a project with real demo edits. |
+| List project memory | `loom_memory_list`: optional `kind`, `limit` (1–1000). |
 | Discover agents/models | `loom_agents`; read each agent's `models`. |
 | Add requested sessions | `loom_add_agents`: `kind`, optional `model`, `count`. Inspect first; addition is not idempotent. |
 | Find a conversation | `loom_chats`. |
@@ -83,7 +88,8 @@ worker IDs; model/effort choices apply per spawn. The orchestrator must resolve 
 one instance. Saved references such as `["@parser"]` use existing machine fleets;
 `["best:2"]` is an orchestra worker selection using the project's scoreboard.
 Inspect the resulting workers because insufficient evidence falls back to the roster.
-Use the CLI fleet/scoreboard workflow to inspect or manage those selections.
+Use `loom_scoreboard` and owner-authorized `loom_fleets` to inspect those selections;
+use the CLI fleet workflow to manage them.
 
 Compare expands to 2–8 entrants, each with an isolated worktree and permission to
 edit according to its agent configuration. It is not a read-only opinion poll.
@@ -121,6 +127,10 @@ The per-turn credential is held in daemon memory and authorizes reads of its pro
 and the limited writes these tools need. It can send/steer, add agents/board items,
 start work, and record memory; reporting additionally requires its matching run/task.
 An ordinary turn credential cannot report for an arbitrary worker.
+
+The machine-wide `loom_fleets` and `loom_try` tools require an owner or unscoped
+device; their presence in the schema does not grant a worker access. Scoreboard
+results and memory listing retain the caller's project scope.
 
 It cannot access another project or daemon-wide management. It cannot change
 config, permissions, or agent options; open terminals; manage triggers; or delete

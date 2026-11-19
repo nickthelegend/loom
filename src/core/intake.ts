@@ -1,10 +1,11 @@
+import { jiraAssigned, jiraComment } from "./jira.js";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "./process.js";
 import { resolveProvider } from "./providers.js";
 import { logbook } from "./logbook.js";
 
-export type IntakeSource = "github" | "linear";
+export type IntakeSource = "github" | "linear" | "jira";
 export type IntakeMode = "chat" | "orchestra";
 
 /** GET intake and POST intake/start return { issues: IntakeIssue[] }.
@@ -27,11 +28,12 @@ export interface IntakeRecord extends IntakeIssue {
   started: { chat: string; run?: string };
   /** Reserved before enqueueing so a crash cannot create a second chat. */
   pending?: boolean;
+  completedAt?: number;
   prs: Array<{ url: string; sent?: boolean }>;
 }
 
 export function intakeSource(value: unknown): IntakeSource {
-  if (value !== "github" && value !== "linear") throw new Error("source must be github or linear");
+  if (value !== "github" && value !== "linear" && value !== "jira") throw new Error("source must be github, linear or jira");
   return value;
 }
 export function intakeMode(value: unknown): IntakeMode {
@@ -79,7 +81,7 @@ function linearEndpoint(): string {
   }
   return "https://api.linear.app/graphql";
 }
-async function linear<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+export async function linear<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const key = process.env.LINEAR_API_KEY?.trim() || resolveProvider("linear")?.key;
   if (!key) throw new Error("Set LINEAR_API_KEY or store a linear provider key to use intake");
   // Provider error bodies can echo credentials; return only our own diagnostics.
@@ -102,6 +104,7 @@ export async function assignedIssues(dir: string, source: IntakeSource, label?: 
     const rows = JSON.parse(await gh(dir, args)) as Array<{ number: number; title: string; body: string; labels: Array<{ name: string }>; url: string }>;
     return rows.map(r => ({ source, id: r.url, number: r.number, title: r.title, body: (r.body ?? "").slice(0, 8000), url: r.url, labels: r.labels.map(l => l.name) }));
   }
+  if (source === "jira") return jiraAssigned(label);
   const issues: IntakeTask[] = [];
   let after: string | null = null;
   const seen = new Set<string>();
@@ -159,6 +162,7 @@ export function flushIntakePrs(dir: string): Promise<void> {
     for (const row of readIntake(dir)) for (const pr of row.prs.filter(p => !p.sent)) {
       const body = `Loom opened a pull request for this issue: ${pr.url}`;
       if (row.source === "github") await gh(dir, ["issue", "comment", row.url, "--body", body]);
+      else if (row.source === "jira") await jiraComment(row.id, body);
       else {
         const data = await linear<{ commentCreate: { success: boolean } }>(
           "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }", { input: { issueId: row.id, body } },
@@ -173,4 +177,21 @@ export function flushIntakePrs(dir: string): Promise<void> {
   linking.set(dir, next);
   void next.finally(() => { if (linking.get(dir) === next) linking.delete(dir); }).catch(() => {});
   return next;
+}
+
+/** Retry completion from the durable PR ledger, including after a daemon restart. */
+export async function completeLinearIssues(dir: string, mergedUrls: string[]): Promise<void> {
+  for (const row of readIntake(dir).filter(r => r.source === "linear" && !r.completedAt && r.prs.some(p => mergedUrls.includes(p.url)))) {
+    const data = await linear<{ issue: { state: { type: string }; team: { states: { nodes: Array<{ id: string; name: string; type: string }> } } } }>(
+      "query($id: String!) { issue(id: $id) { state { type } team { states { nodes { id name type } } } } }", { id: row.id });
+    if (data.issue.state.type !== "completed") {
+      const states = data.issue.team.states.nodes.filter(s => s.type === "completed");
+      const state = states.find(s => s.name.toLowerCase() === "done") ?? states[0];
+      if (!state) throw new Error("Linear team has no completed workflow state");
+      const updated = await linear<{ issueUpdate: { success: boolean } }>("mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }", { id: row.id, input: { stateId: state.id } });
+      if (!updated.issueUpdate.success) throw new Error("Linear declined issue completion");
+    }
+    const fresh = readIntake(dir).find(r => r.source === row.source && r.id === row.id)!;
+    saveIntake(dir, { ...fresh, completedAt: Date.now() });
+  }
 }

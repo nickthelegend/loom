@@ -53,6 +53,9 @@ export interface ProviderSpec {
  * base URL and it works, because the protocol is the protocol.
  */
 export const BUILTIN_PROVIDERS: ProviderSpec[] = [
+  { id: "linear", label: "Linear", baseUrl: "https://api.linear.app", envKeys: ["LINEAR_API_KEY"], note: "Issue intake and completion" },
+  { id: "jira", label: "Jira", baseUrl: "https://your-site.atlassian.net", envKeys: ["JIRA_API_KEY"], note: "Set your site URL and use email:API-token as the key" },
+  { id: "gitlab", label: "GitLab", baseUrl: "https://gitlab.com", envKeys: ["GITLAB_API_KEY"], note: "Merge request feedback; token needs read_api" },
   {
     id: "openrouter",
     label: "OpenRouter",
@@ -211,7 +214,7 @@ export function forgetProvider(id: string): boolean {
 
 /** A built-in keyless endpoint is an option, not evidence the user configured it. */
 export function hasConfiguredProvider(): boolean {
-  return listProviders().some(p => p.configured && p.source !== "none")
+  return listProviders().some(p => p.configured && p.source !== "none" && !["linear", "jira", "gitlab"].includes(p.id))
     || Object.hasOwn(readStore(), "ollama");
 }
 
@@ -444,7 +447,7 @@ export async function allModels(
   const models: ProviderModel[] = [];
   const errors: Array<{ provider: string; error: string }> = [];
   for (const row of listProviders(env)) {
-    if (!row.configured) continue;
+    if (!row.configured || ["linear", "jira", "gitlab"].includes(row.id)) continue;
     const p = resolveProvider(row.id, env);
     if (!p) continue;
     const got = await fetchModels(p, opts.refresh ? { refresh: true } : {});

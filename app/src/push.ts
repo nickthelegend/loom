@@ -1,3 +1,4 @@
+import { pushRegistration } from "./r4-phone/push-state";
 /**
  * Register this device for pushes: ask permission, fetch the Expo push
  * token, hand it to the daemon (attached to our paired-client record).
@@ -5,10 +6,11 @@
  * outcomes and new releases — the kinds this phone switched on (PUSH_KINDS).
  */
 
+import { haptic } from "./haptics";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { AppState, Platform, Vibration } from "react-native";
-import { api, kv, type Creds } from "./api";
+import { AppState, Platform } from "react-native";
+import { phoneApi as api, kv, type Creds } from "./api";
 
 /** What the daemon can push, each switchable from the account sheet (daemon push.ts PUSH_CATEGORIES). */
 export const PUSH_KINDS = [
@@ -59,12 +61,12 @@ if (Platform.OS !== "web") {
  * Allow / Deny on the alert itself, for a tool approval ("loom-approval" — the daemon sets it on
  * approval pushes). Neither opens the app: the answer goes straight to the computer that asked.
  */
-export async function registerApprovalActions(): Promise<void> {
+export async function registerApprovalActions(locked = false): Promise<void> {
   if (Platform.OS === "web") return;
   try {
     await Notifications.setNotificationCategoryAsync("loom-approval", [
-      { identifier: "allow", buttonTitle: "Allow", options: { opensAppToForeground: false } },
-      { identifier: "deny", buttonTitle: "Deny", options: { isDestructive: true, opensAppToForeground: false } },
+      { identifier: "allow", buttonTitle: "Allow", options: { opensAppToForeground: locked, isAuthenticationRequired: locked } },
+      { identifier: "deny", buttonTitle: "Deny", options: { isDestructive: true, opensAppToForeground: locked, isAuthenticationRequired: locked } },
     ]);
   } catch { /* no native module (Expo Go without notifications): the alert just opens the app */ }
 }
@@ -73,32 +75,34 @@ export async function registerApprovalActions(): Promise<void> {
 export function onApprovalAction(cb: (data: Record<string, unknown>, decision: "allow" | "deny") => void): () => void {
   if (Platform.OS === "web") return () => {};
   const seen = new Set<string>();
+  let live = true;
   let sub: { remove: () => void } | null = null;
+  const handle = (r: Notifications.NotificationResponse | null) => {
+    if (!live || !r) return;
+    const a = r.actionIdentifier;
+    if (a !== "allow" && a !== "deny") return;
+    const id = r.notification.request.identifier;
+    if (seen.has(id)) return;
+    seen.add(id);
+    cb((r.notification.request.content.data ?? {}) as Record<string, unknown>, a);
+    void Notifications.dismissNotificationAsync(id).catch(() => {});
+    void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  };
   try {
-    sub = Notifications.addNotificationResponseReceivedListener((r) => {
-      const a = r.actionIdentifier;
-      if (a !== "allow" && a !== "deny") return;
-      const id = r.notification.request.identifier;
-      if (seen.has(id)) return;
-      seen.add(id);
-      cb((r.notification.request.content.data ?? {}) as Record<string, unknown>, a);
-      void Notifications.dismissNotificationAsync(id).catch(() => {});
-    });
+    sub = Notifications.addNotificationResponseReceivedListener(handle);
+    void Notifications.getLastNotificationResponseAsync().then(handle).catch(() => {});
   } catch { /* nothing to listen to */ }
-  return () => sub?.remove();
+  return () => { live = false; sub?.remove(); };
 }
 
 /** on: registered · denied: the phone's notification setting is off · unavailable: no push here (a simulator, web, a build without push set up). */
 export type PushState = "on" | "denied" | "unavailable";
 
 /** How the last registration went (App registers on launch), for the account sheet. */
-let lastState: PushState | null = null;
-export const lastPushState = () => lastState;
-
-export async function enablePush(creds: Creds): Promise<PushState> {
-  lastState = await register(creds);
-  return lastState;
-}
+const registration = pushRegistration(register);
+export const lastPushState = registration.last;
+export const enablePush = registration.active;
+export const registerPush = registration.background;
 
 async function register(creds: Creds): Promise<PushState> {
   if (Platform.OS === "web") return "unavailable";
@@ -114,10 +118,11 @@ async function register(creds: Creds): Promise<PushState> {
     if (!perm.granted) return "denied";
     const projectId = easProjectId();
     const token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)).data;
-    await api(creds, "/api/push/register", {
+    const registered = await api<{ clientId?: string }>(creds, "/api/push/register", {
       method: "POST",
-      body: JSON.stringify({ token, platform: Platform.OS, kinds: await loadPushKinds() }),
+      body: JSON.stringify({ token, platform: Platform.OS, kinds: await loadPushKinds(), groupByProject: Constants.appOwnership !== "expo" }),
     });
+    if (registered.clientId) await kv.set("loom.push-client." + creds.token, registered.clientId);
     return "on";
   } catch {
     // Push is optional — the app works fully without it.
@@ -138,7 +143,7 @@ export async function disablePush(creds: Creds): Promise<void> {
 export function notifyApproval(what: { agent: string; tool: string; project?: string }): void {
   if (Platform.OS === "web") return;
   try {
-    Vibration.vibrate([0, 60, 80, 60]);
+    haptic.tap();
   } catch {
     // no vibrator — nothing to do
   }
@@ -181,7 +186,7 @@ export function onNotificationOpen(onOpen: (data: unknown) => void): () => void 
     .then((r) => {
       handle(r);
       // so a later remount (or a re-pair) doesn't reopen the same alert
-      if (r) void Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
+      if (r?.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) void Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
     })
     .catch(() => {});
   return () => {

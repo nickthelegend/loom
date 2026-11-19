@@ -157,8 +157,7 @@ export function modelScoreboard(sources: ScoreboardSource[], window: ScoreboardW
 }
 
 /** Read registered projects without starting their agents or recovering inactive runs. */
-export async function readScoreboard(projects: ProjectInfo[], window: ScoreboardWindow = "30d", project = "all"): Promise<Scoreboard> {
-  const now = Date.now();
+export async function readScoreboard(projects: ProjectInfo[], window: ScoreboardWindow = "30d", project = "all", now = Date.now()): Promise<Scoreboard> {
   const sinceTs = window === "all" ? undefined : now - (window === "7d" ? 7 : 30) * 86_400_000;
   const sources: ScoreboardSource[] = [];
   for (const info of projects) {
@@ -182,4 +181,21 @@ export function bestFleet(rows: ModelStanding[], count: number, fallback: string
   if (!Number.isInteger(count) || count < 1 || count > 100) throw new Error("best count must be an integer from 1 to 100");
   const best = rankModels([...rows]).filter(r => r.entries >= 5 && r.kind && r.model !== "unknown" && allowed(r.kind)).slice(0, count);
   return best.length === count ? best.map(r => `${r.kind}@${r.model}`) : fallback;
+}
+
+/** Quoted cells preserve commas/newlines; text prefixes keep spreadsheet formulas inert. */
+export function scoreboardCsv(board: Scoreboard, by: "byKindModel" | "byModel" = "byKindModel"): string {
+  const keys: Array<keyof ModelStanding> = ["key", "kind", "model", "turns", "finished", "interrupted", "errored", "finishedRate", "interruptedRate", "erroredRate", "medianMs", "p90Ms", "totalCostUsd", "costedTurns", "avgCostUsd", "inputTokens", "outputTokens", "tokens", "entries", "wins", "winRate", "tasksDone", "reviews", "reviewsPassed", "reviewPassRate"];
+  const cell = (value: unknown) => {
+    let text = value == null ? "" : String(value);
+    if (typeof value === "string" && /^[\s]*[=+@-]/.test(text)) text = "'" + text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  };
+  return [keys.map(cell).join(","), ...board[by].map(row => keys.map(k => cell(row[k])).join(","))].join("\r\n") + "\r\n";
+}
+
+export function scoreboardDigest(board: Scoreboard): string {
+  if (!board.byModel.length) return "Weekly scoreboard: no model results in the last 7 days.";
+  return "Weekly scoreboard · last 7 days\n" + board.byModel.map(r =>
+    `${r.model}: ${r.turns} turns, ${r.finished} finished, ${r.wins}/${r.entries} wins, ${r.tokens} tokens, $${r.totalCostUsd.toFixed(4)} recorded cost`).join("\n");
 }

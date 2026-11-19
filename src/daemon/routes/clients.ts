@@ -25,11 +25,11 @@ export function registerClientsRoutes(app: Express, ctx: Pick<RouteContext, "aut
   app.post("/api/push/register", (req, res) => {
     const me = ctx.auth.clientFor(bearerToken(req.headers.authorization));
     if (!me) return void res.status(403).json({ error: "device tokens only — pair first" });
-    const { token, platform, kinds } = (req.body ?? {}) as { token?: string; platform?: string; kinds?: unknown };
+    const { token, platform, kinds, groupByProject } = (req.body ?? {}) as { token?: string; platform?: string; kinds?: unknown; groupByProject?: unknown };
     if (!token?.trim()) return void res.status(400).json({ error: "missing token" });
     const wanted = Array.isArray(kinds) ? kinds.filter((k): k is string => typeof k === "string" && (PUSH_CATEGORIES as string[]).includes(k)) : undefined;
-    ctx.auth.setPushToken(me.id, token.trim(), platform, wanted);
-    res.json({ registered: true, kinds: wanted ?? PUSH_CATEGORIES });
+    ctx.auth.setPushToken(me.id, token.trim(), platform, wanted, groupByProject === true);
+    res.json({ registered: true, clientId: me.id, kinds: wanted ?? PUSH_CATEGORIES });
   });
 
   app.delete("/api/push/register", (req, res) => {

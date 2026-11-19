@@ -1,3 +1,6 @@
+import { heldApprovals, approvalPending, recordHeldApproval } from "../core/phone-r4/held-approvals.js";
+import { readDaemonConfig } from "../core/registry.js";
+import { permitsPush, preferences } from "../core/phone-r4/preferences.js";
 /**
  * Phone push — the daemon's side of fire-and-notify.
  *
@@ -133,18 +136,55 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
   }
 }
 
+/** The machine is part of the key because a phone can pair with several computers. */
+export function projectPushGroup(data: Record<string, unknown>): string {
+  return `loom:${encodeURIComponent(String(data.daemon ?? ""))}:${encodeURIComponent(String(data.projectId ?? ""))}`;
+}
+
 /** Send one message to many devices in a single Expo batch call. Best-effort. */
-export async function sendExpoPush(tokens: string[], message: PushMessage): Promise<void> {
+export async function sendExpoPush(tokens: string[], message: PushMessage, groupedAndroid: ReadonlySet<string> = new Set()): Promise<void> {
   if (!tokens.length || process.env.LOOM_NO_PUSH) return;
+  const clients = readDaemonConfig()?.clients ?? [];
+  const recipients = new Map<string, string>();
+  tokens = [...new Set(tokens)].filter(token => {
+    const matches = clients.filter(c => c.pushToken === token).sort((a, b) => b.createdAt - a.createdAt);
+    const category = String(message.data?.category ?? "updates");
+    const project = typeof message.data?.projectId === "string" ? message.data.projectId : undefined;
+    const chat = String(message.data?.chat ?? "main");
+    const eligible = matches.find(c => {
+      if (c.guest && (!project || c.guest.project !== project || c.guest.chat !== chat || c.guest.expiresAt <= Date.now())) return false;
+      if (project && c.projects?.length && !c.projects.includes(project)) return false;
+      if (message.data?.category && c.pushKinds && !c.pushKinds.includes(category)) return false;
+      return true;
+    });
+    const chosen = eligible && permitsPush(preferences(eligible.id), category, project, chat) ? eligible : undefined;
+    const approvalId = message.data?.approvalId;
+    if (eligible && !chosen && category === "approvals" && project && typeof approvalId === "string") {
+      recordHeldApproval(project, approvalId);
+      heldApprovals.hold(`${project}:${approvalId}:${token}`, {
+        pending: () => approvalPending(project, approvalId) && (readDaemonConfig()?.clients ?? []).some(c => c.id === eligible.id && c.pushToken === token),
+        permitted: () => permitsPush(preferences(eligible.id), category, project, chat),
+        send: () => sendExpoPush([token], message, groupedAndroid),
+      });
+    }
+    if (chosen) recipients.set(token, chosen.id);
+    return !matches.length || Boolean(chosen);
+  });
+  if (!tokens.length) return;
+  if (message.data?.kind === "run_complete" || message.data?.kind === "needs_input") message = { ...message, categoryId: "loom-reply" };
   const url = process.env.LOOM_EXPO_PUSH_URL ?? EXPO_PUSH_URL;
-  const batch = tokens.map((to) => ({
-    to,
-    title: message.title,
-    body: message.body,
-    sound: "default",
-    ...(message.data ? { data: message.data } : {}),
-    ...(message.categoryId ? { categoryId: message.categoryId } : {}),
-  }));
+  const batch = tokens.map((to) => {
+    const group = message.data?.projectId ? projectPushGroup(message.data) : undefined;
+    const androidData = group && groupedAndroid.has(to);
+    return {
+      to,
+      ...(androidData ? { priority: "high" } : { title: message.title, body: message.body, sound: "default" }),
+      ...(group ? { threadId: group } : {}),
+      ...(message.data ? { data: { ...message.data, clientId: recipients.get(to), ...(group ? { projectGroup: group } : {}),
+        ...(androidData ? { loomTitle: message.title, loomBody: message.body } : {}) } } : {}),
+      ...(message.categoryId ? { categoryId: message.categoryId } : {}),
+    };
+  });
   try {
     await fetch(url, {
       method: "POST",

@@ -4,6 +4,8 @@
  *
  * LOOM_HOME env var overrides the home directory (used heavily by tests).
  */
+import { validateAgentOptions } from "./model-routing-settings.js";
+
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -176,6 +178,16 @@ export function readProjectConfig(projectDir: string, opts: { strict?: boolean }
   return cfg;
 }
 
+/**
+ * An agent's picture, as anything may show it: a small PNG, JPEG or WebP data URL and nothing
+ * else. The avatar API always checked this; a hand-edited .loom/config.json didn't, and its value
+ * went into every client's HTML — `data:image/png;base64,x" onerror="…` ran in Loom's origin.
+ */
+export const AVATAR_MAX = 120_000;
+export function isAvatarDataUrl(v: unknown): v is string {
+  return typeof v === "string" && v.length <= AVATAR_MAX && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
+}
+
 const AGENT_KEYS = new Set(["id", "kind", "role", "account", "options", "memoryFiles", "enabled", "instructions", "avatar", "permissions"]);
 /** Keys an adapter reads from options — someone writing one on the agent itself meant it there. */
 const OPTION_KEYS = new Set(["model", "bin", "extraArgs", "baseUrl", "configDir", "env", "effort", "sandbox", "timeoutMs", "startTimeoutMs", "permissionMode", "mode", "args"]);
@@ -198,6 +210,7 @@ export function agentConfigWarnings(cfg: ProjectConfig): string[] {
 }
 
 export function writeProjectConfig(projectDir: string, cfg: ProjectConfig): void {
+  for (const a of cfg.agents) if (a.options !== undefined) validateAgentOptions(a.kind, a.options);
   const dir = projectLoomDir(projectDir), file = path.join(dir, "config.json");
   fs.mkdirSync(dir, { recursive: true });
   const temporary = path.join(dir, `.config-${crypto.randomUUID()}.tmp`);
@@ -341,6 +354,8 @@ export interface PairedClient {
   guest?: GuestScope;
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
+  /** The Android client can present grouped data notifications. */
+  pushGroupByProject?: boolean;
   platform?: string;
   /** Which push categories this device wants (questions, approvals, done, goals); absent means all. */
   pushKinds?: string[];

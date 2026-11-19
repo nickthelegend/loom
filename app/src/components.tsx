@@ -1,9 +1,11 @@
+import { Text } from "./r4-phone/preferences";
+import { diffLocations, type DiffLocation } from "./phone-batch-model";
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
 import { MessagePressable, type ChatActions } from "./chat-composer";
 
 import { createContext, useContext, useState } from "react";
-import { Alert, Image, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Image, Platform, Pressable, ScrollView, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
 import { actOnLoop, interrupt, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
@@ -216,7 +218,7 @@ export function Unreachable(props: { what: string; detail: string; onRetry: () =
  * a decorative placeholder — a fake sparkline on an empty run is a lie with a
  * gradient on it.
  */
-export function Empty(props: { text: string }) {
+export function Empty(props: { text: string; action?: string; onAction?: () => void }) {
   return (
     <View
       style={{
@@ -231,6 +233,9 @@ export function Empty(props: { text: string }) {
       <Text style={{ color: T.faint, fontSize: 12, lineHeight: 19, textAlign: "center" }}>
         {props.text}
       </Text>
+      {props.action && props.onAction && <TouchableOpacity onPress={props.onAction} accessibilityRole="button" style={{ alignSelf: "center", marginTop: 12, padding: 10, borderWidth: 1, borderColor: T.line2, borderRadius: radii.key }}>
+        <Text style={{ color: T.thread, fontWeight: "600" }}>{props.action}</Text>
+      </TouchableOpacity>}
     </View>
   );
 }
@@ -283,6 +288,7 @@ export function Segmented<K extends string>(props: {
  * near-white fill with dark text; everything else is a raised neutral key.
  */
 export function Btn(props: {
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   primary?: boolean;
@@ -291,6 +297,9 @@ export function Btn(props: {
   return (
     <TouchableOpacity
       onPress={props.onPress}
+      disabled={props.disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: props.disabled }}
       activeOpacity={0.7}
       style={{
         backgroundColor: props.primary ? T.bright : T.raised,
@@ -333,7 +342,10 @@ export function Sys(props: { text: string; color?: string }) {
 }
 
 /** Unified diff with +/− washes; used by turn cards and the Changes tab. */
-export function DiffView(props: { patch: string; maxHeight?: number }) {
+export function DiffView(props: { patch: string; maxHeight?: number; onAsk?: (line: DiffLocation) => void }) {
+  const context = useContext(ThreadCtx);
+  const ask = props.onAsk ?? context?.askLine;
+  const locations = diffLocations(props.patch);
   const lines = props.patch.split("\n");
   return (
     <ScrollView
@@ -372,6 +384,8 @@ export function DiffView(props: { patch: string; maxHeight?: number }) {
         return (
           <Text
             key={i}
+            onLongPress={locations[i] && ask ? () => ask(locations[i]!) : undefined}
+            accessibilityHint={locations[i] && ask ? "Hold to ask about this line in chat" : undefined}
             style={{
               color: add ? T.gitAdd : del ? T.gitDel : meta ? T.faint : T.dim,
               backgroundColor: add ? T.diffAddBg : del ? T.diffDelBg : "transparent",
@@ -446,7 +460,7 @@ export interface BranchCtx {
   edit: (eventId: number, text: string) => void;
   retry: (eventId: number) => void;
 }
-export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx; composer?: ChatActions } | null>(null);
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx; composer?: ChatActions; askLine?: (line: DiffLocation) => void } | null>(null);
 
 /** ‹ n/m › under a message that has other versions (#375). */
 function BranchPager(props: { eventId: number; mine: boolean }) {
@@ -751,6 +765,11 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  if (e.kind === "status" && p.state === "model_fallback") return <Text style={{ color: T.dim, fontSize: 12, padding: 8 }}>{String(p.from ?? "")} → {String(p.to ?? "")}{p.reason ? ` · ${String(p.reason)}` : ""}</Text>;
+  if (e.kind === "status" && p.state === "model_cap_warning") return <Text style={{ color: T.warn, fontSize: 12, padding: 8 }}>{String(p.text ?? "")}</Text>;
+  if (e.kind === "status" && p.state === "memory_injection") return <View style={{ padding: 8, gap: 4 }}><Text style={{ color: T.dim }}>Why was this injected? · Turn {String(p.turn)}</Text>{(p.memories as Array<{ id: string; text: string; score: number; reason: string }> ?? []).map(m => <Text key={m.id} style={{ color: T.dim, fontSize: 12 }}>{m.text} · score {m.score.toFixed(3)} · {m.reason}</Text>)}</View>;
+  if (e.kind === "review" && p.phase === "started") return <Sys text={`Review checklist\n${(Array.isArray(p.checklist) ? p.checklist : []).map(item => "☐ " + String(item)).join("\n")}`} />;
+  if (e.kind === "status" && p.state === "git_failed") return <Sys text={`Git: ${String(p.text || "commit failed")}`} />;
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
   if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;

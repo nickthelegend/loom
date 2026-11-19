@@ -1,3 +1,4 @@
+import { agentDiffStats } from "../../core/git-review.js";
 import type { Express } from 'express';
 import { writeMcpSession } from "../../core/mcp.js";
 import { ask, type AskContext } from "../../observability/ask.js";
@@ -241,6 +242,7 @@ export function registerObservabilityRoutes(app: Express, withRuntime: WithRunti
       const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
       // ?since= (ms) narrows the leaderboard to a window — "today", for loom stats
       const since = Number(req.query.since) || 0;
+      const diffStats = agentDiffStats(rt.log.list({ kinds: ["turn_diff", "orchestra"], sinceTs: since }));
       const board = leaderboard(since ? rows.filter((r) => r.ts >= since) : rows);
       // your 👍/👎, beside what the log says
       const rated = rt.ratingsByAgent();
@@ -249,7 +251,7 @@ export function registerObservabilityRoutes(app: Express, withRuntime: WithRunti
       res.json({
         leaderboard: board.map((a) => {
           const t = trust[a.agentId];
-          return { ...a, ...(rated[a.agentId] ? { rated: rated[a.agentId] } : {}),
+          return { ...a, diff: diffStats.find(d => d.agentId === a.agentId) ?? { added: 0, removed: 0, files: 0, turns: 0 }, ...(rated[a.agentId] ? { rated: rated[a.agentId] } : {}),
             ...(t ? { trust: { ...t, costPerVerifiedUsd: t.verified ? a.totalCostUsd / t.verified : null } } : {}) };
         }),
         days: perDay(rows, days), total: rows.length,

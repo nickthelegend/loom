@@ -1,3 +1,5 @@
+import { OrchestraOptionFields, OrchestraRecipes, OrchestraRunExtras } from "./orchestra-extras";
+import { parseRunOptions } from "./orchestra-options";
 /**
  * Orchestra on the phone: one orchestrator agent plans a goal into tasks, many
  * worker agents run them in parallel on their own branches, and the results
@@ -401,6 +403,11 @@ function StartForm(props: {
   const [fleet, setFleet] = useState<FleetRow[]>([]);
   const [plan, setPlan] = useState(false);
   // a race: every checked agent gets the same prompt in its own worktree, and you keep one
+  const [budget, setBudget] = useState("");
+  const [stall, setStall] = useState("10");
+  const [limits, setLimits] = useState("");
+  const [webhook, setWebhook] = useState("");
+  const [planOnly, setPlanOnly] = useState(false);
   const [race, setRace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -424,6 +431,7 @@ function StartForm(props: {
             ...(orch ? { orchestrator: orch } : {}),
             ...(all.length ? { workers: all } : {}),
             maxParallel: parallel,
+            ...parseRunOptions(budget, stall, limits, webhook, planOnly),
             ...(plan ? { plan: true } : {}),
           });
       props.onStarted(run);
@@ -466,6 +474,8 @@ function StartForm(props: {
         />
       </View>
 
+      <OrchestraRecipes creds={props.creds} projectId={props.project.id} onRun={props.onStarted} />
+      {!race ? <OrchestraOptionFields {...{ budget, setBudget, stall, setStall, limits, setLimits, webhook, setWebhook, planOnly, setPlanOnly }} /> : null}
       {race ? null : <View style={{ gap: 6 }}>
         <SectionLabel text="Orchestrator — plans, reviews, merges" />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -871,6 +881,7 @@ function RunView(props: {
         </View>
       )}
 
+      <OrchestraRunExtras creds={props.creds} projectId={props.projectId} run={run} onRun={props.onRun} />
       <Sheet title={diff?.title ?? ""} visible={!!diff} onClose={() => setDiff(null)}>
         {diff?.patch == null ? <ActivityIndicator color={T.dim} /> : diff.patch ? <DiffView patch={diff.patch} maxHeight={520} /> : <Text style={{ color: T.faint }}>No changes on this branch.</Text>}
       </Sheet>
