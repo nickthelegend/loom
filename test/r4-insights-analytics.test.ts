@@ -16,6 +16,10 @@ describe('R4 analytics from recorded events', () => {
       e('status', 10000, { state: 'turn_started', session: 's' }), e('tool_call', 10050, { id: 'u', tool: 'shell' }), e('status', 10060, { state: 'turn_started', session: 's' }), e('run_complete', 10100, {})]);
     expect(rows).toHaveLength(2); expect(rows[0]!.firstOutputMs).toBe(4); expect(rows[0]!.durationMs).toBe(9100); expect(rows[1]!.firstOutputMs).toBe(50);
   });
+  it('counts output just before the adapter-reported window as immediate, not unknown', () => {
+    const rows = turns([e('status', 2, { state: 'turn_started' }), e('tool_call', 214, { id: 't', tool: 'shell' }), e('run_complete', 281, { durationMs: 65 })]);
+    expect(rows[0]!.firstOutputMs).toBe(0); expect(rows[0]!.durationMs).toBe(65);
+  });
   it('pairs tool IDs within agent and chat, counts failures and leaves unknown timings unknown', () => {
     const events = [e('tool_call', 0, { id: 'x', tool: 'shell' }), e('tool_call', 10, { id: 'x', tool: 'read' }, 'b'), e('tool_result', 50, { id: 'x', ok: false }), e('tool_result', 110, { id: 'x', ok: true }, 'b'), e('tool_call', 120, { name: 'shell', ok: true }), e('tool_call', 125, { tool: 'pending' })];
     const result = toolAnalytics(events);

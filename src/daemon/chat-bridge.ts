@@ -256,7 +256,9 @@ export class ChatBridges {
         write(async (client) => {
           const parts = chunk(text, max);
           if (current?.message) {
-            try { await client.edit(ref.channel, current.message, parts[0]!); parts.shift(); }
+            // One retry first: a reused keep-alive socket or a brief 5xx shouldn't turn the answer into a second message.
+            const edit = () => client.edit(ref.channel, current.message!, parts[0]!);
+            try { await edit().catch(async () => { await new Promise((r) => setTimeout(r, 300)); await edit(); }); parts.shift(); }
             catch (e) { logbook.warn("bridge", `${ref.platform} final edit failed`, String(e)); }
           }
           for (const part of parts) await client.post(ref.channel, ref.thread, part);

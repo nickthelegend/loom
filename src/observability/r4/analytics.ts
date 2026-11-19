@@ -3,6 +3,8 @@ import type { LoomEvent } from "../../types.js";
 const number = (v: unknown): number | null => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 const key = (e: LoomEvent) => JSON.stringify([e.agentId ?? "", e.chat ?? "main", e.branch ?? "0"]);
 const sorted = (events: LoomEvent[]) => [...events].sort((a, b) => a.ts - b.ts || a.id - b.id);
+const FIRST_OUTPUT_GRACE_MS = 500;
+
 export const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 export function percentiles(values: number[]) {
   const xs = [...values].sort((a, b) => a - b);
@@ -54,10 +56,12 @@ export function turns(events: LoomEvent[], workingUntil?: number, liveAgents?: S
     const reportedDuration = number(p.durationMs);
     const duration = reportedDuration ?? (started ? Math.max(0, e.ts - started.start) : null);
     const start = started ? (reportedDuration === null ? started.start : Math.max(started.start, e.ts - reportedDuration)) : e.ts - (duration ?? 0);
+    // The adapter's own duration can start a few ms after this turn's first output (coarse clocks on Windows):
+    // that output came at once. Output well before the reported window (a turn queued for a slot) is stale.
     const failed = e.kind === "error" || Boolean(p.error);
     const row: Turn = { id: e.id, agent: e.agentId, chat: e.chat ?? "main", model: String(p.model ?? "unknown"),
       start, end: e.ts, ok: !failed, error: failed ? String(p.message ?? p.error ?? "error") : "",
-      durationMs: duration, firstOutputMs: number(p.firstOutputMs) ?? (a?.first !== undefined && a.first >= start ? a.first - start : null),
+      durationMs: duration, firstOutputMs: number(p.firstOutputMs) ?? (a?.first !== undefined && a.first >= start - FIRST_OUTPUT_GRACE_MS ? Math.max(0, a.first - start) : null),
       costUsd: number(p.costUsd) ?? 0, waits: [...(a?.waits ?? []), ...(a?.wait !== undefined ? [[a.wait, e.ts] as [number, number]] : [])] };
     // An error followed by run_complete describes one failed turn, not two turns.
     let retained = row;
