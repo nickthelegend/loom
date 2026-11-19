@@ -319,7 +319,8 @@ describe("web app · crew tab", () => {
 
     // A Lead that asks: the banner names who asks what, and your reply answers it.
     say(m, "pick a palette ask: which colour?");
-    await waitUntil(() => pill(m) === "needs you" && !!$(m, "#pane-crew .crewask"), { timeoutMs: 30_000 });
+    // On Windows the stopped Lead's turns can take a while to wind down before this one runs.
+    await waitUntil(() => pill(m) === "needs you" && !!$(m, "#pane-crew .crewask"), { timeoutMs: process.platform === "win32" ? 150_000 : 30_000 });
     expect(text(m, "#pane-crew .crewask .cwbt")).toBe("lead asks: which colour?");
     expect(($(m, "#crewsaytext") as HTMLTextAreaElement).placeholder).toMatch(/Answer lead/);
     expect(act(m, "stop")).toBeTruthy();
