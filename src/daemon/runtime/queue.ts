@@ -1,3 +1,4 @@
+import { enforceCostBudget, type CostHost } from "../../core/cost-r4/budgets.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import { blockedBy } from "../../core/goal-lanes.js";
 import { OrchestraEngine } from "../../core/orchestra.js";
@@ -21,7 +22,7 @@ import { CLOCK_TICK_MS, questionHold } from '../runtime-support.js';
 import type { TurnOptions, TurnResult } from "./turns.js";
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
-export interface RuntimeQueueHost {
+export interface RuntimeQueueHost extends CostHost {
   queue: PromptQueue;
   agents: ReadonlyMap<string, AnyAgent>;
   routeState: () => RouteState | null;
@@ -254,6 +255,7 @@ export class RuntimeQueue {
     // A queued prompt goes once. After a restart one task went twice in the same millisecond, and each
     // send cut the other's turn short — five starts and stops in nine seconds (#302).
     if (this.dispatching.has(item.id)) return;
+    enforceCostBudget(this.host, item.chat ?? "main");
     this.dispatching.add(item.id);
     try {
       const holder = this.host.validHolder();

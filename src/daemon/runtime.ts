@@ -1,3 +1,4 @@
+import { assertChatBudget } from "../core/cost-r4/budgets.js";
 import { resolveModel, validateAgentOptions, enforceModelCap, modelUsage, readModelRouting } from "../core/model-routing.js";
 import { RedactedStream } from "../core/redact.js";
 import { readSafety, writeSafety, parseSafety, presetMode, hasSafetyRules, SAFETY_PRESETS, type SafetyPolicy } from "../core/safety.js";
@@ -276,6 +277,7 @@ export class ProjectRuntime {
       noteMemoriesUsed: (ids) => this.noteMemoriesUsed(ids),
     });
     this.queueCoordinator = new RuntimeQueue({
+      get info() { return runtime.info; }, get log() { return runtime.log; },
       get queue() { return runtime.queue; },
       get agents() { return runtime.agents; },
       routeState: (...args) => this.routeState(...args),
@@ -3802,6 +3804,7 @@ export class ProjectRuntime {
     to: string,
     opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ from: string | null; merge?: MergeOutcome }> {
+    if (opts.chat) assertChatBudget(this, opts.chat);
     if (this.continuity?.store.activeReceipts().some(r => r.execution === "unknown"))
       throw new ContinuityError("recovery_required", "reconcile uncertain native writers before handoff or merge");
     const target = this.agent(to);

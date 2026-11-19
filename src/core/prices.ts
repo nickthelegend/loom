@@ -1,3 +1,4 @@
+import { priceOverrides } from "./cost-r4/settings.js";
 /**
  * What a token costs, by model — so an agent that reports tokens but no price
  * (Codex on a ChatGPT sign-in, Grok) still has a figure beside it, labelled
@@ -14,7 +15,7 @@ import path from "node:path";
 import { loomHome } from "./registry.js";
 
 /** USD per token. */
-export interface Price { in: number; out: number; cacheRead?: number }
+export interface Price { in: number; out: number; cacheRead?: number; context?: number }
 export interface PriceBook { at: number; models: Record<string, Price> }
 
 const LIST_URL = "https://openrouter.ai/api/v1/models";
@@ -30,7 +31,7 @@ export function modelKey(model: string): string {
   return model.trim().toLowerCase().split("/").pop()!.replace(/:.*$/, "").replace(/\./g, "-").replace(/-(20\d{6}|\d{4}-\d{2}-\d{2})$/, "");
 }
 
-interface Listed { id?: string; pricing?: { prompt?: string; completion?: string; input_cache_read?: string } }
+interface Listed { context_length?: number; id?: string; pricing?: { prompt?: string; completion?: string; input_cache_read?: string } }
 
 /** The book from a /models response. A free variant never hides the paid price of the same model. */
 export function priceBookFrom(data: Listed[], at = Date.now()): PriceBook {
@@ -42,7 +43,7 @@ export function priceBookFrom(data: Listed[], at = Date.now()): PriceBook {
     const key = modelKey(m.id), had = models[key];
     if (had && had.in + had.out > 0 && pin + pout === 0) continue;
     const cache = Number(m.pricing.input_cache_read);
-    models[key] = { in: pin, out: pout, ...(Number.isFinite(cache) && cache >= 0 && m.pricing.input_cache_read !== undefined ? { cacheRead: cache } : {}) };
+    models[key] = { in: pin, out: pout, ...(typeof m.context_length === "number" && m.context_length > 0 ? { context: m.context_length } : {}), ...(Number.isFinite(cache) && cache >= 0 && m.pricing.input_cache_read !== undefined ? { cacheRead: cache } : {}) };
   }
   return { at, models };
 }
@@ -91,7 +92,11 @@ export function priceBook(): PriceBook | null {
   }
   const stale = !book || Date.now() - book.at > PRICES_TTL_MS;
   if (stale && !process.env.LOOM_NO_PRICE_FETCH && Date.now() - lastTry > RETRY_MS) void refreshPrices();
-  return book;
+  const overrides = priceOverrides();
+  if (!Object.keys(overrides).length) return book;
+  const models = { ...(book?.models ?? {}) };
+  for (const [key, p] of Object.entries(overrides)) models[key] = { ...models[key], in: p.in / 1e6, out: p.out / 1e6, ...(p.cacheRead === undefined ? { cacheRead: undefined } : { cacheRead: p.cacheRead / 1e6 }) };
+  return { at: book?.at ?? 0, models };
 }
 
 /** For tests: forget the book in memory, or set one. */

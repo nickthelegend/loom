@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { registerR4Onboard } from "./r4-onboard.js";
 import { registerR4Insights } from "./r4-insights.js";
+import { registerCostCommands } from "./r4-cost.js";
 import { scoreboardCsv, scoreboardDigest } from "../core/scoreboard.js";
 import { registerR4Brain } from "./r4-brain.js";
 /**
@@ -5488,6 +5489,7 @@ program.command("completion")
 registerR4Onboard(program, { ensureDaemon, currentProject });
 registerR4Insights(program);
 registerR4Brain(program, ensureDaemon, currentProject);
+registerCostCommands(program, ensureDaemon);
 
 async function main() {
   const args = process.argv.slice(2);

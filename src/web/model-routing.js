@@ -1,3 +1,4 @@
+import { renderCostSettings } from "./cost-r4.js";
 import { esc } from './format.js';
 
 /** Machine settings and project choices share a pane, but keep their own permissions. */
@@ -40,4 +41,5 @@ export async function renderModelRouting(pane, pid, api){
       }).catch(function(e){ error(status, e); });
     };
   } catch (e) { error(machine, e); }
+  const costs = document.createElement("div"); pane.appendChild(costs); await renderCostSettings(costs, pid, api);
 }

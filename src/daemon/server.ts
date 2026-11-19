@@ -1,4 +1,5 @@
 import { registerHelpRoutes } from "./routes/help.js";
+import { registerCostRoutes } from "./routes/cost-r4.js";
 import { registerModelRoutingRoutes } from "./routes/model-routing.js";
 import { mondayScoreboard } from "../core/scoreboard-digest.js";
 import { registerCliSettingsRoutes } from "./routes/cli-settings.js";
@@ -624,6 +625,7 @@ export class LoomDaemon {
     registerInsightsR4(app, withRuntime, ctx, () => this.server);
     registerModelRoutingRoutes(app, withRuntime);
     registerHelpRoutes(app, ctx, withRuntime);
+    registerCostRoutes(app, withRuntime);
     void mondayScoreboard().catch(() => {});
     this.scoreboardTimer = setInterval(() => void mondayScoreboard().catch(() => {}), 60_000);
     this.scoreboardTimer.unref();
