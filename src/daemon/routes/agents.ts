@@ -66,7 +66,12 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
       // Profiles are owner metadata; keep model suggestions available to scoped callers.
       const caller = req as typeof req & { projectScope?: unknown; guest?: unknown };
       res.json({ kind, count: choices.length, models: choices, source,
-        ...(!caller.projectScope && !caller.guest ? { profiles: profiles().filter(p => p.kind === kind).map(p => ({ name: p.name, model: p.model })) } : {}) });
+        // only when there are some: the response keeps its 2.1 shape for everyone without profiles
+        ...(() => {
+          if (caller.projectScope || caller.guest) return {};
+          const mine = profiles().filter(p => p.kind === kind).map(p => ({ name: p.name, model: p.model }));
+          return mine.length ? { profiles: mine } : {};
+        })() });
     }),
   );
 
