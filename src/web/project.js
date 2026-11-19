@@ -1,3 +1,6 @@
+import { saveChatSkillItem } from "./agentic-r4.js";
+/** Browser project module. See README.md for ownership and startup. */
+import { savedTab,saveTab } from './session.js';
 import { createChatComposer } from "./project/chat-composer.js";
 import { createApprovalEvents } from './project/approval-events.js';
 import { createBoard } from './project/board.js';
@@ -14,7 +17,6 @@ import { createBranches } from './project/branches.js';
 import { createRoutes } from './project/routes.js';
 import { createTerminal } from './project/terminal.js';
 import { createThread } from './project/thread.js';
-/** Browser project module. See README.md for ownership and startup. */
 import { approvalClick,approvalKey,closeApprovalsPop,openApprovalsPop } from './approvals.js';
 import { copyText } from './clipboard.js';
 import { openConnectPhone } from './connect-phone.js';
@@ -74,6 +76,7 @@ import { openMenu } from './menus.js';
       get BROWSER_TAB() { return BROWSER_TAB; },
     });
     var { refreshBrain, refreshTeamBrain } = createBrain({
+      get chatId() { return chatId; },
       get drawMemGraph() { return drawMemGraph; },
       get brainView() { return brainView; }, set brainView(value) { brainView = value; },
       get pid() { return pid; },
@@ -242,7 +245,7 @@ import { openMenu } from './menus.js';
     clearTimers();
     // Which conversation this view is showing. The daemon streams the whole
     // project over one socket, so the thread filters to this chat itself.
-    var chatId = state.currentChat ? state.currentChat() : "main";
+    var chatId = state.currentChat ? state.currentChat() : (function(){ try { return localStorage.getItem("loomChat:" + pid) || "main"; } catch (e) { return "main"; } })();
     state.chat = chatId;
     var chatComposer = createChatComposer({ pid: pid, chat: chatId, resize: function(){ autosizeBox(); }, save: saveDraft, jump: jumpToMessage });
     state.showBookmarks = chatComposer.bookmarks;
@@ -307,7 +310,7 @@ import { openMenu } from './menus.js';
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
       '<div class="cqueue" id="cqueue" style="display:none"></div>' +
-      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for teammates or files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
       // Orchestrate mode's cast: who plans, who works, how many at once.
@@ -326,7 +329,9 @@ import { openMenu } from './menus.js';
       '<button class="ctool devonly" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
       "</span>" +
       // What the chosen agent may do without asking. Drawn by drawPermChip().
-      '<button class="cperm devonly" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
+      '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
+      '<span class="cpermission-status" id="cpermission-status" role="status"></span>' +
+      '<button class="ctool" id="safety-open" type="button" aria-label="Project safety">Safety</button>' +
       // The chosen agent's context meter and usage limits (usage.js).
       '<span class="cctx devonly" id="cctx" style="display:none"></span>' +
       // MCPs and Skills live behind this rather than beside it: they are
@@ -581,10 +586,11 @@ import { openMenu } from './menus.js';
       });
     }
     function showTab(name){
+      if (["thread", "team", "orchestra", "crew", "fleet", "board", "brain", "observatory"].indexOf(name) < 0) name = "thread";
       // Orchestra, Crew and Insights are Developer mode's: a stray link to one says where it is
       if (!devMode() && SIMPLE_TABS.indexOf(name) < 0) { toast("That\u2019s in Developer mode \u2014 turn it on in Settings \u2192 Preferences"); return; }
       // a quick crossfade between workspace tabs, where the browser can
-      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var still = document.documentElement.classList.contains("reduced-motion");
       if (document.startViewTransition && state.tab && state.tab !== name && !still && !showTab.inTransition) {
         showTab.inTransition = true;
         try {
@@ -608,6 +614,7 @@ import { openMenu } from './menus.js';
     function showTabNow(name){
       state.tab = name;
       (state.tabByProject || (state.tabByProject = {}))[pid] = name;
+      saveTab(pid, name);
       ["thread", "team", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
@@ -720,11 +727,6 @@ import { openMenu } from './menus.js';
         def: 520, key: "loomDockW", invert: true,
       });
       drawTabs();
-      // Back on a project (or the same one drawn again while it loads): the
-      // tab you were on, not Chat — a click on Crew mid-load used to bounce.
-      showTab((state.tabByProject && state.tabByProject[pid]) || "thread");
-      // A just-launched orchestra lands on its own view, in its own chat.
-      if (state.pendingTab) { var pt = state.pendingTab; state.pendingTab = null; showTab(pt); }
       drawRail();
     }
 
@@ -1565,6 +1567,7 @@ import { openMenu } from './menus.js';
         copyText(mine ? decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl) : bubbleText(msgEl)); toast("copied");
       } });
       items = items.concat(chatComposer.messageItems(id));
+      items.push(saveChatSkillItem(pid, chatId));
       if (mine) {
         var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
         items.push({ label: "Edit as a new version", icon: ICONS.pencil, hint: "\u2039 \u203a to switch", run: function(){ if (!branches.editAsBranch(msgEl, raw)) composeFor(raw, null, false); } });
@@ -2035,6 +2038,15 @@ import { openMenu } from './menus.js';
     };
     bindComposer();
     loadQueue();
+    // Restore after every pane has initialized its state (Board used to run before its data existed).
+    if (desktop) {
+      // Back on a project (or the same one drawn again while it loads): the
+      // tab you were on, not Chat — a click on Crew mid-load used to bounce.
+      var restoredTab = (state.tabByProject && state.tabByProject[pid]) || savedTab(pid);
+      showTab(devMode() || SIMPLE_TABS.indexOf(restoredTab) >= 0 ? restoredTab : "thread");
+      // A just-launched orchestra lands on its own view, in its own chat.
+      if (state.pendingTab) { var pt = state.pendingTab; state.pendingTab = null; showTab(pt); }
+    }
     maybeDigest(pid);
   }
 export { renderProject };

@@ -100,12 +100,13 @@ export function createFleet(view) {
         local.innerHTML = head + (view.fleet.err ? '<div class="onote err">' + esc(view.fleet.err) + "</div>" : LOADER);
       } else if (!agentsN) {
         local.innerHTML = head + '<div class="oempty"><b>No agents running.</b><br>' +
-          "Open a project with agents on its roster and every one shows up here \u2014 what it\u2019s doing, in which thread, and for how long.</div>";
+          "Add an agent to a project to start working together.<div><button class=\"btn outline xs\" id=\"fleet-start\">Set up agents</button></div></div>";
       } else {
         local.innerHTML = head +
           (busyN ? "" : '<div class="fnote">No agents running right now \u2014 everyone below is idle.</div>') +
           projects.map(fleetProject).join("");
       }
+      var start = el.querySelector("#fleet-start"); if (start) start.onclick = function(){ openSettingsModal("setup"); };
       var rf = el.querySelector("#frefresh"); if (rf) rf.onclick = function(){ loadFleet(); };
       Array.prototype.forEach.call(el.querySelectorAll("[data-fchat]"), function(b){
         b.onclick = function(){ openFleetThread(b.getAttribute("data-fpid"), b.getAttribute("data-fchat")); };
@@ -207,8 +208,10 @@ export function createFleet(view) {
       var t = state.team;
       if (!t) {
         // A project-scoped client can't read the team at all; that's not news.
-        host.innerHTML = state.teamErr && !/unscoped/.test(state.teamErr)
-          ? teamHeadHtml() + '<div class="fnote">' + esc(state.teamErr) + "</div>" : "";
+        host.innerHTML = !state.teamErr ? LOADER : !/unscoped/.test(state.teamErr)
+          ? teamHeadHtml() + '<div class="fnote">' + esc(state.teamErr) + '<div><button class="btn outline xs" data-team-retry>Try again</button></div></div>' : '<div class="oempty">Team access is unavailable for this device. Open Chat to keep working in this project.<button class="btn outline xs" data-team-chat>Open Chat</button></div>';
+        var retry = host.querySelector("[data-team-retry]"); if (retry) retry.onclick = function(){ loadTeam(); };
+        var back = host.querySelector("[data-team-chat]"); if (back) back.onclick = function(){ if (state.showTab) state.showTab("thread"); };
         wireTeamBlock(host);
         return;
       }

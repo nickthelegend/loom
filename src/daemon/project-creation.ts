@@ -1,3 +1,4 @@
+import { applyStarterTemplate, starterTemplate } from "../core/starter-templates.js";
 import { demoDestination, prepareDemoProject, type TryProjectInput, type TryProjectResult } from "../core/demo-project.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -40,8 +41,10 @@ export class ProjectCreation {
     const name = projectName(input.name);
     const agents = projectAgents(input.agents);
     if (input.git !== undefined && typeof input.git !== "boolean") throw new ProjectCreationError("git must be a boolean");
+    if (input.template !== undefined) starterTemplate(input.template);
     const dir = reserveProjectDirectory(name);
     try {
+      if (input.template !== undefined) applyStarterTemplate(dir, input.template);
       await initializeProject(dir, name, input.git !== false);
       if (agents !== undefined) writeProjectConfig(dir, { name, agents });
       const { info, config } = await this.register(dir, name);

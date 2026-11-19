@@ -108,8 +108,8 @@ export function createBoard(view) {
             '<button type="button" class="bn bwip" data-wip="' + key + '" title="' + (lim ? "limit " + lim + (over ? " — over it" : "") + " · click to change" : "set a work-in-progress limit") + '">' +
               mine.length + (lim ? " / " + lim : "") + "</button></div>" +
           '<div class="bcb" data-drop="' + key + '">' +
-            (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">nothing here</div>') +
-            '<button class="badd" data-add="' + key + '" title="add a card here">+</button>' +
+            (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">No tasks here yet. Add a task to plan your next step.</div>') +
+            '<button class="badd" data-add="' + key + '" title="add a card here">+ Add task</button>' +
           "</div></div>";
       }).join("");
 

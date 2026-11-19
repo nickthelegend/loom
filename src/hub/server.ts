@@ -32,6 +32,7 @@ const METHODS = new Set<keyof HubClient>([
   "createTeam",
   "teams",
   "registerDevice",
+  "listInvites", "revokeInvite", "teamFleets", "putTeamFleet",
   "createInvite",
   "redeemInvite",
   "members",

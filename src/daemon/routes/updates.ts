@@ -3,13 +3,15 @@ import { type Request } from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { logbook } from "../../core/logbook.js";
-import { detectInstall, newerThan, plan, refuseDirtyCheckout } from "../../core/updater.js";
+import { CHECK_TTL_MS, releaseChangelog, detectInstall, newerThan, plan, refuseDirtyCheckout } from "../../core/updater.js";
 import { VERSION } from "../../version.js";
 import { defaultExec } from "../landing.js";
 import { BUILD_REV, loomRoot } from '../system.js';
 import type { RouteContext } from './context.js';
 /** Register updates routes in the order established by LoomDaemon.routes(). */
 export function registerUpdatesRoutes(app: Express, ctx: Pick<RouteContext, "cachedRelease" | "updating" | "close">): void {
+
+  let changelogCache: { tag: string; at: number; value: ReturnType<typeof releaseChangelog> } | undefined;
 
   app.get("/api/updates", (req, res) => {
     void (async () => {
@@ -20,10 +22,15 @@ export function registerUpdatesRoutes(app: Express, ctx: Pick<RouteContext, "cac
         git = await remoteBehind(root).catch(() => null);
       }
       const release = await ctx.cachedRelease(req.query.refresh !== undefined);
+      if (release && (!changelogCache || changelogCache.tag !== release.tag || Date.now() - changelogCache.at > CHECK_TTL_MS || req.query.refresh !== undefined)) {
+        changelogCache = { tag: release.tag, at: Date.now(), value: releaseChangelog(VERSION, release) };
+      }
+      const changelog = release ? await changelogCache!.value : { entries: [], available: false };
       const install = detectInstall(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
       const p = plan(install);
       res.json({
         version: VERSION,
+        changelog,
         rev: BUILD_REV,
         root,
         git,
